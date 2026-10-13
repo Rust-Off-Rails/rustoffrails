@@ -306,6 +306,14 @@ This is the cheapest production setup, and the common one: one VPS already runs 
 - **SQLite:** a **named volume** (`"<app>_storage:/app/storage"`) and `DATABASE_URL=sqlite:///app/storage/production.sqlite3?mode=rwc`. Docker seeds a new named volume from the image directory, so ownership by the non-root `app` user carries over. Run one container, never two, against one SQLite file.
 - **Builds:** `builder.arch: amd64`, and `builder.remote` pointing at a build host if the production box is busy. Kamal builds from **committed** HEAD; uncommitted changes aren't deployed.
 
+#### Behind Cloudflare: turn off script injection
+
+Cloudflare injects scripts into proxied HTML on its own: **Web Analytics / RUM** (`static.cloudflareinsights.com/beacon.min.js`, auto-enabled on new free zones), Rocket Loader, Email Address Obfuscation, and Bot Fight Mode's JS detections. The strict CSP ([security](security.md)) correctly blocks them, which logs a console error and an Issues-panel entry, and that costs points in Lighthouse Best Practices. **Never loosen the CSP to fit them.** Turn them off at the zone:
+
+- Web Analytics: register the zone with auto-install off: `POST /accounts/{account}/rum/site_info {"zone_tag": "<zone>", "auto_install": false}`. If the zone already has a site, `PUT` it with `auto_install: false`. It takes a few minutes to apply at the edge.
+- Rocket Loader and Email Obfuscation: `PATCH /zones/{zone}/settings/rocket_loader {"value":"off"}`, and the same for `email_obfuscation`.
+- Verify with a real browser (or `curl -A '<Chrome UA>'`, since injection skips non-browser clients): the page must load with a clean console.
+
 ### Open-source apps: keep the deploy config private
 
 If the repository is public:
