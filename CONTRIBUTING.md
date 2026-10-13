@@ -2,6 +2,12 @@
 
 Rust off Rails has one founding rule: **all code is written by AI** ([doctrine §0](doctrine.md#0-all-code-is-written-by-ai)). That applies to this repository too. Contributions are **intent and evidence**, not hand-written code.
 
+## Code policy
+
+- **AI-written code is what we accept.** Docs, generators, skills, hooks and scripts in this repo are written by coding agents, steered by people.
+- **Hand-written code is the exception.** If you had to write something by hand, explain why in the PR (what the agents got wrong, which agent and model, what you tried). It may still be accepted, but the explanation is required, and we'll usually prefer turning it into a doc fix so agents get it right next time.
+- **Why no reference code (yet)?** Apps are generated from the docs, so two people with different agents can get different code for the same spec. That's expected: the docs pin the decisions (stack, structure, conventions, security, tests), not the exact lines. We tested shipping sample code and, for now, it isn't in the framework's interest; it may come later as optional, verified reference implementations.
+
 ## Great contributions
 
 - **A doc bug found by building something.** You followed the framework, an agent got stuck, improvised or produced something wrong. Open an issue with the app type, the step, what happened, and (ideally) the agent transcript excerpt. This is the most valuable thing you can send.
