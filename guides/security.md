@@ -279,6 +279,8 @@ The "brakeman" pass. Run through this before finishing any work touching auth, p
 
 ## Gotchas agents get wrong
 
+- **ZAP "Suspicious Comments" (10027) reads words in served JS and CSS comments** (`from`, `select`, `query`, `admin`, `todo`, `bug`…) as hints of SQL or debug leftovers, and each match is a WARN that fails the 0-WARN gate. Keep comments in `static/` free of those words (or don't ship comments: minify), rather than triaging the rule away.
+
 Each of these was a real finding in the reference app, fixed test-first:
 - **Cookies built without config miss `Secure`.** The flash cookie is set from `IntoResponseParts`, which has no config, so in production it went out without `Secure`. The middleware now hardens every `Set-Cookie`, and the header test fails if any production cookie lacks `Secure` or `HttpOnly`.
 - **Authenticated pages were cacheable.** Only kernel pages sent `no-store`, so a logged-in book page could be kept by a shared cache or the back/forward cache. Now any request carrying a session cookie gets `no-store`, static assets excepted.

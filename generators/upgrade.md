@@ -27,7 +27,7 @@ Require a clean git tree. If it isn't clean, ask the human to commit first, or c
 
 ## 3. Read what changed
 
-Read `$FW/CHANGELOG.md` from the app's version up to the new one. Each release lists **App migration** steps written for an agent, in reconcile style (detect → final shape → converge). Then diff the docs (`diff -ru .offrails "$FW" -x .git -x .claude-plugin -x skills -x hooks -x evals -x brand`) to catch anything the changelog doesn't mention.
+Read `$FW/CHANGELOG.md` from the app's version up to the new one. Each release lists **App migration** steps written for an agent, in reconcile style (detect → final shape → converge). Then diff the docs (`diff -ru .offrails "$FW" -x .git -x .claude-plugin -x skills -x hooks -x evals -x brand -x .in_use`) to catch anything the changelog doesn't mention.
 
 ## 4. Reconcile, don't re-create
 
@@ -55,7 +55,7 @@ Each slice must be green under the [Definition of Done](../workflow.md#definitio
 ## 8. Verify nothing is stale
 
 - Grep the app (templates, views, `web/src`, docs, tests) for the old version string. Anything that displays the framework version must read `.offrails/VERSION`, never a literal.
-- Run the app's own post-upgrade checks (its `AGENTS.md`, "Post-upgrade checks").
+- Run the app's own post-upgrade checks (its `AGENTS.md`, "Post-upgrade checks"). If the app's `AGENTS.md` predates that section, add it from [`blueprints/AGENTS.md`](../blueprints/AGENTS.md) and list anything this upgrade taught you to verify next time.
 - `bash "$FW/hooks/fingerprint.sh" .offrails` now equals the framework's.
 
 ## 9. Report

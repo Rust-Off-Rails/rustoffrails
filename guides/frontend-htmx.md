@@ -99,7 +99,7 @@ Request tests can't see this: they get the 500 and assert on it. Check it in the
 
 ### Keep the URL on a 422
 
-A boosted form that comes back 422 is swapped in (above), and htmx then pushes the **POST** URL into the address bar (`/books/5` showing the edit form). Reloading or sharing that URL then shows a different page. Every 422 re-render for an htmx request sends **`HX-Push-Url: false`**, which htmx 2 honours by skipping the history update (verified in htmx 2.0.11's source), so the address bar stays on `/books/5/edit`. Do it once, in the shared form re-render helper.
+A boosted form that comes back 422 is swapped in (above), and htmx then pushes the **POST** URL into the address bar (`/books/5` showing the edit form). Reloading or sharing that URL then shows a different page. Every 422 re-render for an htmx request sends **`HX-Push-Url: false`**, which htmx 2 honours by skipping the history update (verified in htmx 2.0.11's source), so the address bar stays on `/books/5/edit`. Do it once, at the end of `error::shape_errors` ([errors-and-logging](errors-and-logging.md)): it sees every 422, whether a handler rendered it or `AppError::Invalid` did.
 
 ## Full page vs fragment
 

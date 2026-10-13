@@ -100,7 +100,7 @@ impl TestResponse {
 ### Database per test
 
 - **Default (SQLite):** `sqlite::memory:` with `max_connections(1)`, `min_connections(1)`, built through `kernel::db::connect`, then `Migrator::up(&db, None)`. It's isolated by construction and takes milliseconds.
-- **`TEST_DATABASE_URL=postgres://…/postgres` set:** connect to it, `CREATE DATABASE test_<crate>_<uuid-simple>` (the crate name from `env!("CARGO_PKG_NAME")`, `-` → `_`, so apps sharing a Postgres server never touch each other's databases), connect to that database, and migrate. `Drop` runs `DROP DATABASE … WITH (FORCE)` on a **dedicated `std::thread` with its own current-thread runtime, joined** before `Drop` returns. A task spawned on the test's runtime is cancelled when that runtime shuts down, and the database leaks. Anything left over (a killed run) is removed by `app task test_db_cleanup`, which calls `kernel::db::drop_idle_test_databases`: it drops only `test_<crate>_<hex>` databases with **no open connections** (`pg_stat_activity`), so it's safe while another suite is running. Both the per-test drop and the cleanup SQL live in `kernel/db.rs`, since raw SQL outside the kernel is a DoD failure.
+- **`TEST_DATABASE_URL=postgres://…/postgres` set:** connect to it, `CREATE DATABASE test_<crate>_<uuid-simple>` (the crate name from `env!("CARGO_PKG_NAME")`, `-` → `_`, so apps sharing a Postgres server never touch each other's databases), connect to that database, and migrate. `Drop` runs `DROP DATABASE … WITH (FORCE)` on a **dedicated `std::thread` with its own current-thread runtime, joined** before `Drop` returns. A task spawned on the test's runtime is cancelled when that runtime shuts down, and the database leaks. Anything left over (a killed run) is removed by `app task test_db_cleanup`, which calls `kernel::db::drop_idle_test_databases`: it drops only `test_<crate>_<hex>` databases with **no open connections** (`pg_stat_activity`), so it's safe while another suite is running. All of it lives in `kernel/db.rs`, since raw SQL outside the kernel is a DoD failure, under these names: `create_database(admin, name)`, `drop_database(admin, name)`, `drop_idle_test_databases(admin, prefix)` and `ping(db)`. Database names are interpolated into DDL (Postgres can't bind identifiers), so each helper accepts only `[a-z0-9_]` names and refuses anything else.
 - Measured in the reference app (38 tests): the SQLite suite takes ~0.2–1 s, and the Postgres run (one `CREATE DATABASE` per test) takes 3–30 s, depending on machine load.
 - Never share a database between tests. Never depend on test order.
 
@@ -286,6 +286,8 @@ jobs:
           chmod 777 .zap
           docker run --rm --network host -v "$PWD/.zap:/zap/wrk:rw" ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py -t http://localhost:3000 -c rules.tsv -r zap-report.html -m 2
+          # Locally on Docker Desktop (macOS/Windows), --network host doesn't reach the host. Drop it and target
+          # http://host.docker.internal:<port> instead.
       - if: failure()
         uses: actions/upload-artifact@v7
         with: { name: zap-report, path: .zap/zap-report.html, if-no-files-found: ignore }

@@ -6,7 +6,9 @@ Each entry lists convention changes and what an existing app must do about them.
 
 - Docs: the Postgres compose service is `db` everywhere (`docker compose up -d db`); `fingerprint.sh` ignores a `.git` *file* (worktrees, submodules); the Copilot pointer file has an exact body; `generators/upgrade.md` defines a non-interactive path; the pre-deploy checklist requires green CI on the exact commit.
 
-**App migration:** none required. If your app's docs or scripts say `docker compose up -d postgres`, use `db`.
+- Fixes from a real 0.3.0 → 0.4.0 upgrade (bookshelf, via `/offrails:upgrade`): `fingerprint.sh` and vendoring ignore the plugin cache's `.in_use/` marker; the error-page `app.js` snippet is now shown in errors-and-logging; ZAP's "Suspicious Comments" gotcha; the 0.4.0 migration notes' detect lines for #2, #3 and #6 are greppable (and `HX-Push-Url` lives at the end of `error::shape_errors`); the test-harness DB helpers are named (`create_database`, `drop_database`); a macOS ZAP variant; a deterministic first-login transaction test; the upgrade recipe adds a missing "Post-upgrade checks" section.
+
+**App migration:** none required. If your app's docs or scripts say `docker compose up -d postgres`, use `db`. Apps upgraded from 0.3.0 should double-check 0.4.0 note #5 (the first-login race: a caught unique violation aborts a Postgres transaction).
 
 (nothing yet)
 
@@ -56,11 +58,11 @@ Spec: `guides/channels.md` (protocol, transports, security), `guides/realtime.md
 
 **App migration** (reconcile, don't re-create):
 1. *Detect:* `grep -rn "execute_unprepared" src/controllers src/tasks`. *Converge:* move each into `kernel::db` (`ping`, `drop_idle_test_databases`) and call those.
-2. *Detect:* `CatchPanicLayer::new()` in `src/routes.rs`. *Converge:* `CatchPanicLayer::custom(error::panic_response)`, rendering `errors/500.html`; add a test that a panicking handler returns the 500 page.
-3. *Detect:* in development, `GET /no-such-path` with a pending migration returns 404 instead of the pending page. *Converge:* apply `migrations::guard` after `.fallback(...)`.
+2. *Detect:* `CatchPanicLayer::new()` in `src/routes.rs`, **or** a `CatchPanicLayer::custom(|_| …)` closure that ignores the panic payload or doesn't render `errors/500.html`. *Converge:* `CatchPanicLayer::custom(error::panic_response)`, rendering `errors/500.html`; add a test that a panicking handler returns the 500 page.
+3. *Detect:* `migrations::guard` is layered **before** `.fallback(...)` in `src/routes.rs` (structural), or, with the app running and a pending migration, `GET /no-such-path` returns 404 instead of the pending page. *Converge:* apply `migrations::guard` after `.fallback(...)`.
 4. *Detect:* `GET /dev/mailers` returns 308. *Converge:* return 301 explicitly.
 5. Magic-link apps: *detect* a sign-up path that catches a unique violation inside a transaction. *Converge:* `on_conflict_do_nothing_on([Column::Email])` + select. Add `no-store` and `Referrer-Policy: no-referrer` to the token pages, with a test.
-6. htmx apps: *detect* a 422 re-render without `HX-Push-Url: false`. *Converge:* set it in the shared re-render helper; add a request test asserting the header on a 422 from an htmx request.
+6. htmx apps: *detect* a 422 re-render without `HX-Push-Url: false`. *Converge:* set it once, at the end of `error::shape_errors` (it sees every 422, whether a handler rendered it or `AppError::Invalid` did, and covers future forms); add a request test asserting the header on a 422 from an htmx request.
 7. *Detect:* `templates/errors/*.html` without `/static/app.js`. *Converge:* add `<script src="/static/app.js" defer></script>`; extend the browser smoke with Forward from a 404.
 
 ## 0.3.0 (2026-10-13)

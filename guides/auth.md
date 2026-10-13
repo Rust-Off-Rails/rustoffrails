@@ -145,6 +145,7 @@ Phoenix 1.8's default. There are no passwords to leak, reuse or reset. Every rul
 
 On top of [test-standards](test-standards.md):
 
+- **First login can't abort its transaction (Postgres):** call `insert_if_absent(&txn, email)` twice in one transaction, then keep using the transaction (e.g. create the session). The race itself isn't testable; this is, and it fails on Postgres with the catch-the-violation version.
 - A known email and an unknown one get byte-identical responses (status, location, flash). Mail: under `magic-link` **both** get a login email (sign-up happens on first login); under `magic-link-invite`, only the known one (`drain_jobs`, then `sent_emails`).
 - `GET` on the link twice, then `POST`: still logs in (scanner-safe). A second `POST` → invalid.
 - Expired (issue with `now − 16 min`) → invalid. 14 minutes → valid.
