@@ -69,7 +69,7 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
         .layer(from_fn(kernel::flash::middleware))
         .layer(csrf)
         .layer(from_fn_with_state(state.clone(), error::shape_errors))
-        /* security headers, compression, timeout, catch-panic, request id, trace */
+        /* request id, trace, security headers, catch-panic, timeout, compression */
         .with_state(state))
 }
 
@@ -117,10 +117,10 @@ pub const ROUTES: &[(&str, &str, &str, Access)] = &[
 Outermost first. In code, `.layer` calls run bottom-up, so they appear in the **reverse** of this order:
 
 1. `SetRequestIdLayer::new(x-request-id, MakeRequestUuid)`, then `TraceLayer::new_for_http().make_span_with(...)` (span fields `method`, `path`, `request_id`), then `PropagateRequestIdLayer`
-2. `CatchPanicLayer::new()`
-3. `TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, 30s)` (`TimeoutLayer::new` is deprecated in tower-http 0.7)
-4. `CompressionLayer::new()`
-5. Security headers: `SetResponseHeaderLayer::if_not_present` per header ([security](security.md#security-headers))
+2. `kernel::security::middleware` (`from_fn_with_state(security::Hardening::new(&config), …)`): the header matrix, `no-store` for authenticated responses, production cookie hardening ([security](security.md#the-header-matrix)). It sits **outside** the panic and timeout layers, so their 500 and 408 responses are hardened too
+3. `CatchPanicLayer::new()`
+4. `TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, 30s)` (`TimeoutLayer::new` is deprecated in tower-http 0.7)
+5. `CompressionLayer::new()`
 6. `error::shape_errors` (`from_fn_with_state`)
 7. `CsrfLayer` (tower-http `csrf` feature; [security](security.md#csrf))
 8. `kernel::flash::middleware` (`htmx` and `inertia` modes)

@@ -53,7 +53,7 @@ We take the best ideas of two great ecosystems and bring them together in one st
 ### With Claude Code (recommended): install the plugin
 
 ```
-/plugin marketplace add Rust-Off-Rails/rustoffrails      # or a local path: /plugin marketplace add ~/dev/rustoffrails
+/plugin marketplace add Rust-Off-Rails/rustoffrails      # or a local checkout: /plugin marketplace add /path/to/rustoffrails
 /plugin install offrails@offrails
 ```
 
@@ -120,7 +120,7 @@ blueprints/        files copied into every new app (AGENTS.md, spec template…)
 skills/            /offrails:* skills (thin entry points into the docs above)
 hooks/             convention guards (no-ops outside Off Rails apps)
 evals/             `claude plugin eval` cases: does the framework steer agents right?
-tools/             optional helper scripts vendored with the docs (browser-smoke for the kernel pages)
+tools/             helper scripts vendored with the docs: brand/ (favicons + social card), browser-smoke/ (kernel pages)
 VERSION, CHANGELOG.md   framework version; apps record theirs in .offrails/VERSION
 ```
 
@@ -155,3 +155,11 @@ Axum on hyper (the binary *is* the web server: HTTP/1.1 + HTTP/2, no app server 
 Plus a database-backed job queue, cache and pub/sub (the "Solid trifecta") · lettre · object_store · tracing · one binary, one Docker image.
 
 Yes, the acronym is still RoR. That's on purpose, and it's a thank-you.
+
+## License
+
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT license](LICENSE-MIT), at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in this project by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
+
+Security issues: see [SECURITY.md](SECURITY.md). Contributing: see [CONTRIBUTING.md](CONTRIBUTING.md).

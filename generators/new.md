@@ -141,6 +141,7 @@ Generate these in order. Each module compiles against the ones before it. The or
 3. `src/error.rs`: `AppError`, `ResponseFlavor` and the `shape_errors` middleware ([errors-and-logging](../guides/errors-and-logging.md))
 4. `src/models/mod.rs`: `Errors`, `Page` and the model aliases ([models](../guides/models.md))
 5. The kernel, now. Each item's spec is in the linked guide:
+   - `security.rs`: **the header matrix middleware** (CSP, HSTS and `upgrade-insecure-requests` only with an https `APP_URL`, nosniff, Referrer-Policy, Permissions-Policy, COOP, CORP, X-Frame-Options, `no-store` for authenticated responses, production cookie hardening), mounted outside the panic and timeout layers ([security](../guides/security.md#the-header-matrix));
    - `flash.rs` and `rate_limit.rs`;
    - `assets.rs`;
    - `mailer.rs` (constructors only; selection lives in `state.rs`) and `mailbox.rs`: **the full dev mailbox** ([mailers](../guides/mailers.md#the-dev-mailbox-kernelmailboxrs-swooshs-local-mailbox)): storage, the two-pane inbox, Previews tab, message view (headers, HTML/Text/Raw, Desktop/Mobile, attachments, links), `/message.eml`, test-email button, JSON endpoints;
@@ -151,7 +152,7 @@ Generate these in order. Each module compiles against the ones before it. The or
 
    CSRF is **not** generated. It's tower-http's `CsrfLayer`, configured in `routes.rs` ([security](../guides/security.md#csrf)).
 
-   Later, on first use: `pubsub` (channel generator), `storage` (first attachment field), `session` (authentication generator).
+   Later, on first use: `pubsub` (channel generator), `storage` (first attachment field), `session` (authentication generator; its cookie is `__Host-session_token` in production, [auth](../guides/auth.md#sessions)).
 
    None of these is a stub or "later": the mailbox, the jobs dashboard and `/dev` are part of every app from day one, and their tests (step 7) prove it.
 
@@ -224,7 +225,11 @@ Generate these in order. Each module compiles against the ones before it. The or
 | `compose.yaml` | **The whole app, production-shaped**: `docker compose up --build` runs the `app` service (built from the `Dockerfile`, `APP_ENV=production`, healthcheck `app health`) against a `db` service (Postgres, the production major, healthcheck `pg_isready`, a named volume, published on `127.0.0.1:${DB_PORT:-5432}` so `TEST_DATABASE_URL` works from the host). Profiles: `worker` (a separate `app worker` container; run with `APP_INLINE_WORKER=false`) and `mail` (Mailpit; `SMTP_URL=smtp://mailpit:1025`). Ports overridable (`APP_PORT`, `DB_PORT`, `MAILPIT_PORT`). The full file is in [deployment](../guides/deployment.md#docker-compose-the-whole-app-locally). `bin/dev` stays the fast native loop |
 | `Dockerfile` | Per [deployment](../guides/deployment.md#dockerfile-shape) (trixie images). Delete the `web` stage in plain htmx and `api` modes, and the Tailwind line in `api` mode |
 | Deploy config | Only for the chosen `DEPLOY_TARGET`. Skip it if "decide later" |
-| `.github/workflows/ci.yml` | Per [testing](../guides/testing.md#ci): SQLite, Postgres, frontend (TS modes) and Docker jobs |
+| `.github/workflows/ci.yml` | Per [testing](../guides/testing.md#ci): SQLite, Postgres, frontend (TS modes), **security** (cargo-deny + gitleaks over the full history) and Docker jobs. The Docker job boots the production image and runs the **ZAP baseline** against it ([security](../guides/security.md#automated-enforcement)) |
+| `deny.toml` | cargo-deny: advisories (`yanked = "deny"`, `unmaintained = "all"`), permissive licenses, `[licenses.private] ignore = true`, the [stack](../stack.md) "Banned" list as `[bans] deny` (plus `openssl`, `openssl-sys`, `native-tls`), crates.io-only sources. Set `publish = false` in `Cargo.toml` and `migration/Cargo.toml`. The full file is in [security](../guides/security.md#automated-enforcement) |
+| `.gitleaks.toml` | `[extend] useDefault = true` and an allowlist of build/runtime paths only (`target/`, `storage/`, `node_modules/`, `web/dist/`, `static/vendor/`) |
+| `.zap/rules.tsv` | The triaged ZAP baseline rules (htmx `eval` 10110, anti-CSRF tokens 10202, COEP 90004 → `IGNORE`; 10049/10111/10112 → `INFO`), each with its reason. Plus `.zap/.gitignore` for scan output (`/zap-report.*`, `/zap.yaml`, `/gen.conf`) |
+| `.github/dependabot.yml` | Weekly, grouped updates for `cargo` and `github-actions` (plus `npm` with `directory: /web` in TS modes) |
 
 `chmod +x bin/*`.
 
@@ -234,11 +239,12 @@ The layout is one binary, `tests/app/` ([testing](../guides/testing.md)):
 
 | File | Content |
 |------|---------|
-| `main.rs` | `mod errors_test; mod factories; mod kernel_jobs_test; mod kernel_test; mod kernel_web_test; mod security_test; mod smoke_test;` plus `#[allow(dead_code)] mod support;`. Not every test file uses every helper, and clippy `-D warnings` would fail on that |
+| `main.rs` | `mod errors_test; mod factories; mod headers_test; mod kernel_jobs_test; mod kernel_test; mod kernel_web_test; mod security_test; mod smoke_test;` plus `#[allow(dead_code)] mod support;`. Not every test file uses every helper, and clippy `-D warnings` would fail on that |
 | `support.rs` | `TestApp` and `TestResponse`, including the query counter, per-test Postgres databases, the job helpers (`drain_jobs`/`drain_queue`/`drain_all_jobs` → `Drained`, `enqueued`, `assert_enqueued`, `refute_enqueued`, `perform_job`) and `wait_until` ([jobs](../guides/jobs.md#testing-obantesting-equivalents)) |
 | `factories.rs` | Empty for now. Each model adds one |
 | `smoke_test.rs` | See the list below |
 | `security_test.rs` | The access matrix over `ROUTES` ([test-standards §3](../guides/test-standards.md#3-security-tests-every-app)) |
+| `headers_test.rs` | **The header matrix** ([security](../guides/security.md#the-header-matrix)): one request per response class in development and production (https `APP_URL`), each asserting the full header set; production over plain http sends no TLS-only directives. `TestApp::request_head` reads status and headers without the body, for SSE. Grows with the app: authenticated page, SSE and WebSocket rows arrive with auth and channels |
 | `kernel_test.rs` | Cache fetch/hit, delete, `delete_prefix` (a `_` in a key is literal), expiry with `Duration::ZERO`; the rate limiter's 11th hit → `TooManyRequests`; `Flash::notice` sets the cookie attributes |
 | `errors_test.rs` | Every `AppError` variant × flavor, through `error::shape_errors` on a small test router: HTML pages never leak internals; dev 500 shows the chain; `Unauthorized` → 303 or `HX-Redirect`; `/api` JSON shapes (insta); `ClientIp` honors `X-Forwarded-For` only with `APP_TRUSTED_PROXY`; tasks run by name. Never run `test_db_cleanup` from a Postgres test |
 
@@ -247,7 +253,7 @@ The layout is one binary, `tests/app/` ([testing](../guides/testing.md)):
 - the home page returns 200 and renders the layout;
 - `/up` returns 200;
 - an unknown path returns the 404 page, and an unknown `/api/...` path returns `{"error":"not_found"}` (an insta inline snapshot);
-- security headers are present (CSP, nosniff, frame options, referrer policy, `x-request-id`);
+- security headers are present (CSP, nosniff, frame options, referrer policy, `x-request-id`). The full matrix is `headers_test.rs`;
 - the SQLite connection has `foreign_keys = 1`;
 - an email sent with `deliver_later` is delivered only after `drain_jobs()` (memory mailer);
 - with development config (`Mailer::Local`), an email sent with `deliver_later` and drained lands in `mailbox_messages`, **`GET /dev/mailbox` shows it, and `GET /dev/mailbox/{id}/html` renders its HTML** with the iframe CSP;
@@ -255,7 +261,7 @@ The layout is one binary, `tests/app/` ([testing](../guides/testing.md)):
 - the home page's query count is stable (`assert_query_count_stable`);
 - **meta and brand assets** (modes with pages): the home page has `<title>`, `meta name="description"`, `link rel="canonical"` (absolute, from `APP_URL`), `og:title`/`og:description`/`og:image` (absolute URL), `twitter:card`, `link rel="icon"` and `apple-touch-icon`; `/favicon.ico`, `/static/og.png`, `/robots.txt` and `/sitemap.xml` return 200.
 
-`api` mode replaces the page checks: `GET /` is the JSON index, `/robots.txt` disallows everything, any unknown path is `{"error":"not_found"}`, there is no flash test, and `errors_test.rs` checks HTML error pages only under `/dev` (everything else is JSON). Its API suites come from [api](../guides/api.md#testing-on-top-of-test-standards) and [graphql](../guides/graphql.md#required-tests-graphql-archetype-test-standards).
+`api` mode replaces the page checks: `GET /` is the JSON index, `/robots.txt` disallows everything, any unknown path is `{"error":"not_found"}`, there is no flash test, and `errors_test.rs` checks HTML error pages only under `/dev` (everything else is JSON). Its API suites come from [api](../guides/api.md#testing) and [graphql](../guides/graphql.md#required-tests-graphql-archetype).
 
 `security_test.rs` covers:
 

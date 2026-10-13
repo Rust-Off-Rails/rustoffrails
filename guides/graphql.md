@@ -82,7 +82,7 @@ A removed or retyped field is a breaking change: use `#[graphql(deprecation = "u
 
 `GraphiQLSource::build().endpoint("/graphql").version(GRAPHIQL_VERSION)` at `/dev/graphiql`, with `GRAPHIQL_VERSION` pinned (verified: `4.1.2`). It loads React and GraphiQL from unpkg and runs an inline script, so this one dev-only route sets its own CSP: `script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https:; connect-src 'self'`. Never mounted in production (the dev-routes test covers it). Send a token from the Headers tab: `{"Authorization": "Bearer …"}`.
 
-## Required tests (GraphQL archetype; [test-standards](test-standards.md#2-the-required-test-set-by-archetype))
+## Required tests (GraphQL archetype)
 
 - Every query and mutation anonymously → `UNAUTHENTICATED`, with no data.
 - Another user's record → `NOT_FOUND`; a read-only token on any mutation → `FORBIDDEN`.

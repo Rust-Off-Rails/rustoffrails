@@ -63,8 +63,8 @@ pub fn digest(token: &str) -> String { Sha256::digest(token.as_bytes()).iter().m
 Database-backed, as in Rails 8:
 
 1. **Start** (`session::start(db, user_id, ip, user_agent) -> (Model, raw_token)`): insert the digest, then set the cookie
-   `session_token=<token>; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000` (30 days), plus `; Secure` when `APP_ENV=production`.
-   Format this header by hand in `kernel/session.rs` (`cookie(token, secure)`, `clear_cookie(secure)` with `Max-Age=0`). axum-extra doesn't re-export `cookie::time`, so `Cookie::max_age` would need an extra crate.
+   `session_token=<token>; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000` (30 days). In production (`secure = config.is_production()`) the name is **`__Host-session_token`** and `; Secure` is added: the `__Host-` prefix stops a sibling subdomain from planting a session ([security](security.md#the-header-matrix)).
+   Format this header by hand in `kernel/session.rs` (`name(secure)`, `cookie(token, secure)`, `clear_cookie(secure)` with `Max-Age=0`). `read(headers, secure)` accepts **only** `name(secure)`, so production ignores a plain `session_token` cookie. Tests that set the cookie use `ksession::name(config.is_production())`. axum-extra doesn't re-export `cookie::time`, so `Cookie::max_age` would need an extra crate.
 2. **Every request:** `load_session` (private, in `controllers/application.rs`) reads the cookie and runs `session::find_by_token(db, token, now)`. That's one query: `find_also_related(user::Entity)` filtered on `last_seen_at > now − 30 days`. The result, `None` included, is cached in the request extensions (`LoadedSession`), so `Ctx`, `CurrentUser`, `RequireUser` and `CurrentSession` in one handler cost a single query. `session::touch` bumps `last_seen_at` at most once an hour.
 3. **Logout:** delete the session row (`CurrentSession` extractor) and clear the cookie. Replaying the old cookie must not log anyone in. There's a test for that.
 4. **Log out everywhere** (password reset or change): `session::destroy_all_for_user`.

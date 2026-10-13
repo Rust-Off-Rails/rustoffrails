@@ -125,7 +125,7 @@ pub async fn create(State(s): State<AppState>, me: ApiUser, ApiJson(params): Api
 - **Dev reference UI** at `/dev/api-docs` (development only): a hand-written page that loads Scalar from jsDelivr at a **pinned** version (`SCALAR_VERSION`) with no inline script, and its own CSP (`script-src 'self' https://cdn.jsdelivr.net`, `style-src … 'unsafe-inline'`). Don't add `utoipa-scalar`/`utoipa-swagger-ui`: the first loads an **unpinned** CDN script, the second downloads Swagger UI from GitHub at build time (breaks offline and Docker builds).
 - utoipa fills `info.license` from Cargo metadata with an empty name, which is invalid OpenAPI. The `Modify` sets it to `None`.
 
-## Testing (on top of [test-standards](test-standards.md))
+## Testing
 
 `TestApp` helpers for APIs: `login_as(&user) -> token` (a real read+write token, sent from then on), `login_with_scopes(&user, &["read"])`, `use_token(Some(..)/None)`, `post_json`, `patch_json`, `delete`, `json(method, path, body)`, `graphql(query, variables)`, and `TestResponse::json()`.
 

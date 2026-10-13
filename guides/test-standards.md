@@ -41,8 +41,8 @@ Find the app's archetype from its `AGENTS.md` header and the product README. An 
 | **React app** (`inertia`) | `FRONTEND_MODE: inertia` | Everything in Web app, with request tests asserting **props** rather than HTML. Plus component tests (Vitest) and E2E for critical flows (Playwright) |
 | **SPA + API** (`spa`) | `FRONTEND_MODE: spa` | Model, policy, **API contract**, security. Plus component tests and E2E for critical flows |
 | **Public API** | Third parties or mobile apps call `/api` | Everything in SPA + API, plus **frozen contract snapshots**, versioning tests, auth-token tests, and pagination/limit tests |
-| **API-only** | `FRONTEND_MODE: api` | Everything in Public API, plus: every error path is JSON (no HTML outside `/dev`, `/admin`); bearer-token matrix (missing, garbage, revoked, expired → the same 401 with `WWW-Authenticate: Bearer`; a read-only token can't write anything); per-token and per-IP rate limits; CORS allowlist (preflight and real request, no credentials, foreign origins refused) and CSRF still refusing a foreign `Origin`; the committed `docs/openapi.json` matches and covers every `/api/v1` route ([api](api.md#testing-on-top-of-test-standards)) |
-| **GraphQL** | `API: graphql \| both` | Every query and mutation anonymously → `UNAUTHENTICATED`; another user's record → `NOT_FOUND`; read-only token on mutations → `FORBIDDEN`; validation failures as payload `errors` (no top-level errors); the N+1 guard for every association (1 vs 20 rows, same query count); depth and complexity limits reject abuse **and the standard introspection query passes**; the committed `docs/schema.graphql` matches; with `API: both`, REST and GraphQL agree on the same record ([graphql](graphql.md#required-tests-graphql-archetype-test-standards)) |
+| **API-only** | `FRONTEND_MODE: api` | Everything in Public API, plus: every error path is JSON (no HTML outside `/dev`, `/admin`); bearer-token matrix (missing, garbage, revoked, expired → the same 401 with `WWW-Authenticate: Bearer`; a read-only token can't write anything); per-token and per-IP rate limits; CORS allowlist (preflight and real request, no credentials, foreign origins refused) and CSRF still refusing a foreign `Origin`; the committed `docs/openapi.json` matches and covers every `/api/v1` route ([api](api.md#testing)) |
+| **GraphQL** | `API: graphql \| both` | Every query and mutation anonymously → `UNAUTHENTICATED`; another user's record → `NOT_FOUND`; read-only token on mutations → `FORBIDDEN`; validation failures as payload `errors` (no top-level errors); the N+1 guard for every association (1 vs 20 rows, same query count); depth and complexity limits reject abuse **and the standard introspection query passes**; the committed `docs/schema.graphql` matches; with `API: both`, REST and GraphQL agree on the same record ([graphql](graphql.md#required-tests-graphql-archetype)) |
 | **Background-heavy** | Specs with schedules, imports, or emails at volume | Every worker: success, retry on error, idempotency (run twice → same result), uniqueness, cron entry fires |
 | **Realtime** | Channels exist | Signals: broadcast emitted on change, subscriber authz (can't subscribe to others' streams). Rooms ([channels](channels.md#testing)): join authz (401 logged out, 403 foreign Origin, others' private topics refused), delivery + storage, presence join/leave and two tabs = one person, replay after reconnect, room rate limit, frame size/flood/garbage closes, text shown as typed; Postgres apps add the 3-node cluster case |
 | **Multi-tenant** | `TENANCY: teams` | **Tenant isolation suite** (§4). It's the most important test file in the app |
@@ -113,12 +113,22 @@ These live in `tests/app/security_test.rs`. Most iterate over `ROUTES`, so new r
 | **Access matrix** | Every `ROUTES` entry declares an access level: `public`, `user`, `admin` or `dev` ([routing](routing.md)). Request every non-public route anonymously → never 2xx. Every `admin` route as a normal user → 403/404. Every `dev` route with production config → 404. Substitute `1` for path params |
 | CSRF | A cross-site POST to every unsafe `ROUTES` entry → 403, while logged in, so a 403 can't come from auth |
 | Escaping | Create a record whose text fields are `<script>alert(1)</script>`. The page shows it escaped (htmx: `assert_text(evil)` plus `assert_not_contains(evil)`; Askama 0.16 uses numeric entities such as `&#60;`), or the props contain it raw and React escapes it (inertia/spa). Markdown fields go through ammonia |
-| Session | Logout invalidates the server session (the old cookie no longer works). The password-reset token is single-use and expires |
+| Session revocation | Logout invalidates the server session (the old cookie no longer works). Password change or reset ends **every** session of the user, including **open sockets and streams** ([channels](channels.md)). Reset and magic-link tokens are single-use and expire |
+| Session cookie | Production: the cookie is `__Host-session_token` with `Secure; HttpOnly; SameSite=Lax; Path=/` and no `Domain`, and a planted plain `session_token` cookie doesn't log anyone in |
+| **Header matrix** | `tests/app/headers_test.rs`: one request per response class (HTML, authenticated page, JSON, SSE via `request_head`, the WebSocket 101 and the cross-origin 403 over a real socket, a kernel page, 404/403/422/500, a static asset, a redirect), each asserting the full set from [security](security.md#the-header-matrix), in development **and** production (https `APP_URL`). Plus: authenticated responses are `no-store`, every production cookie is `Secure` and `HttpOnly`, and production over plain http sends no TLS-only directives |
 | Rate limit | 11th login attempt in the window → 429 |
 | Mass assignment | Posting `owner_id`/`role`/`account_id` in a form doesn't change them |
 | Uploads (if any) | Over the spec's limit → 422 with the field message. Over the route's `DefaultBodyLimit` → 413. Wrong type, including a claimed type that doesn't match the magic bytes and SVG → 422. Served with `Content-Disposition`, `nosniff` and an owner check, per [storage](storage.md) |
 | Admin as a plain user | Every `Access::Admin` route requested by a logged-in non-admin → never 2xx |
 | CSRF fallback | Without fetch metadata (`app.without_fetch_metadata().with_origin(…)`): a foreign `Origin` → 403, `APP_URL` → passes |
+
+**Scanner gates (CI, every push; locally via `/offrails:check`):**
+- `cargo deny check` is green;
+- gitleaks over the full history is green;
+- the OWASP ZAP baseline against the production image has no untriaged WARN (`.zap/rules.tsv`);
+- `pnpm audit --prod` in TS modes.
+
+See [security](security.md#automated-enforcement). A failing scanner is a failing test: fix it, or triage it in the committed config with a reason (and, for advisories, a recheck date).
 
 ## 4. Tenant isolation suite (multi-tenant apps)
 

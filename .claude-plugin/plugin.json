@@ -6,7 +6,7 @@
   "author": {
     "name": "Daniel CJ"
   },
-  "license": "MIT",
+  "license": "MIT OR Apache-2.0",
   "keywords": [
     "rust",
     "rails",

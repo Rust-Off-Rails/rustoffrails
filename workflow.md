@@ -41,6 +41,11 @@ comm -23 <(grep -rhoE 'AC-[a-z0-9_-]+-[0-9]+' product/ | sort -u) \
 # coverage gate (test-standards.md §5): ≥ 80% lines overall, ≥ 90% for src/models and src/policies
 cargo llvm-cov nextest --summary-only --ignore-filename-regex 'src/main\.rs$' --fail-under-lines 80
 
+# security gates (guides/security.md#automated-enforcement)
+cargo deny check                                    # advisories, licenses, banned crates, sources
+gitleaks git . --redact --no-banner                 # secrets anywhere in history (.gitleaks.toml)
+pnpm --dir web audit --prod                         # TS modes only
+
 # htmx mode
 bin/tailwindcss -i assets/app.css -o static/app.css --minify
 
@@ -62,6 +67,7 @@ Plus:
 - [ ] New routes appear in `docs/routes.md` (`cargo run -- routes`).
 - [ ] New env vars appear in `.env.example`, in `Config`, and in the deploy config.
 - [ ] Decisions not covered by `.offrails/` are logged in `docs/decisions.md`.
+- [ ] **Security-relevant changes** (auth, sessions, permissions, tenancy, payments, uploads, realtime, APIs, webhooks, outbound fetches, anything new in `headers_test.rs`) run **`/offrails:security`** or its checklist, fill the spec's `## Security` threat model, and add an **attack test** for each threat: failing first, then fixed. A Non-negotiable ([security](guides/security.md#non-negotiables)) is never weakened without a decision **and** the human's explicit OK. The ZAP baseline runs in CI; run it locally when you add routes or change headers.
 - [ ] If the change is user-visible, you ran the app and exercised it, not just the tests. **UI-affecting changes need a real-browser smoke of the changed flow** ([test-standards §9](guides/test-standards.md#9-real-browser-smoke)): styling applied, Back/Forward, console free of errors and CSP violations. curl alone isn't enough. Emails: check `/dev/mailbox/latest.json`. Jobs: `app jobs list --state discarded` is empty ([dev-tools](guides/dev-tools.md)).
 
 ## When something fails

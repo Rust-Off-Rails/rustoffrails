@@ -1,6 +1,25 @@
 # Security
 
-Rails ships defenses on by default. Off Rails ships them as specs you generate on day one (`generators/new.md`). Never remove one to make something work. Fix the something.
+**Security is the gold standard of this framework.** Rails ships defenses on by default. Off Rails ships them as specs you generate on day one (`generators/new.md`), enforced by tests, CI scanners and plugin hooks. Agents go hard here: assume every input is hostile, every client is scripted, and every proxy lies. Never remove a defense to make something work. Fix the something.
+
+## Non-negotiables
+
+You must **never weaken** any of these without **both** a `docs/decisions.md` entry and the human's **explicit approval in conversation**. "It was blocking me" is not a reason. If a fix seems to need it, stop and ask.
+
+1. **CSP**: the strict policy in [the header matrix](#the-header-matrix). No `unsafe-inline`, no `unsafe-eval`, no wildcard sources, no inline `<script>` or `on*=` handlers.
+2. **Security headers** on every response class, verified by `tests/app/headers_test.rs`.
+3. **CSRF and Origin checks**, including the WebSocket handshake. Safe methods never change state.
+4. **Escaping**: Askama autoescape, React and Svelte text rendering. Raw HTML only from ammonia-sanitized helpers.
+5. **Authorization on every route and every socket join and push**: `RequireUser` (or stronger) plus a policy or an owner-scoped query.
+6. **Tenant scoping** on every query in multi-tenant apps, with the isolation suite ([test-standards](test-standards.md) §4).
+7. **Rate limits** on login, sign-up, password reset, magic links, API tokens, anything that sends email or costs money, and socket frames.
+8. **Tokens**: random (≥ 32 bytes), **only digests stored**, expiring, single-use where they grant access, minted inside jobs (never in job args).
+9. **Session revocation**: logout, password change and reset end the server session, and **every** session on change or reset, including open sockets and streams ([channels](channels.md)).
+10. **Cookies**: `HttpOnly`, `SameSite=Lax`, `Secure` in production; the session cookie is `__Host-` prefixed in production.
+11. **Secrets hygiene**: env vars only. Never in code, logs, job args, error pages, fixtures or git history (gitleaks in CI).
+12. **Dependencies**: cargo-deny green (no known advisories, permissive licenses, no banned crates, crates.io only).
+
+The plugin's hooks flag the common ways these get weakened as you type (`|safe`, `{@html}`, `dangerouslySetInnerHTML`, inline scripts, `unsafe-inline`/`unsafe-eval`, permissive CORS, SQL built with `format!`, cookies with `Secure`/`HttpOnly` turned off). For a full review run **`/offrails:security`**: threat model, scanners, live header check, the checklist, and attack tests.
 
 ## CSRF
 
@@ -24,28 +43,54 @@ let csrf = CsrfLayer::new()
 - Behind a proxy, `Host` and `Origin` must reach the app unchanged (Fly, Kamal-proxy, Render and Railway do this by default). Otherwise only `Sec-Fetch-Site` protects you.
 - Tests: a `Sec-Fetch-Site: cross-site` POST and a foreign-`Origin` POST both get 403. `TestApp::post_form` sends `Sec-Fetch-Site: same-origin`, like a browser.
 
-## Security headers
+## The header matrix
 
-Set via `tower-http` `SetResponseHeaderLayer::if_not_present`, one layer per header, in `routes.rs` ([routing](routing.md#middleware)):
+One middleware, `kernel/security.rs` (`security::middleware`), sets the headers. It sits **outside** `CatchPanicLayer` and the timeout in `routes.rs`, so panic 500s and 408s get them too ([routing](routing.md#middleware)). It only fills in headers a handler didn't set, so a route can make a header *stricter* (the mailbox viewer's own CSP), never remove it.
 
-| Header | Value |
-|--------|-------|
-| `Content-Security-Policy` | `default-src 'self'; img-src 'self' data: <storage host>; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'` |
-| `X-Content-Type-Options` | `nosniff` |
-| `Referrer-Policy` | `strict-origin-when-cross-origin` |
-| `X-Frame-Options` | `DENY` |
-| `Strict-Transport-Security` | `max-age=63072000; includeSubDomains` in production, `max-age=0` otherwise (one layer, value chosen from config) |
-| `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` (unless a spec needs them) |
+| Header | Value | Notes |
+|--------|-------|-------|
+| `Content-Security-Policy` | `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'` | Plus `; upgrade-insecure-requests` when served over https (below). Add a storage host to `img-src` only if blobs are served from another origin |
+| `Strict-Transport-Security` | `max-age=63072000; includeSubDomains` | Production **with an `https://` `APP_URL`** only; `max-age=0` otherwise, so localhost is never pinned. `preload` is opt-in per decision (it's hard to undo) |
+| `X-Content-Type-Options` | `nosniff` | |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), hid=(), midi=(), browsing-topics=()` | Open a feature per spec. Don't list retired features (`interest-cohort`) |
+| `Cross-Origin-Opener-Policy` | `same-origin` | Isolates the window from cross-origin openers |
+| `Cross-Origin-Resource-Policy` | `same-origin` | Other sites can't embed your responses. Crawlers (OG images) aren't affected |
+| `X-Frame-Options` | `DENY` | Legacy twin of `frame-ancestors 'none'` |
+| `Cache-Control` | `no-store` | On **every response to a request with a session cookie** (except `/static/*`, `/favicon.ico`, `/robots.txt`), and on all kernel pages (`/dev/*`, `/admin/*`). Private data never lands in a shared or back/forward cache |
+| `Cross-Origin-Embedder-Policy` | not set | Only needed for cross-origin isolation (`SharedArrayBuffer`). `require-corp` breaks third-party embeds such as video players. Set it per spec |
 
-CSP adjustments, made only in `APP_ENV=development` for Vite modes:
+By response class (all verified by `tests/app/headers_test.rs`, in development and production):
 
+| Class | Example | Required |
+|-------|---------|----------|
+| HTML page | `GET /` | full matrix |
+| Authenticated page | `GET /books/1` logged in | full matrix + `no-store` |
+| JSON | `GET /api/…`, `/dev/mailbox.json` | full matrix (+ `no-store` when authenticated or kernel) |
+| SSE stream | `GET /streams/{stream}` | full matrix, `text/event-stream` |
+| WebSocket handshake | `GET /socket` → 101, and the cross-origin 403 | `nosniff`, CORP, CSP on both |
+| Kernel page | `/admin/jobs`, `/dev` | full matrix + `no-store` |
+| Errors | 404, 403 (CSRF), 422, 500 (panic) | full matrix |
+| Static asset | `/static/app.js?v=…` | full matrix, cacheable (`immutable` when digested) |
+| Redirect | `303` to login | full matrix |
+
+**Cookies.** Every cookie the app sets is `HttpOnly; SameSite=Lax`, plus `Secure` in production. The session cookie is named **`__Host-session_token`** in production (`kernel::session::name(secure)`): browsers refuse a `__Host-` cookie unless it's `Secure`, `Path=/` and has no `Domain`, so a sibling subdomain can't plant a session (session fixation, login CSRF). Production reads **only** that name. In production the middleware also adds any missing `Secure`/`HttpOnly`/`SameSite` to every `Set-Cookie`, as a backstop for cookies built without config (the flash).
+
+**TLS-only directives key off `APP_URL`.** `upgrade-insecure-requests` and HSTS are sent only when `APP_ENV=production` **and** `APP_URL` starts with `https://`, which is always the case when deployed behind TLS. Verified in Chrome: on a production build run locally over plain http, `upgrade-insecure-requests` makes the browser upgrade same-origin **redirects** (not the initial requests) to `https://localhost`, and every redirect flow fails with `ERR_SSL_PROTOCOL_ERROR`. Production with a non-https `APP_URL` on a non-local host logs a loud warning at boot.
+
+**Verified in current Chrome (2026-10-12):**
+- `connect-src 'self'` covers same-origin `ws://` and `wss://` (CSP3). The book-room socket joins and presence renders under this exact CSP.
+- `Secure` and `__Host-` cookies work on `http://localhost` (a secure context), so the production cookie path is testable locally.
+- The Permissions-Policy above logs no console warnings.
+
+**Development adjustments**, for Vite modes only (`APP_ENV=development`):
 - add `http://localhost:5173` to `script-src`, `style-src` and `connect-src`;
 - add `ws://localhost:5173` to `connect-src`;
 - add `'unsafe-inline'` to `style-src`.
 
-The React refresh preamble is a same-origin file, `/dev/vite-preamble.js`, served by `kernel/assets.rs` in development ([frontend-inertia](frontend-inertia.md)), so it needs no nonce or hash. Production CSP has **no** `unsafe-inline` or `unsafe-eval`.
+The React refresh preamble is a same-origin file, `/dev/vite-preamble.js` ([frontend-inertia](frontend-inertia.md)), so it needs no nonce. SvelteKit SPA's boot script is allowed by **sha256 hash** ([frontend-svelte](frontend-svelte.md)). Production never gets `unsafe-inline` or `unsafe-eval`.
 
-The kernel pages (`/admin/jobs`, `/dev/*`) are covered by the same CSP. They use vendored htmx with `allowEval: false` and no inline scripts. The one exception is the mailbox's HTML-body route, which sets its own stricter headers ([mailers](mailers.md)).
+The kernel pages (`/admin/jobs`, `/dev/*`) are covered by the same CSP. They use vendored htmx with `allowEval: false` and no inline scripts. The mailbox's HTML-body route sets its own, stricter headers ([mailers](mailers.md)).
 
 ## Rate limiting (`kernel/rate_limit.rs`)
 
@@ -109,9 +154,100 @@ See `storage.md`. In short: enforce a size limit per route (`DefaultBodyLimit`),
 - Never log secrets, tokens, passwords, or full request bodies of auth endpoints. `tracing` fields for these must be omitted, not redacted later.
 - Errors shown to users never include internals (`errors-and-logging.md`).
 
-## Dependencies
+## Automated enforcement
 
-`cargo audit` (and `pnpm audit` in Vite modes) in CI, weekly. Treat new advisories as bugs.
+Every app gets these on day one ([new](../generators/new.md)). They run in CI on every push, and locally through `/offrails:check` and `/offrails:security`.
+
+| Gate | Tool | Config (committed) | Fails on |
+|------|------|--------------------|----------|
+| Header matrix | `tests/app/headers_test.rs` | — | any response class missing a header; unprefixed or non-`Secure` production cookies; a planted unprefixed session cookie logging someone in |
+| Dependencies | `cargo deny check` (cargo-deny 0.20) | `deny.toml` | RustSec advisories and yanked crates; unmaintained crates; non-permissive licenses; **banned crates** (the "Banned" list in [stack](../stack.md), generated into `[bans]`); git or non-crates.io sources |
+| Secrets | `gitleaks` (8.30) over **all git history** | `.gitleaks.toml` | any secret in any commit |
+| Dynamic scan | **OWASP ZAP baseline** (`ghcr.io/zaproxy/zaproxy:stable`) against the production Docker image | `.zap/rules.tsv` | any WARN not triaged in the rules file |
+| JS dependencies | `pnpm audit --prod` (TS modes) | — | high or critical advisories |
+| Updates | Dependabot, weekly and grouped | `.github/dependabot.yml` | — (opens PRs; CI gates them) |
+
+The reference `deny.toml` (verified with cargo-deny 0.20.2: `advisories ok, bans ok, licenses ok, sources ok`):
+
+```toml
+# cargo-deny: run in CI and by /offrails:check (`cargo deny check`).
+# Generated from stack.md "Banned". Never loosen without a docs/decisions.md entry + human approval.
+
+[graph]
+all-features = false
+
+[advisories]
+# RustSec advisory DB. A vulnerable or yanked crate fails the build; unmaintained crates are
+# reported for the whole tree (they're the ones nobody will fix).
+version = 2
+yanked = "deny"
+unmaintained = "all"
+ignore = [
+  # Triaged exceptions only, each with a reason and a review date:
+  # { id = "RUSTSEC-YYYY-NNNN", reason = "…, not reachable because …; recheck 2026-12-01" },
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# Permissive licenses only. A copyleft or unknown license fails the build.
+allow = [
+  "MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause",
+  "ISC", "Zlib", "0BSD", "BSL-1.0", "CC0-1.0", "Unicode-3.0", "CDLA-Permissive-2.0", "MPL-2.0",
+]
+
+# The app and its migration crate are `publish = false`; they're ours, not a dependency.
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+# Never anywhere in the tree (stack.md "Banned"). Direct-only bans (lazy_static, once_cell,
+# async-trait, log macros) are checked against Cargo.toml by the plugin hook and /offrails:doctor,
+# because healthy crates still pull them in transitively.
+deny = [
+  { crate = "diesel", reason = "SeaORM is the one data layer (stack.md)" },
+  { crate = "actix-web", reason = "one web stack: axum (stack.md)" },
+  { crate = "rocket", reason = "one web stack: axum (stack.md)" },
+  { crate = "poem", reason = "one web stack: axum (stack.md)" },
+  { crate = "loco-rs", reason = "one web stack: axum (stack.md)" },
+  { crate = "leptos", reason = "no WASM front ends (stack.md)" },
+  { crate = "dioxus", reason = "no WASM front ends (stack.md)" },
+  { crate = "yew", reason = "no WASM front ends (stack.md)" },
+  { crate = "tera", reason = "runtime templates hide errors (stack.md)" },
+  { crate = "handlebars", reason = "runtime templates hide errors (stack.md)" },
+  { crate = "minijinja", reason = "runtime templates hide errors (stack.md)" },
+  { crate = "askama_axum", reason = "removed upstream (stack.md)" },
+  { crate = "axum-inertia", reason = "generate the adapter from the spec (stack.md)" },
+  { crate = "redis", reason = "the database does jobs, cache and pub/sub (stack.md)" },
+  { crate = "openssl", reason = "rustls only (security.md)" },
+  { crate = "openssl-sys", reason = "rustls only (security.md)" },
+  { crate = "native-tls", reason = "rustls only (security.md)" },
+]
+
+[sources]
+# Only crates.io. A git or alternative-registry dependency must be justified and added here.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+```
+
+Details:
+- **`deny.toml`:**
+  - set `publish = false` on the app and migration crates and ignore private crates' licenses (`[licenses.private] ignore = true`), so only dependencies are judged;
+  - crates that healthy dependencies pull in transitively (`lazy_static`, `once_cell`, `async-trait`, `log`) are banned as **direct** dependencies only, which the plugin hook and `/offrails:doctor` check against `Cargo.toml`;
+  - everything else on the banned list is denied anywhere in the tree, plus `openssl`, `openssl-sys` and `native-tls` (rustls only).
+- **Advisory ignores** in `deny.toml` need an id, a reason ("not reachable because …") and a recheck date.
+- **gitleaks:**
+  - the allowlist covers build and runtime directories only (`target/`, `storage/`, `node_modules/`, `web/dist/`, `static/vendor/`);
+  - a known-public value (an RFC test vector) gets `// gitleaks:allow` **on the same line**, so move it into a one-line `const`.
+- **ZAP:**
+  - CI boots the production image and runs `zap-baseline.py -c rules.tsv` **without** `-I`, so every untriaged WARN fails;
+  - each `IGNORE`/`INFO` line in `rules.tsv` states why, for example: htmx's `eval` (disabled by `allowEval:false` and the CSP), anti-CSRF tokens (by design: Fetch Metadata plus Origin), COEP (see the matrix);
+  - with a rules file, ZAP's informational detectors (10049 cacheability, 10111 login form found, 10112 session cookie found) are reported as WARN, so mark them `INFO` with a note.
 
 ## Checklist
 
@@ -133,4 +269,18 @@ The "brakeman" pass. Run through this before finishing any work touching auth, p
 - [ ] The dev mailbox hint and `/dev/*` links render only when `APP_ENV=development` (test with production config).
 - [ ] Uploads: size limit, type allowlist, random keys, safe `Content-Disposition`.
 - [ ] WebSockets: Origin checked (missing = refused), auth at upgrade, every join authorized, frame size and rate limits, tests for each ([channels](channels.md#testing)).
-- [ ] No secrets in code, logs, fixtures or `.env.example`.
+- [ ] No secrets in code, logs, fixtures or `.env.example`. gitleaks is green over the full history.
+- [ ] `headers_test.rs` covers every response class the change adds (a new kind of endpoint means a new row).
+- [ ] `cargo deny check` is green. Any new advisory ignore has a reason and a recheck date.
+- [ ] The ZAP baseline is green. Any new `rules.tsv` line explains its triage.
+- [ ] The feature spec's `## Security` section lists the threats this change touches, each with its control and the test that proves it.
+- [ ] No Non-negotiable was weakened, or there's a decision entry **and** the human's explicit approval.
+
+## Gotchas agents get wrong
+
+Each of these was a real finding in the reference app, fixed test-first:
+- **Cookies built without config miss `Secure`.** The flash cookie is set from `IntoResponseParts`, which has no config, so in production it went out without `Secure`. The middleware now hardens every `Set-Cookie`, and the header test fails if any production cookie lacks `Secure` or `HttpOnly`.
+- **Authenticated pages were cacheable.** Only kernel pages sent `no-store`, so a logged-in book page could be kept by a shared cache or the back/forward cache. Now any request carrying a session cookie gets `no-store`, static assets excepted.
+- **Headers set inside `CatchPanicLayer` vanish on panics.** A layer only decorates responses produced *inside* it, so the hardening middleware sits outside the panic and timeout layers.
+- **`upgrade-insecure-requests` over plain http breaks redirects.** See the matrix: TLS-only directives key off an `https://` `APP_URL`.
+- **Testing headers on endless responses:** use `TestApp::request_head`, which returns status and headers without reading the body, for SSE. Use a raw TCP handshake against `support::serve` for the WebSocket 101.
