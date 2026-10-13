@@ -249,7 +249,7 @@ All three transports drive the same `Session`, so joins, authorization, limits, 
 | `Origin` missing or not exactly APP_URL's origin | **403** at the handshake (CSWSH: browsers send cookies on cross-site WebSocket handshakes, and CSRF protection doesn't cover them) |
 | Logged out | **401** at the handshake |
 | No `offrails.v1` subprotocol offered | the socket opens, gets `bye` `protocol` "subprotocol offrails.v1 required", closes **1002** (browsers hide an HTTP refusal's reason). A client offering only other subprotocols can't connect at all |
-| More than `max_conns_per_user` | `bye` `limit`, close **1008** (HTTP transports: 429) |
+| More than `max_conns_per_user` | `bye` `limit`, close **1008** (HTTP transports: 429). Test it at the boundary without opening 128 sockets: hold `cap - 1` slots with `ConnGuard::register(&state, &member, "test")`, then one real socket joins and the next gets 1008. Opening `cap` real sockets slowed the Postgres suite from 80 s to 150 s and starved timing-sensitive tests |
 | Join | limits (`max_topics`, `max_joins_per_min`), `authorize`, then **subscribe before computing the reply** (nothing broadcast in between is lost), `track`, then `ok` with `replay` n, the replayed `event`s, and `presence` `here` **computed after `track`**, so the snapshot includes the joiner. Diffs for the topic that the subscription received meanwhile are sent after `here`, never before |
 | Push | `not_joined` unless joined; **re-`authorize`** (a reader removed since joining is refused and leaves the topic); the room's `In` type (`bad_event`); then the room |
 | More than `max_in_per_10s` frames | `bye` `rate_limited`, close **1008** |
