@@ -41,3 +41,7 @@ cargo llvm-cov nextest --summary-only --ignore-filename-regex 'src/main\.rs$'   
 ## App-specific notes
 
 <!-- Agents: add durable, app-specific guidance here (domain vocabulary, tricky invariants). Keep it short and link to product/ specs. -->
+
+### Post-upgrade checks
+
+<!-- Agents: list app-specific things /offrails:upgrade must verify after a framework upgrade, e.g. "the footer shows .offrails/VERSION (test: footer_shows_framework_version)". -->

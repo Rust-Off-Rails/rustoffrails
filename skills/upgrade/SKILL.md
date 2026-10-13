@@ -18,4 +18,5 @@ Only for Rust off Rails apps (a `.offrails/` directory exists). The new framewor
 5. Show the human a plan: each change with its classification → what it means for this app (files affected, migrations, risk). Wait for a yes.
 6. Replace `.offrails/` with a fresh copy of `$FW` (same exclusions) and write `.offrails/VERSION` as in `generators/new.md` step 1 (framework version, then `vendored <date>`).
 7. Apply the plan in vertical slices, each green under `/offrails:check`. Log `YYYY-MM-DD: upgraded Off Rails <old> → <new>` and each deviation in `docs/decisions.md`.
-8. Report what changed, in product terms where it matters.
+8. **Verify nothing shows a stale framework version.** Grep the app (templates, views, `web/src`, docs, tests) for the old version string. Every place that displays or embeds the framework version must read it from `.offrails/VERSION` at boot or build time, never a literal. Run the app's own post-upgrade checks, if its `AGENTS.md` lists any under "App-specific notes".
+9. Report what changed, in product terms where it matters.
