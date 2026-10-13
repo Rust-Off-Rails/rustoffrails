@@ -386,6 +386,7 @@ Redeploy the previous image (`fly deploy --image <prev>`, `kamal rollback <versi
 ## Pre-deploy checklist (agent)
 
 - [ ] Definition of Done passes (both DB backends).
+- [ ] **CI is green on the exact commit you deploy** (`gh run list -L 1 --json headSha,conclusion`). A local DoD doesn't replace it: CI builds from a clean checkout and catches what your machine hides (e.g. a CSS file that only exists locally).
 - [ ] `docker build` succeeds locally, and `/up` returns 200 from the container.
 - [ ] Every new env var is in `.env.example`, `Config`, and the target's config, and you've told the human exactly which secrets to set.
 - [ ] Migrations follow expand/contract, and `down` was tested.

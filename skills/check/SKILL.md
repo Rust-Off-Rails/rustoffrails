@@ -9,7 +9,7 @@ argument-hint: "[--deep]"
 Only for Rust off Rails apps (a `.offrails/` directory exists).
 
 1. Read the app's `AGENTS.md` for `FRONTEND_MODE` and `ISLANDS`.
-2. Run every command in `.offrails/workflow.md#definition-of-done` for that mode, in order. For Postgres: use `TEST_DATABASE_URL` if set. Otherwise, if Docker is available, run `docker compose up -d postgres` and use the URL from the app's `AGENTS.md`. If neither works, say that Postgres was skipped. Never claim it passed.
+2. Run every command in `.offrails/workflow.md#definition-of-done` for that mode, in order. For Postgres: use `TEST_DATABASE_URL` if set. Otherwise, if Docker is available, run `docker compose up -d db` and use the URL from the app's `AGENTS.md`. If neither works, say that Postgres was skipped. Never claim it passed.
 3. Fix failures per "When something fails" in `workflow.md`, then rerun from the first failing step.
 4. Run the gates from `.offrails/guides/test-standards.md`:
    - **traceability** (§1): every `AC-…` ID in `product/` is cited by a test;

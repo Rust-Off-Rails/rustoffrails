@@ -10,7 +10,7 @@
 
 ## Which backend where
 
-- **Development:** SQLite. There's nothing to install and `bin/setup` just works. Switch to Postgres locally with `docker compose up -d postgres` and the Postgres URL in `.env` when debugging a Postgres-only issue.
+- **Development:** SQLite. There's nothing to install and `bin/setup` just works. Switch to Postgres locally with `docker compose up -d db` and the Postgres URL in `.env` when debugging a Postgres-only issue.
 - **Test:** SQLite in-memory by default (fast, isolated). `TEST_DATABASE_URL=postgres://…` runs the whole suite on Postgres. **CI runs both**, and both must pass.
 - **Production:** Postgres (managed, from the deploy platform). Single-server apps may run SQLite in production, as Rails 8 does, if the [interview](../interview.md) chose it: the DB lives on a persistent volume and is backed up (Litestream or the platform's volume snapshots).
 

@@ -37,7 +37,7 @@ The plugin's `skills/` and `hooks/` stay out of the app. They're loaded from the
 | `AGENTS.md` | [`blueprints/AGENTS.md`](../blueprints/AGENTS.md), with every `{{…}}` in the header filled in from the interview |
 | `CLAUDE.md` | a single line: `@AGENTS.md` |
 | `.cursor/rules/offrails.mdc` | Cursor already reads `AGENTS.md`; this pins it in every chat. Frontmatter `alwaysApply: true`, body: `Follow AGENTS.md and .offrails/AGENTS.md. All code is written by AI; humans edit product/.` (`.mdc`, not `.md`: Cursor ignores `.md` files in `.cursor/rules/`) |
-| `.github/copilot-instructions.md` | GitHub Copilot: the same two lines in plain Markdown, pointing to `AGENTS.md` |
+| `.github/copilot-instructions.md` | GitHub Copilot: the same body as the Cursor rule (`Follow AGENTS.md and .offrails/AGENTS.md. All code is written by AI; humans edit product/.`), in plain Markdown with no frontmatter |
 | `product/README.md` | [`blueprints/product-README.md`](../blueprints/product-README.md), filled in from the interview |
 | `product/features/` | one spec per feature from the confirmed plan ([`blueprints/feature-spec.md`](../blueprints/feature-spec.md)). They're built after step 9 |
 | `docs/decisions.md` | [`blueprints/decisions.md`](../blueprints/decisions.md) |

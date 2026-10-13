@@ -154,7 +154,7 @@ cargo install --locked cargo-deny                     # or `brew install cargo-d
 # inertia/react/islands: Node 24 LTS (fnm/nvm/mise/Homebrew), then pnpm:
 #   corepack enable pnpm        # Node ≤ 24 ships corepack; Node 25+ doesn't, so there use: npm install -g pnpm
 # Deploy CLIs only for the chosen target: flyctl, kamal (gem), railway, render — installed when DEPLOY_TARGET is set
-# Postgres locally is optional: `docker compose up -d postgres` when testing against it
+# Postgres locally is optional: `docker compose up -d db` when testing against it
 # Optional, any mode: Node ≥ 22.12 + an installed Chrome for .offrails/tools/browser-smoke/run.sh
 #   (puppeteer-core is cached in ~/.cache/offrails, never added to the app; guides/dev-tools.md#browser-smoke)
 ```

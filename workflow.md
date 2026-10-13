@@ -32,7 +32,7 @@ All must pass, in this order. Gates and thresholds are defined in [`guides/test-
 cargo fmt --all
 cargo clippy --all-targets -- -D warnings
 cargo nextest run                                   # SQLite; also re-exports ts-rs types
-TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres cargo nextest run   # Postgres (docker compose up -d postgres): required locally when reachable; CI always runs it
+TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres cargo nextest run   # Postgres (docker compose up -d db): required locally when reachable; CI always runs it
 
 # acceptance-criteria traceability: must print nothing (test-standards.md §1)
 comm -23 <(grep -rhoE 'AC-[a-z0-9_-]+-[0-9]+' product/ | sort -u) \

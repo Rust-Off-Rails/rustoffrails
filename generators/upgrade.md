@@ -42,6 +42,8 @@ For every change, first look for an equivalent the app already has, often built 
 
 List each change with its classification and what it means for this app: files affected, migrations, risk. Wait for the human's yes.
 
+Non-interactive runs (a headless agent, or a request relayed by another agent): proceed only if the human's request explicitly asked for the upgrade and nothing in the plan is outward-facing (no deploys, no production data). Write the plan to `docs/decisions.md` first, so the human can review what was decided.
+
 ## 6. Re-vendor the framework
 
 Replace `.offrails/` with the release, using the same anchored `rsync` as [`new.md` step 1](new.md#1-create-the-project) (with `--delete`), and write `.offrails/VERSION` (framework version, then `vendored <date>`).

@@ -4,6 +4,10 @@ Each entry lists convention changes and what an existing app must do about them.
 
 ## Unreleased
 
+- Docs: the Postgres compose service is `db` everywhere (`docker compose up -d db`); `fingerprint.sh` ignores a `.git` *file* (worktrees, submodules); the Copilot pointer file has an exact body; `generators/upgrade.md` defines a non-interactive path; the pre-deploy checklist requires green CI on the exact commit.
+
+**App migration:** none required. If your app's docs or scripts say `docker compose up -d postgres`, use `db`.
+
 (nothing yet)
 
 ## 0.4.0 (2026-10-13)
