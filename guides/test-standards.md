@@ -242,7 +242,7 @@ Coverage: 86% (models 94%, policies 100%) · Mutants: 0 surviving (policies)
 
 There are two complementary smokes:
 
-- **The app's own flows** (this section): `tests/e2e/` or `web/e2e/`, written per app, covering the spec's critical flows.
+- **The app's own flows** (this section): `tests/e2e/` or `web/e2e/`, written per app, covering the spec's critical flows. A fresh app from `new` has no flows yet, so the package is created with the **first critical flow** (`generators/authentication.md`, or the first `scaffold` when there are no accounts). Until then the kernel smoke below covers the browser.
 - **The kernel pages** (`/dev`, `/dev/mailbox`, `/admin/jobs`): `.offrails/tools/browser-smoke/run.sh`, shipped by the framework ([dev-tools](dev-tools.md#browser-smoke)). It checks styling after boosted navigation and Back/Forward behavior, and needs no per-app code.
 
 Run both after any UI-affecting change.
@@ -261,7 +261,7 @@ Run both after any UI-affecting change.
 
 1. **Styling is applied:** the computed style of a known element (for example, the primary button's `backgroundColor` is not `rgba(0, 0, 0, 0)`).
 2. **The flow works through the UI:** fill and submit the forms, upload files, follow links and boosted navigation.
-3. **History:** state after Back and Forward, including Back after a delete (expect the 404 page, not the old record).
+3. **History:** state after Back and Forward, including Back after a delete (expect the 404 page, not the old record) **and Forward from that 404** (expect the page you came from, not a stale 404).
 4. **Realtime**, if present: two browser contexts, one acting and one watching.
 5. **Console:** no errors, uncaught exceptions or CSP violations (collect `console` errors and `pageerror`). Assert this before any step that deliberately loads a 404.
 

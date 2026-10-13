@@ -69,7 +69,7 @@ impl TestApp {
     pub async fn drain_all_jobs(&self) -> Drained;       // also runs `scheduled` jobs early
     pub async fn assert_enqueued<W: Worker>(&self, pred: impl Fn(&W) -> bool);
     pub async fn refute_enqueued<W: Worker>(&self);
-    pub async fn enqueued<W: Worker>(&self) -> Vec<(JobInfo, W)>;
+    pub async fn enqueued<W: Worker>(&self) -> Vec<(job::Model, W)>;
     pub async fn perform_job<W: Worker>(&self, w: W) -> anyhow::Result<Outcome>;
     pub fn sent_emails(&self) -> Vec<Email>;            // Mailer::Memory's outbox
     pub fn query_count(&self) -> usize;                  // SQL statements so far
@@ -100,7 +100,7 @@ impl TestResponse {
 ### Database per test
 
 - **Default (SQLite):** `sqlite::memory:` with `max_connections(1)`, `min_connections(1)`, built through `kernel::db::connect`, then `Migrator::up(&db, None)`. It's isolated by construction and takes milliseconds.
-- **`TEST_DATABASE_URL=postgres://…/postgres` set:** connect to it, `CREATE DATABASE test_<crate>_<uuid-simple>` (the crate name from `env!("CARGO_PKG_NAME")`, `-` → `_`, so apps sharing a Postgres server never touch each other's databases), connect to that database, and migrate. `Drop` runs `DROP DATABASE … WITH (FORCE)` on a **dedicated `std::thread` with its own current-thread runtime, joined** before `Drop` returns. A task spawned on the test's runtime is cancelled when that runtime shuts down, and the database leaks. Anything left over (a killed run) is removed by `app task test_db_cleanup`, which drops only `test_<crate>_<hex>` databases with **no open connections** (`pg_stat_activity`), so it's safe while another suite is running.
+- **`TEST_DATABASE_URL=postgres://…/postgres` set:** connect to it, `CREATE DATABASE test_<crate>_<uuid-simple>` (the crate name from `env!("CARGO_PKG_NAME")`, `-` → `_`, so apps sharing a Postgres server never touch each other's databases), connect to that database, and migrate. `Drop` runs `DROP DATABASE … WITH (FORCE)` on a **dedicated `std::thread` with its own current-thread runtime, joined** before `Drop` returns. A task spawned on the test's runtime is cancelled when that runtime shuts down, and the database leaks. Anything left over (a killed run) is removed by `app task test_db_cleanup`, which calls `kernel::db::drop_idle_test_databases`: it drops only `test_<crate>_<hex>` databases with **no open connections** (`pg_stat_activity`), so it's safe while another suite is running. Both the per-test drop and the cleanup SQL live in `kernel/db.rs`, since raw SQL outside the kernel is a DoD failure.
 - Measured in the reference app (38 tests): the SQLite suite takes ~0.2–1 s, and the Postgres run (one `CREATE DATABASE` per test) takes 3–30 s, depending on machine load.
 - Never share a database between tests. Never depend on test order.
 
@@ -179,7 +179,7 @@ async fn logged_in_user_can_add_a_book() {
 - For each resource, cover the happy path, a validation failure (422 + message shown), anonymous access (redirect to login) and another user's record (404/403).
 - Assert on what the user sees (status, redirect, text, email, JSON shape), not on internals.
 - Unit tests next to code: `validate()` edge cases, policies (`can_edit` truth tables), pure helpers.
-- **No sleeping.** Jobs: `drain_jobs`. Runtime/background behavior: `wait_until("what", || async { … })` (support.rs; polls every 20ms, 10s deadline). The plugin hook flags `sleep(` in tests. Time-dependent logic: pass `now: DateTimeUtc` into the model fn instead of calling `Utc::now()` deep inside, and pass a fixed time in tests.
+- **No sleeping.** Jobs: `drain_jobs`. Runtime/background behavior: `wait_until("what", async || { … })` (support.rs: `pub async fn wait_until(what: &str, f: impl AsyncFn() -> bool)`; an async closure can borrow the test's locals, which `|| async {}` can't; polls every 20ms, 10s deadline). The plugin hook flags `sleep(` in tests. Time-dependent logic: pass `now: DateTimeUtc` into the model fn instead of calling `Utc::now()` deep inside, and pass a fixed time in tests.
 
 ## Frontend tests (inertia / spa)
 

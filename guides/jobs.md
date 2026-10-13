@@ -358,7 +358,7 @@ Tests run in **manual mode**: inserts write rows, and nothing executes until the
 | `app.refute_enqueued::<W>().await` | Panics if any `available`/`scheduled` `W` exists |
 | `app.enqueued::<W>().await -> Vec<(job::Model, W)>` | Rows + decoded args, for assertions on schedule, tags or priority |
 | `app.perform_job(w).await -> anyhow::Result<Outcome>` | Round-trips `w` through JSON (catching serde mistakes), then calls `perform` with a synthetic `JobInfo`. Unit-tests one worker |
-| `wait_until("what", \|\| async { … }).await` (support.rs) | Awaits a condition (polled every 20ms, 10s deadline). The only way runtime tests wait; never `sleep` |
+| `wait_until("what", async \|\| { … }).await` (support.rs, `f: impl AsyncFn() -> bool`) | Awaits a condition (polled every 20ms, 10s deadline). The only way runtime tests wait; never `sleep` |
 
 Tests assert on **outcomes** (email sent, row changed). Assert on the queue only when scheduling is the spec ("digest is sent at 8am", "retry in an hour").
 

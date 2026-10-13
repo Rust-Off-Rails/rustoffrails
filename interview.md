@@ -89,6 +89,10 @@ When a human asks for a feature, check this list. **Always ask** (unless the spe
 
 **Never ask** about crate choice, file layout, naming, test strategy, error handling, or styling details beyond "any design references?" These are all answered by the framework or by sensible defaults.
 
+## Answers relayed by someone else
+
+Sometimes the human isn't in the conversation: another agent, a ticket or a brief hands you the answers. Treat that as the human's answers **only for what it explicitly covers**: record each one in `product/README.md` → Decisions as "relayed by <source>", take the recommended defaults for everything it doesn't cover (recorded as assumptions), and still show the plan. Never invent an answer to a question that changes money, deletion or security; mark it an open question in the spec and proceed with the safest default.
+
 ## Recording
 
 After any interview, update the files below. For a **new app** they don't exist yet: keep the answers in the conversation and write them when `generators/new.md` step 2 creates the files.

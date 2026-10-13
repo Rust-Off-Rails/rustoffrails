@@ -26,6 +26,33 @@ Spec: `guides/channels.md` (protocol, transports, security), `guides/realtime.md
 6. **Fallback transports.** Add the four routes (`/socket/sse`, `/socket/sse/{conn}`, `/socket/poll`, `/socket/poll/{conn}` GET+POST) with `ROUTES` rows, and the handlers calling `kchannels::sse_open` / `relay_post` / `poll_open` / `poll_get`.
 7. **Tests:** port `support::Ws` to offrails.v1, add `wire_test.rs` and the resume/session cases in `kernel_pubsub_test.rs`, and `tests/e2e/realtime.spec.ts` (channels.md#testing).
 
+### Upgrading apps from any agent
+- **`generators/upgrade.md`**: the upgrade recipe, agent-neutral (Claude Code, Codex, opencode, Cursor). `/offrails:upgrade` now runs it.
+- **`offrails upgrade [--check]`** in an app: compares content fingerprints with the installed framework, then launches Claude Code (`/offrails:upgrade`), opencode or Codex with the recipe, or prints the prompt. `offrails new` supports opencode too.
+- **Vendoring:** the `rsync` excludes are anchored (`/skills`, `/hooks`, `/evals`, `/brand`…), so `tools/brand/` is kept, and `--delete` removes files dropped upstream. Vendor a **release tag**, never a moving working tree. `.github/` is vendored on purpose, so fingerprints match the release.
+
+**App migration:** none required. Next time you upgrade, vendor with the anchored excludes (`generators/new.md` step 1); `tools/brand/` reappears in `.offrails/`.
+
+### Fixes from the Linkdrop build (a fresh agent, magic-link accounts)
+- **`kernel::db::ping`** (for `/up`) and **`kernel::db::drop_idle_test_databases`** (for `test_db_cleanup`): no raw SQL outside the kernel.
+- **Panics** render the standalone 500 page via `CatchPanicLayer::custom(error::panic_response)`.
+- **Pending-migrations guard** is layered after the fallback, so unknown paths show the page too.
+- **`/dev/mailers`** answers 301 explicitly (`Redirect::permanent` is 308).
+- **Magic links:** `consume` is one transaction returning user, session and token; first-login user creation uses `ON CONFLICT DO NOTHING` (a unique violation aborts a Postgres transaction; a general rule in models.md); `Option<CurrentSession>` needs `OptionalFromRequestParts` in axum 0.8; token pages send `Cache-Control: no-store` and `Referrer-Policy: no-referrer`. The variant is now verified (168 tests, both databases, real browser).
+- **htmx:** a 422 re-render sends `HX-Push-Url: false`, so the address bar keeps the form's URL.
+- **Error pages** load `app.js`, so Forward from a 404 works; test-standards §9 checks it.
+- **Tests:** `wait_until(what, f: impl AsyncFn() -> bool)`; `enqueued` returns `(job::Model, W)`; per-email rate limits are tested across IPs with `APP_TRUSTED_PROXY` + `X-Forwarded-For`.
+- **Docs:** `#[rustfmt::skip]` on `ROUTES`; kernel pages use no `confirm()` dialogs (`data-confirm` pattern for app pages); the e2e package arrives with the first critical flow; port checks with `lsof -sTCP:LISTEN`; direct TLS is added on first use; dates are UTC; guidance for interview answers relayed by another agent.
+
+**App migration** (reconcile, don't re-create):
+1. *Detect:* `grep -rn "execute_unprepared" src/controllers src/tasks`. *Converge:* move each into `kernel::db` (`ping`, `drop_idle_test_databases`) and call those.
+2. *Detect:* `CatchPanicLayer::new()` in `src/routes.rs`. *Converge:* `CatchPanicLayer::custom(error::panic_response)`, rendering `errors/500.html`; add a test that a panicking handler returns the 500 page.
+3. *Detect:* in development, `GET /no-such-path` with a pending migration returns 404 instead of the pending page. *Converge:* apply `migrations::guard` after `.fallback(...)`.
+4. *Detect:* `GET /dev/mailers` returns 308. *Converge:* return 301 explicitly.
+5. Magic-link apps: *detect* a sign-up path that catches a unique violation inside a transaction. *Converge:* `on_conflict_do_nothing_on([Column::Email])` + select. Add `no-store` and `Referrer-Policy: no-referrer` to the token pages, with a test.
+6. htmx apps: *detect* a 422 re-render without `HX-Push-Url: false`. *Converge:* set it in the shared re-render helper; add a request test asserting the header on a 422 from an htmx request.
+7. *Detect:* `templates/errors/*.html` without `/static/app.js`. *Converge:* add `<script src="/static/app.js" defer></script>`; extend the browser smoke with Forward from a 404.
+
 ## 0.3.0 (2026-10-13)
 
 The open-source release. Rust off Rails is public at https://github.com/Rust-Off-Rails/rustoffrails and installs with one line: `curl -fsSL https://rustoffrails.org/install.sh | sh`.

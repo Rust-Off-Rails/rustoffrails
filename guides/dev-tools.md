@@ -13,7 +13,7 @@ In development the app serves a toolbox at `/dev`. It's for the human clicking a
 | `/admin/jobs` | The jobs dashboard (also in production, behind admin access) | [jobs-dashboard](jobs-dashboard.md) |
 | `GET /dev/routes?q=` | The `ROUTES` table: method, path, handler, access badge. One GET search box over all three columns | [routing](routing.md) |
 | `GET /dev/system` | `APP_ENV`, database backend + redacted host/file, `FRONTEND_MODE`, queues, inline worker, `SMTP_URL` configured or not, crate version + git sha (`APP_REVISION`), uptime; migrations applied and **pending** (`Migrator::get_applied_migrations` / `get_pending_migrations_read_only`, sea-orm-migration 2.0: the read-only variant never creates `seaql_migrations`) | here |
-| `GET /dev/mailers` | 301 → `/dev/mailbox/previews` (previews live in the mailbox now) | [mailers](mailers.md#previews) |
+| `GET /dev/mailers` | 301 → `/dev/mailbox/previews` (previews live in the mailbox now). Build it as `(StatusCode::MOVED_PERMANENTLY, [(header::LOCATION, "/dev/mailbox/previews")])`: axum's `Redirect::permanent` sends **308** | [mailers](mailers.md#previews) |
 
 ## Files
 
@@ -48,6 +48,10 @@ templates/kernel/mailbox/       index.html, _list.html, _message.html
 - In development the app layout's footer (htmx) or `Layout` component (inertia/spa) shows a small "Dev tools" link to `/dev`. Render it only when the server says `env == development` (`Ctx.dev` / a shared prop).
 - `bin/dev` migrates first, then prints `→ http://localhost:${PORT}/dev (mailbox, jobs, routes)`.
 
+## No `confirm()` dialogs in kernel pages
+
+Kernel pages aren't boosted, so `hx-confirm` never fires there, and a native `confirm()` dialog would block the browser smoke tool. Destructive kernel actions are either cheap and dev-only (mailbox **Clear all**, deleting a job: no prompt), or go through a **server-rendered confirmation page** ("Retry 1,234 jobs?", which posts back with `confirmed=1`). If an app page needs a quick confirm, use `data-confirm="…"` on the form, handled in `static/app.js` (`submit` listener calling `confirm()`), and make browser tests accept dialogs (`page.on('dialog', d => d.accept())`).
+
 ## Pending migrations
 
 Like Rails' pending-migration error page and Phoenix's "There are pending migrations" screen: a database behind the code shows a clear page, not a "no such table" 500.
@@ -65,7 +69,7 @@ pub async fn run(State(s): State<AppState>, Form(f): Form<RunForm>) -> Result<Re
 
 | Environment | Behavior |
 |-------------|----------|
-| development | `routes.rs` adds `app.layer(from_fn_with_state(state.clone(), migrations::guard))` after the routes are merged. Every request except `/static/*`, `/up` and `POST /dev/migrations` gets a **503 "N pending migrations" page** (kernel layout, so it works before any app table exists) listing them, with a **Run migrations** button: a CSRF-protected form posting `return_to=<current path>` to `/dev/migrations`, which runs `Migrator::up`, flashes "Ran N migrations." and redirects back (only to same-site paths) |
+| development | `routes.rs` adds `app.layer(from_fn_with_state(state.clone(), migrations::guard))` **after** the routes and the `.fallback(...)` are added (a layer only wraps what exists when it's applied, so a fallback added later would skip the guard and unknown paths would 404 instead of showing the page). Every request except `/static/*`, `/up` and `POST /dev/migrations` gets a **503 "N pending migrations" page** (kernel layout, so it works before any app table exists) listing them, with a **Run migrations** button: a CSRF-protected form posting `return_to=<current path>` to `/dev/migrations`, which runs `Migrator::up`, flashes "Ran N migrations." and redirects back (only to same-site paths) |
 | production | **Never auto-migrates**: the entrypoint runs `app db migrate` before `serve` ([deployment](deployment.md)). The guard and `/dev/migrations` aren't mounted. `GET /up` returns **503 "pending migrations"** while any is pending, so a deploy that skipped migrating never goes healthy |
 | worker (`app worker`, inline worker) | Before starting, checks `pending()`. If any are pending it logs **once** `pending migrations: run \`app db migrate\`; worker waiting`, rechecks every 5s (stopping cleanly on shutdown), then logs `migrations applied; worker starting`. It never spams errors against missing tables |
 

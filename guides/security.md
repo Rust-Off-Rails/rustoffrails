@@ -105,7 +105,7 @@ Rails 8 `rate_limit to: 10, within: 3.minutes` equivalent:
   `ClientIp::key(route)` builds the key.
 - It's in-process, so the limit is per instance. That's acceptable, and documented in decisions. If a spec needs global limits, use the escape hatch to the `cache_entries` table.
 - Applied to: login, password reset request, magic-link request (by IP **and** by email: `format!("login_links#create:{email}")`), sign-up, and any endpoint that sends email or costs money.
-- Tests run without a socket, so every request shares the `"<route>:unknown"` key. One `TestApp` can exhaust a limit in a loop (the 11th attempt → 429) without any IP spoofing.
+- Tests run without a socket, so every request shares the `"<route>:unknown"` key. One `TestApp` can exhaust a limit in a loop (the 11th attempt → 429) without any IP spoofing. To test a **per-email limit across IPs**, build the `TestApp` with `APP_TRUSTED_PROXY=true` and send a different `X-Forwarded-For` on each request: the IP keys differ, the email key is shared, and the 11th request still gets 429.
 
 ## XSS
 

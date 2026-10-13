@@ -25,7 +25,7 @@ The cost is generation time, not runtime: an idle queue polls once a second, and
 ```sh
 cargo new <dir> --name <crate_name> && cd <dir>   # also runs git init (edition 2024); --name only if the dir differs
 rsync -a --delete --exclude /.git --exclude /.claude-plugin --exclude /skills --exclude /hooks --exclude /evals --exclude /brand "$FW"/ .offrails/
-date -u +"vendored %F" >> .offrails/VERSION    # first line stays the framework version
+date -u +"vendored %F" >> .offrails/VERSION    # first line stays the framework version; dates are UTC everywhere (VERSION, docs/decisions.md, CHANGELOG)
 ```
 
 The plugin's `skills/` and `hooks/` stay out of the app. They're loaded from the installed plugin, which works for every app at once. Keep exactly these exclusions: `hooks/fingerprint.sh` compares `.offrails/` with the plugin by content using the same list, so excluding anything else (the framework's `.gitignore`, the README's "Developing the framework" section) would report permanent drift. Those files are harmless in `.offrails/`.
@@ -55,7 +55,7 @@ Then fix what it generated:
 1. `migration/Cargo.toml`:
    - **delete the `rust-version` line.** Edition 2024's MSRV-aware resolver would otherwise downgrade dependencies to match it;
    - set `sea-orm-migration` to `default-features = false` with features `["runtime-tokio-rustls", "sqlx-sqlite", "sqlx-postgres"]`. The default `cli` feature pulls clap and sea-orm-cli's runner into the app's tree, and the app binary already has `db migrate|rollback|status`.
-2. Delete `migration/src/main.rs` (it needs the `cli` feature; `sea-orm-cli migrate generate` only writes files and doesn't use it), and delete `migration/src/m20220101_000001_create_table.rs` with its `mod` line in `migration/src/lib.rs`.
+2. Delete `migration/src/main.rs` (it needs the `cli` feature; `sea-orm-cli migrate generate` only writes files and doesn't use it), and delete `migration/src/m20220101_000001_create_table.rs` with its `mod` line in `migration/src/lib.rs`. Also delete `migration/README.md` (it documents `cargo run -- generate`, which no longer exists) and the migration crate's `tokio` dependency (only `main.rs` used it).
 3. Leave the migrations list as an **empty multi-line** `vec!`, with the opening `vec![` and the closing `]` on separate lines. `sea-orm-cli migrate generate` only registers new migrations in that shape. A one-line `vec![]` makes it silently skip registration, which leaves `mod` lines but no `Box::new(...)`.
 
 ```rust
@@ -86,7 +86,7 @@ opt-level = 1          # faster tests, still-fast builds
 cargo add --path migration
 ```
 
-**Crates.** These are the commands verified for `htmx` mode. The rest of [`stack.md`](../stack.md#blessed-crates) arrives later, with the feature that needs it.
+**Crates.** Run them one per line as written. Don't loop over a quoted list in zsh: it doesn't word-split `$var`, so `for c in $crates` passes the whole list as one argument (use bash, or one `cargo add` per line). These are the commands verified for `htmx` mode. The rest of [`stack.md`](../stack.md#blessed-crates) arrives later, with the feature that needs it.
 
 ```sh
 cargo add tokio --features full
@@ -184,8 +184,8 @@ Generate these in order. Each module compiles against the ones before it. The or
     - `dev::router()` plus `kernel::mailbox::router(crate::mailers::previews::PREVIEWS)`, merged only when `APP_ENV=development`, then the `migrations::guard` layer (development only).
 
     Each kernel router (jobs web, mailbox, dev) ends with `.layer(kernel::ui::no_store())`.
-11. `src/tasks/mod.rs`, then `tasks/seed.rs` (empty and idempotent) and `tasks/test_db_cleanup.rs` (drops this app's leftover, idle `test_<crate>_<hex>` Postgres databases; see [testing](../guides/testing.md#database-per-test))
-12. `src/lib.rs` (`pub mod` lines only), `src/main.rs`: the full CLI from [`cli.md`](../cli.md). `serve` uses `into_make_service_with_connect_info::<SocketAddr>()`, which `ClientIp` needs for rate limiting, and shuts down gracefully on Ctrl-C or SIGTERM. It serves plain HTTP/1.1 + h2c with `axum::serve`, or HTTPS (h2 + http/1.1 via ALPN) with `axum-server` when `APP_TLS_CERT`/`APP_TLS_KEY` are set ([deployment](../guides/deployment.md#direct-tls-optional)). Include `app health` (the container healthcheck: `GET /up` on 127.0.0.1:$PORT, no curl needed in the image).
+11. `src/tasks/mod.rs`, then `tasks/seed.rs` (empty and idempotent) and `tasks/test_db_cleanup.rs` (calls `kernel::db::drop_idle_test_databases`, which drops this app's leftover, idle `test_<crate>_<hex>` Postgres databases; see [testing](../guides/testing.md#database-per-test)). `kernel/db.rs` also has `ping(db)` for `/up`, so no SQL lives outside the kernel
+12. `src/lib.rs` (`pub mod` lines only), `src/main.rs`: the full CLI from [`cli.md`](../cli.md). `serve` uses `into_make_service_with_connect_info::<SocketAddr>()`, which `ClientIp` needs for rate limiting, and shuts down gracefully on Ctrl-C or SIGTERM. It serves plain HTTP/1.1 + h2c with `axum::serve`. Direct TLS is **not** part of `new`: `axum-server` + `rustls` are added the first time a deploy needs it ([deployment](../guides/deployment.md#direct-tls-optional)). Until then, `Config` still parses `APP_TLS_CERT`/`APP_TLS_KEY`, and `serve` refuses to start with a clear message if they're set, so a misconfigured box fails loudly instead of serving plain HTTP. Include `app health` (the container healthcheck: `GET /up` on 127.0.0.1:$PORT, no curl needed in the image).
 
 ## 5. Frontend by mode
 

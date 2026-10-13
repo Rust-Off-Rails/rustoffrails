@@ -186,6 +186,7 @@ match am.insert(db).await {
 }
 ```
 
+- **Inside a transaction on Postgres, don't rely on catching the violation:** the failed statement aborts the whole transaction, and every later statement in it fails with "current transaction is aborted". When the insert is one step of a larger transaction (sign-up on first login, get-or-create), use `Entity::insert(am).on_conflict_do_nothing_on([Column::Email]).exec_without_returning(&txn)` (or `try_insert` and match `TryInsertResult::Conflicted`), then select the row. SQLite doesn't have this failure mode, so only the Postgres run catches it.
 - **Composite uniqueness** ("one review per reader per book") works the same way: a unique index on `(book_id, author_id)`, and the violation maps to a `base` error (`Errors::single("base", "You have already reviewed this book")`). Return early **before** any broadcast or enqueue in the same transaction, so nothing announces the failed insert.
 - Validations that need the DB ("author must be active") go in the model's `create` and return `AppError::Invalid`.
 - **Optional fields arrive as strings.** `Params` fields are all `String` (with `#[serde(default)]`), so a re-rendered form shows exactly what was typed. `validate` turns `""` into `None`, parses with `NaiveDate::parse_from_str(s, "%Y-%m-%d")` (an `<input type="date">` sends that format) or `s.parse::<i32>()`, and reports `is not a date` or `must be between 1 and 5`. `From<&Model> for Params` prefills edit forms (`published_on.map(|d| d.to_string())`).

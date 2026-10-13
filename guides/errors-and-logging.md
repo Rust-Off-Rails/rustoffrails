@@ -8,7 +8,7 @@
 | `public/404.html`, `500.html` | `templates/errors/404.html`, `500.html` (htmx); `errors/Show` page (inertia); JSON (api) |
 | `Rails.logger` | `tracing` |
 | `config.log_tags = [:request_id]` | `TraceLayer` span with `request_id` |
-| `/up` | `GET /up`: runs `SELECT 1`, returns 200 or 503 |
+| `/up` | `GET /up`: `kernel::db::ping` (`SELECT 1`), returns 200 or 503 |
 | Sentry/Honeybadger gems | Only if the interview or a spec asks (log the decision) |
 
 ## `src/error.rs`
@@ -62,10 +62,10 @@ impl From<DbErr> for AppError {
   3. It sits **outside** the CSRF layer. tower-http's `CsrfLayer::with_rejection_response(|_| AppError::Forbidden.into_response())` makes CSRF rejections flow through the same shaping.
 
   Handlers just return `AppError`. This is the one place error responses are shaped.
-- **Error pages never touch the DB** and never need the layout's current user. They're standalone Askama templates: `templates/errors/{404,403,500}.html`, with no `{% extends %}` and no `ctx`. The page links `/static/app.css` without a digest. `500.html` takes `detail: Option<String>`, which is set only in development.
+- **Error pages never touch the DB** and never need the layout's current user. They're standalone Askama templates: `templates/errors/{404,403,500}.html`, with no `{% extends %}` and no `ctx`. The page links `/static/app.css` without a digest, and loads `/static/app.js` (`defer`), which reloads on Back/Forward (`pageshow` with `persisted`, and `popstate` when htmx isn't on the page). Without it, going Forward from a 404 changes the URL but not the page. `500.html` takes `detail: Option<String>`, which is set only in development.
 - **Never leak internals.** 500 bodies are generic in every environment. Development may add the error chain to the HTML 500 page when `config.env == Development`, and nowhere else.
 - **Log every 500** at `error!` with the full chain (`{err:#}` / `?err`) inside the request span, so it carries the `request_id`. Log 4xx at `debug!`, or not at all.
-- Panics: add `tower_http::catch_panic::CatchPanicLayer` (feature `catch-panic`) so a panic becomes a logged 500, not a dropped connection.
+- Panics: `tower_http::catch_panic::CatchPanicLayer::custom(error::panic_response)` (feature `catch-panic`), so a panic becomes a logged 500 rendered with the standalone `errors/500.html` page, not a dropped connection or a bare text body. It sits outside `shape_errors`, so `shape_errors` can't style it: `panic_response(Box<dyn Any + Send>) -> Response<Body>` logs the panic message (`String` or `&str` payload) at error level and renders the page itself, without detail.
 
 ## Logging
 
@@ -91,7 +91,7 @@ match config.log_format {
 
 ## Health check
 
-`GET /up` (in `controllers/health.rs`) runs `db.execute_unprepared("SELECT 1")` with a 2s timeout and returns `200 "ok"` or `503`. It doesn't require auth, CSRF, sessions, or logging at info level. Deploy healthchecks point here.
+`GET /up` (in `controllers/health.rs`) calls `kernel::db::ping(&db)` (a `SELECT 1`; raw SQL stays in the kernel) with a 2s timeout and returns `200 "ok"`, or `503` when the database doesn't answer or migrations are pending ([dev-tools](dev-tools.md#pending-migrations)). It doesn't require auth, CSRF, sessions, or logging at info level. Deploy healthchecks point here.
 
 ## Gotchas agents get wrong
 

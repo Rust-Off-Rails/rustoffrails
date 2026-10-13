@@ -89,6 +89,7 @@ pub enum Access { Public, User, Admin, Dev }
 
 /// The route table. `app routes` prints it and writes docs/routes.md. Tests assert every entry is
 /// routable (not 404/405) in development and enforce its access level, so it can't drift.
+#[rustfmt::skip] // keep the table aligned; cargo fmt would explode each tuple onto five lines
 pub const ROUTES: &[(&str, &str, &str, Access)] = &[
     ("GET",  "/",                 "home::index",              Access::Public),
     ("GET",  "/up",               "health::up",               Access::Public),
@@ -118,7 +119,7 @@ Outermost first. In code, `.layer` calls run bottom-up, so they appear in the **
 
 1. `SetRequestIdLayer::new(x-request-id, MakeRequestUuid)`, then `TraceLayer::new_for_http().make_span_with(...)` (span fields `method`, `path`, `request_id`), then `PropagateRequestIdLayer`
 2. `kernel::security::middleware` (`from_fn_with_state(security::Hardening::new(&config), …)`): the header matrix, `no-store` for authenticated responses, production cookie hardening ([security](security.md#the-header-matrix)). It sits **outside** the panic and timeout layers, so their 500 and 408 responses are hardened too
-3. `CatchPanicLayer::new()`
+3. `CatchPanicLayer::custom(error::panic_response)` ([errors](errors-and-logging.md))
 4. `TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, 30s)` (`TimeoutLayer::new` is deprecated in tower-http 0.7)
 5. `CompressionLayer::new()`
 6. `error::shape_errors` (`from_fn_with_state`)

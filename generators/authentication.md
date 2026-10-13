@@ -33,7 +33,7 @@ Write `product/features/accounts.md` from [`blueprints/feature-spec.md`](../blue
    - `user.rs`: entity without `Serialize`; `SignupParams` + `validate`; `normalize_email`; `check_password`; `hash_password`/`verify_password` on `spawn_blocking`; `find`; `find_by_email`; `create` (unique violation → "has already been taken"); `authenticate` with the `LazyLock` dummy digest; `update_password`;
    - `session.rs`: `start → (Model, raw)`, `find_by_token(db, raw, now)` (one `find_also_related` query, idle-expiry filter), `touch` (hourly), `destroy`, `destroy_all_for_user`, `delete_expired`;
    - `password_reset.rs`: `issue(db, user_id, now) → raw`, `find_valid`, `consume` (validate the password, then one transaction: update, delete resets and sessions), `delete_stale`;
-   - **or** `login_link.rs`: `issue(db, email, now) → raw`, `find_valid`, `consume(db, raw, now) → user` (delete the row, find or create the user, in one transaction), `delete_expired`.
+   - **or** `login_link.rs`: `issue(db, email, now) → raw`, `find_valid`, `consume(db, raw, now) → Option<(User, Session, raw_token)>` (one transaction: delete the row, find or create the user with `ON CONFLICT DO NOTHING`, start the session), `delete_expired`.
 
    Register them in `models/mod.rs` with `pub type User = user::Model;`.
 5. **Extractors** in `controllers/application.rs`:
@@ -75,4 +75,5 @@ Write `product/features/accounts.md` from [`blueprints/feature-spec.md`](../blue
       - an idle session expires;
       - the dev mailbox hint appears in development and is absent in production and test configs;
     - magic-link: the required list in [auth.md](../guides/auth.md#required-tests).
+    - **the app's first real-browser smoke** (it's the first critical flow): `tests/e2e/` for htmx (`web/e2e/` in TS modes) per [test-standards §9](../guides/test-standards.md#9-real-browser-smoke), with one spec: sign up or request a link → open it from `/dev/mailbox/latest.json` → logged in → log out. `page.on('dialog', d => d.accept())` in the setup, so a `data-confirm` never hangs it.
 14. Log decisions in `docs/decisions.md` (variant, any deviation). Run the [security checklist](../guides/security.md#checklist), then the Definition of Done. Smoke the flows in a real browser: sign up, log out, log in, and request a reset and open it from `/dev/mailbox` (see [test-standards §9](../guides/test-standards.md#9-real-browser-smoke)).
