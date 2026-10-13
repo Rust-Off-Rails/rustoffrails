@@ -17,7 +17,7 @@ Read `.offrails/AGENTS.md`, `structure.md`, `stack.md` and `workflow.md`, plus t
 - Module rules: models import no controllers or views; views do no DB access; no `services/` directory.
 
 **Stack** (`stack.md`)
-- `Cargo.toml` / `web/package.json` contain no banned crates or packages. Any unlisted crate has a `docs/decisions.md` entry.
+- `Cargo.toml` / `web/package.json` contain no banned crates or packages (`cargo deny check bans` enforces the list mechanically via `deny.toml`; check direct dependencies by hand too). Any unlisted crate has a `docs/decisions.md` entry.
 - `.offrails/` is unmodified (compare with `.offrails/VERSION` and the plugin copy if available).
 
 **Data**

@@ -4,6 +4,35 @@ Each entry lists convention changes and what an existing app must do about them.
 
 ## Unreleased
 
+### Security as the gold standard: Non-negotiables, the header matrix, automated enforcement
+
+Spec: `guides/security.md` (Non-negotiables, the header matrix, Automated enforcement, Gotchas), plus `blueprints/feature-spec.md` (a `## Security` STRIDE section), `workflow.md`, `guides/test-standards.md` §3, `guides/testing.md` CI, `generators/new.md`, `stack.md`, `structure.md`, `guides/routing.md` and `guides/auth.md`. Plugin: the `/offrails:security` skill and security tripwires in the hooks. Verified on the reference app (branch `security`): 207 tests on SQLite and Postgres 18; cargo-deny `advisories/bans/licenses/sources ok`; gitleaks clean over the history; ZAP baseline 0 FAIL, 0 WARN, 61 PASS; checked in Chrome.
+
+- **`kernel/security.rs`**, one middleware outside the panic and timeout layers:
+  - the full header matrix, adding `object-src 'none'`, COOP and CORP to what was there;
+  - `upgrade-insecure-requests` and HSTS only with an https `APP_URL`;
+  - `no-store` on every authenticated response;
+  - production cookies forced to `Secure; HttpOnly; SameSite=Lax`.
+- **Session cookie:** `__Host-session_token` in production, and production ignores the plain name.
+- **CI:**
+  - a `security` job (cargo-deny + gitleaks over the full history);
+  - the Docker job boots the production image and runs the ZAP baseline;
+  - Dependabot.
+- **Findings fixed:**
+  - the flash cookie had no `Secure` in production;
+  - authenticated pages were cacheable;
+  - panic 500s and timeout 408s had no security headers.
+
+**App migration** (reconcile, don't re-create):
+1. **Header middleware.** Detect: `src/kernel/security.rs`.
+   - Missing: generate it per `guides/security.md#the-header-matrix`. In `routes.rs`, replace the per-header `SetResponseHeaderLayer`s and the `CSP` const with one `.layer(from_fn_with_state(security::Hardening::new(&config), security::middleware))` placed **after** (outside) `CatchPanicLayer`.
+   - If a route sets its own CSP (the mailbox viewer), keep it. The middleware only fills in missing headers.
+2. **Session cookie.** Detect `PROD_COOKIE` in `kernel/session.rs`. Missing: add `name(secure)` and make `read(headers, secure)` accept only `name(secure)`. Update `cookie`/`clear_cookie`, the `load_session` caller and any WebSocket upgrade that reads the cookie. Tests use `ksession::name(config.is_production())`. Deploying logs everyone out once, because the cookie name changes. Say so to the human.
+3. **`tests/app/headers_test.rs`.** Add it (one row per response class the app has), plus `TestApp::request_head`. Production rows use an `https://` `APP_URL`. Make it fail first if the middleware is off.
+4. **Scanner configs.** Add `deny.toml` (copy the reference in `security.md`; keep any `[bans]` the app already has), with `publish = false` in both crates. Add `.gitleaks.toml`, `.zap/rules.tsv` (+ `.zap/.gitignore`) and `.github/dependabot.yml`. Run each scanner locally. Fix findings, or triage them **with a reason** in the config.
+5. **CI.** Add the `security` job and the Docker job's boot + ZAP steps from `guides/testing.md#ci`. Lint with actionlint.
+6. **Feature specs.** Add a `## Security` section to every `product/features/*.md` (`blueprints/feature-spec.md`). Each threat gets a control and a test. A threat without a test is a finding.
+
 ### API-only apps, the `API` axis (REST + OpenAPI, GraphQL), Docker compose, day-one meta and favicons
 
 Spec: `guides/api.md` and `guides/graphql.md` (new), `tools/brand/render.sh` (new), plus `interview.md`, `blueprints/AGENTS.md`, `generators/new.md`, `generators/scaffold.md`, `guides/views.md`, `guides/deployment.md`, `guides/auth.md`, `guides/controllers.md`, `guides/config.md`, `guides/test-standards.md`, `stack.md`, `structure.md`, `cli.md`, `RAILS_MAP.md`. Verified with the `offrails-api-demo` app (`FRONTEND_MODE: api`, `API: both`): 151 tests green on SQLite and Postgres 18, clippy clean, GraphiQL and the Scalar reference checked in Chrome, `docker compose up --build` from scratch plus the `mail` and `worker` profiles, and direct TLS (h2 via ALPN).

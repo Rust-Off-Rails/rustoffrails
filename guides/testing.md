@@ -257,14 +257,43 @@ jobs:
       - uses: taiki-e/install-action@nextest
       - run: cargo nextest run --locked
 
-  docker:                       # the image builds (catches Dockerfile drift before deploy day)
+  security:                     # security.md#automated-enforcement
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with: { fetch-depth: 0 }          # gitleaks scans the whole history
+      - uses: taiki-e/install-action@cargo-deny
+      - name: cargo deny (advisories, licenses, bans, sources)
+        run: cargo deny --locked check
+      - name: gitleaks (secrets in any commit)
+        run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --config /repo/.gitleaks.toml --redact --no-banner
+
+  docker:                       # the image builds AND passes the ZAP baseline in production mode
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
       - uses: docker/build-push-action@v7
-        with: { context: ., push: false, cache-from: type=gha, cache-to: "type=gha,mode=max" }
+        with: { context: ., push: false, load: true, tags: "app:ci", cache-from: type=gha, cache-to: "type=gha,mode=max" }
+      - name: Boot the production image
+        run: |
+          docker run -d --name app --network host -e APP_ENV=production -e PORT=3000 \
+            -e APP_URL=http://localhost:3000 -e "DATABASE_URL=sqlite:///app/storage/ci.sqlite3?mode=rwc" app:ci
+          for _ in $(seq 1 60); do curl -fsS localhost:3000/up && break; sleep 1; done
+          curl -fsS localhost:3000/up
+      - name: OWASP ZAP baseline (fails on any WARN not triaged in .zap/rules.tsv)
+        run: |
+          chmod 777 .zap
+          docker run --rm --network host -v "$PWD/.zap:/zap/wrk:rw" ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t http://localhost:3000 -c rules.tsv -r zap-report.html -m 2
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with: { name: zap-report, path: .zap/zap-report.html, if-no-files-found: ignore }
+      - if: always()
+        run: docker logs app | tail -50
 ```
+
+The security and Docker jobs are actionlint-clean. TS modes add `pnpm --dir web audit --prod` to the frontend job. Run ZAP locally against `app serve` with `APP_ENV=production` and `APP_URL=http://host.docker.internal:$PORT`, adding `--add-host=host.docker.internal:host-gateway` to the ZAP container. Verified: 0 FAIL, 0 WARN, 61 PASS on the reference app.
 
 - In `htmx` mode without islands, delete the frontend steps. Templates are compiled by `cargo`, so CSS isn't needed for tests.
 - `--locked` fails if `Cargo.lock` is stale, and `--frozen-lockfile` does the same for `pnpm-lock.yaml`. Commit both.

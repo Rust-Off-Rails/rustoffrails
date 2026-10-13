@@ -147,6 +147,9 @@ htmx mode (no Node): **htmx 2.x** (`htmx.org@2`; 4.x is not adopted) + **htmx-ex
 ```sh
 cargo install --locked sea-orm-cli cargo-nextest cargo-watch
 cargo install --locked cargo-llvm-cov cargo-mutants   # coverage gate + weekly mutation run (test-standards.md §5)
+cargo install --locked cargo-deny                     # or `brew install cargo-deny` (verified 0.20.2): deny.toml gate
+# gitleaks (verified 8.30.1: `brew install gitleaks`, or CI's ghcr.io/gitleaks/gitleaks:v8.30.1 image): secrets in history
+# OWASP ZAP baseline: Docker image ghcr.io/zaproxy/zaproxy:stable (security.md#automated-enforcement)
 # htmx mode: bin/setup downloads the Tailwind standalone binary to bin/tailwindcss
 # inertia/react/islands: Node 24 LTS (fnm/nvm/mise/Homebrew), then pnpm:
 #   corepack enable pnpm        # Node ≤ 24 ships corepack; Node 25+ doesn't, so there use: npm install -g pnpm
@@ -171,6 +174,7 @@ These pieces are small, easy to get wrong in a generic crate, and central to the
 | `kernel/cluster.rs`    | `guides/channels.md`           | libcluster + Horde: `cluster_nodes` heartbeats, `NOTIFY` bus, rendezvous ownership (Postgres, opt-in) |
 | `kernel/session.rs`    | `guides/auth.md`               | Rails 8 authentication sessions |
 | `kernel/flash.rs`      | `guides/controllers.md`        | `flash[:notice]` (+ the `_errors` cookie in `inertia` mode) |
+| `kernel/security.rs`   | `guides/security.md`           | Rails' default headers + `force_ssl` cookie flags + secure_headers gem: the header matrix, `no-store`, production cookie hardening |
 | `kernel/rate_limit.rs` | `guides/security.md`           | Rails 8 `rate_limit` |
 | `kernel/mailer.rs`     | `guides/mailers.md`            | Action Mailer delivery (`Smtp`/`Local`/`Log`/`Memory`) |
 | `kernel/storage.rs`    | `guides/storage.md`            | Active Storage service |
@@ -178,6 +182,8 @@ These pieces are small, easy to get wrong in a generic crate, and central to the
 | `kernel/inertia.rs`    | `guides/frontend-inertia.md`   | inertia-rails |
 
 ## Banned (don't add these, don't propose them)
+
+Enforced mechanically: `deny.toml` `[bans]` fails CI if any of these appears anywhere in the dependency tree. Crates that healthy dependencies pull in transitively (`lazy_static`, `once_cell`, `async-trait`, `log`) are banned as **direct** dependencies only, which the plugin hook and `/offrails:doctor` check ([security](guides/security.md#automated-enforcement)).
 
 | Banned                                   | Why |
 |------------------------------------------|-----|

@@ -69,6 +69,15 @@ case "$file" in
 esac
 
 case "$file" in
+  Cargo.toml|migration/Cargo.toml)
+    # stack.md "Banned": direct dependencies only (sea-orm-migration's own async-trait use is fine).
+    if sed -n '/^\[\(dev-\)\{0,1\}dependencies\]/,/^\[/p' "$path" | grep -nE '^(diesel|actix-web|rocket|poem|loco-rs|leptos|dioxus|yew|tera|handlebars|minijinja|askama_axum|axum-inertia|lazy_static|once_cell|async-trait|log|config|figment|redis|lapin|rdkafka|elasticsearch)[[:space:]]*=' >/dev/null; then
+      problems+=("Banned crate added to Cargo.toml (stack.md#banned). Use the blessed alternative, or log a decision and ask the human.")
+    fi
+    ;;
+esac
+
+case "$file" in
   tests/*.rs)
     if grep -nE '(tokio::time::sleep|thread::sleep)\(' "$path" >/dev/null; then
       problems+=("sleep in a test (guides/test-standards.md §7). Use drain_jobs, pass now: DateTimeUtc, or await the condition.")

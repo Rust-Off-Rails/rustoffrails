@@ -33,6 +33,9 @@ printf 'x = <div dangerouslySetInnerHTML={{__html: h}} />\n' > "$APP/web/src/A.t
 printf '{@html body}\n' > "$APP/web/src/A.svelte";                            check 2 check-conventions.sh "$(j web/src/A.svelte)" "Svelte {@html} is flagged"
 printf 'tokio::time::sleep(d).await;\n' > "$APP/tests/app/x_test.rs";         check 2 check-conventions.sh "$(j tests/app/x_test.rs)" "sleep in tests is flagged"
 
+printf '[package]\nname = "x"\n[dependencies]\nonce_cell = "1"\n' > "$APP/Cargo.toml";   check 2 check-conventions.sh "$(j Cargo.toml)" "banned crate in Cargo.toml is flagged"
+printf '[package]\nname = "x"\n[dependencies]\naxum = "0.8"\n' > "$APP/Cargo.toml";     check 0 check-conventions.sh "$(j Cargo.toml)" "blessed crate in Cargo.toml passes"
+
 b() { printf '{"tool_input":{"command":"%s"}}' "$1"; }
 check 2 guard-bash.sh "$(b 'pkill -f myapp')"                      "pkill is blocked"
 check 2 guard-bash.sh "$(b 'cd x && killall myapp')"               "killall is blocked"

@@ -21,7 +21,7 @@ You are the app's adversary. Assume every input is hostile, every client is scri
    Any threat without a control *and* a test is a finding.
 3. **Run the scanners** (install them if missing; report versions):
    - `cargo deny check` for advisories, licenses, bans and duplicate sources;
-   - a secret scan of the working tree and git history (`gitleaks detect`, or `trufflehog`);
+   - a secret scan of git history and the working tree (`gitleaks git .` and `gitleaks dir .`; gitleaks 8.30+);
    - `pnpm audit --prod` in TS modes;
    - the **ZAP baseline** against the release build running locally (`docker run … zaproxy … zap-baseline.py -t http://host.docker.internal:$PORT`). Treat every WARN as a finding until it's triaged.
 4. **Verify the response hardening live** (curl every response class: HTML page, JSON, SSE, WebSocket upgrade, kernel page, error page, static asset, redirect):
