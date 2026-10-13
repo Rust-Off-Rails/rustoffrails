@@ -196,6 +196,8 @@ Rules the implementation follows (and tests prove):
 - **Slow consumers are warned, then dropped.** Each topic's channel buffers `TOPIC_BUFFER` (256) frames. At ¾ full the connection gets a `slow` frame; past the buffer it gets `bye` (`too_slow`) and close 1013. The client reconnects and resumes from `since`. One slow phone can't make the server hold memory for everyone.
 - **Idle topics are forgotten.** No local connections and nobody present → the topic (and its actor) is dropped. An actor with no commands for 5 minutes stops by itself.
 - **Presence lists people, not tabs.** Refs are `(node, conn)`. A person joins when their first ref arrives and leaves when their last ref goes. Two tabs = one avatar.
+- **Every join and rejoin gets a full snapshot before any diff.** The server orders the frames (above); the client's `Presence` also defends itself: on each (re)join it marks itself unsynced, **buffers** `joins`/`leaves` until that join's `here` arrives, replaces its state with `here`, applies the buffered diffs, and only then calls `onSync`. Diffs are idempotent (a `joins` for someone already present or a `leaves` for someone absent changes nothing), so overlap between the snapshot and buffered diffs is harmless.
+- **After a server restart, presence converges as clients come back.** The restarted node starts with nobody present; each client reappears when it rejoins, so the first one back sees only itself until the others reconnect. That window is the reconnect backoff (≤ 10 s, **with ±25% jitter** so clients don't return in lockstep), not a bug, but it must close: a test restarts the server with two clients connected and asserts both see both within backoff + 1 s. (Found in a real build: one client briefly saw only itself after a restart.)
 
 ## The connection (`kernel/channels.rs`)
 
@@ -248,7 +250,7 @@ All three transports drive the same `Session`, so joins, authorization, limits, 
 | Logged out | **401** at the handshake |
 | No `offrails.v1` subprotocol offered | the socket opens, gets `bye` `protocol` "subprotocol offrails.v1 required", closes **1002** (browsers hide an HTTP refusal's reason). A client offering only other subprotocols can't connect at all |
 | More than `max_conns_per_user` | `bye` `limit`, close **1008** (HTTP transports: 429) |
-| Join | limits (`max_topics`, `max_joins_per_min`), `authorize`, then **subscribe before computing the reply** (nothing broadcast in between is lost), `ok` with `replay` n, the replayed `event`s, `presence` `here`, then `track` |
+| Join | limits (`max_topics`, `max_joins_per_min`), `authorize`, then **subscribe before computing the reply** (nothing broadcast in between is lost), `track`, then `ok` with `replay` n, the replayed `event`s, and `presence` `here` **computed after `track`**, so the snapshot includes the joiner. Diffs for the topic that the subscription received meanwhile are sent after `here`, never before |
 | Push | `not_joined` unless joined; **re-`authorize`** (a reader removed since joining is refused and leaves the topic); the room's `In` type (`bad_event`); then the room |
 | More than `max_in_per_10s` frames | `bye` `rate_limited`, close **1008** |
 | Not JSON / an array / unknown `t` / binary | `bye` `protocol`, close **1002** / **1003** |
@@ -350,7 +352,7 @@ addEventListener("offrails:revoked", () => (location.href = "/session/new"));  /
 ```
 
 - **One connection per tab** (`OffRails.socket()`), many channels, any transport.
-- **Reconnect** with backoff 250ms → 1s → 2s → 5s → 10s; every wanted channel rejoins with its current `since`.
+- **Reconnect** with backoff 250ms → 1s → 2s → 5s → 10s, each ±25% jitter; every wanted channel rejoins with its current `since`, and its `Presence` goes unsynced until the new `here`.
 - **`join()` before the connection is open just waits.**
 - **Replies are promises** with a 10s timeout; rejections are `{code, message}`.
 - **Render user text with `textContent`, never `innerHTML`.**
@@ -399,7 +401,25 @@ A kernel page in the `/dev` tab bar (same rules as every kernel page: own layout
 - live nodes;
 - per topic: local connections, people present, owner, whether its actor is running, and broadcasts sent;
 - per connection: member, **transport** (`websocket`, `sse`, `longpoll`), topics, age, frames in and out;
-- **a live decoded frame log**: the last 40 frames per connection, in (↑) and out (↓), as readable offrails.v1 JSON. Development only (`Hub::log_frames`): nothing is copied or kept in production.
+- **a live decoded frame log** per connection (spec below).
+
+**The frame log** (what the reference app implements; a `new` app gets it with the first channel):
+
+```rust
+// kernel/hub.rs
+pub const FRAME_LOG: usize = 40;            // frames kept per connection (oldest dropped)
+const FRAME_LOG_TEXT: usize = 400;          // bytes kept per frame, cut on a char boundary, then "…"
+pub struct LoggedFrame { pub dir: &'static str /* "in" | "out" */, pub at: DateTime<Utc>, pub text: String }
+// ConnInfo gains `frames: VecDeque<LoggedFrame>`; Snapshot carries it to the page.
+impl Hub<R> {
+    pub fn log_frames(&self, on: bool);                                  // AppState::new: on in development only
+    pub fn log_frame(&self, conn: u64, dir: &'static str, text: &str);   // no-op unless on
+}
+```
+
+- **Where it's recorded:** in the transport-independent protocol state (`kernel/channels.rs`), once per frame: `log_frame(conn, "in", raw)` as each client frame is read (before decoding, so a malformed frame shows as sent), and `log_frame(conn, "out", json)` as each server frame is encoded. Every offrails.v1 transport (WebSocket, SSE + POST, long-poll) goes through it. Signal streams under `/streams/` carry no frames and show only their transport.
+- **What it shows:** the offrails.v1 JSON text as sent (`{"t":"push","ref":"3","topic":"book:1",…}`), newest first, with ↑/↓ and the time. Pings and pongs are frames too. Development only: with `log_frames(false)` nothing is copied, so production keeps no message text.
+- **Tests** (`kernel_channels_test.rs`): with logging on, a join and a push appear as an `in` frame and the `ok`/`event` replies as `out` frames; the 41st frame drops the oldest; a 1 KB frame is cut to 400 bytes plus "…"; with logging off the deque stays empty.
 
 ## Measured (reference app, M-series laptop under heavy parallel load, 2026-10-12)
 
@@ -429,7 +449,7 @@ Run them with `cargo nextest run --run-ignored only -E 'test(bench_)' --no-captu
 Required cases, per channel:
 - **join authorization:** logged out gets 401, a foreign Origin gets 403, and someone else's private topic, an unknown topic, or a missing record each give `forbidden` / `unknown_topic`;
 - **delivery:** a message reaches others and is stored, `seq` equals its id, and validation errors carry `invalid` + the reason; an undeclared event is `bad_event`;
-- **presence:** `here` then `joins`/`leaves`, two tabs counting as one person, no emails in metadata;
+- **presence:** `here` (including the joiner) before any `joins`/`leaves`, two tabs counting as one person, no emails in metadata, both clients see each other within backoff + 1 s after a server restart;
 - **resume:** after a reconnect with `since`, exactly the missed events arrive, in order, from memory and from the database;
 - **limits:** the per-room rate limit, an oversized frame, flooding (1008), garbage / unknown `t` / legacy arrays (1002);
 - **output:** HTML in messages is delivered raw and rendered escaped.

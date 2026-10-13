@@ -81,6 +81,16 @@ pub async fn run(State(s): State<AppState>, Form(f): Form<RunForm>) -> Result<Re
 | production | **Never auto-migrates**: the entrypoint runs `app db migrate` before `serve` ([deployment](deployment.md)). The guard and `/dev/migrations` aren't mounted. `GET /up` returns **503 "pending migrations"** while any is pending, so a deploy that skipped migrating never goes healthy |
 | worker (`app worker`, inline worker) | Before starting, checks `pending()`. If any are pending it logs **once** `pending migrations: run \`app db migrate\`; worker waiting`, rechecks every 5s (stopping cleanly on shutdown), then logs `migrations applied; worker starting`. It never spams errors against missing tables |
 
+**Nothing in `serve` may read an app table before the listener is up.** The guard renders from the kernel layout and `seaql_migrations` alone; everything else that touches app tables at boot (realtime's pub/sub and cluster, the inline worker, a cache warm-up) waits for `pending()` to be empty ([realtime](realtime.md#kernel-spec-srckernelpubsubrs)). **Fresh-database smoke**, after any change to `serve` or to what starts at boot (`bin/dev` migrates first, so it never shows this):
+
+```sh
+rm -f storage/fresh.sqlite3 && PORT=4321 DATABASE_URL='sqlite://storage/fresh.sqlite3?mode=rwc' cargo run -q -- serve & sleep 5
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:4321/          # 503: the pending-migrations page, not a crash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Sec-Fetch-Site: same-origin' -d return_to=/ http://localhost:4321/dev/migrations   # 303
+sleep 6; curl -s -o /dev/null -w '%{http_code}\n' http://localhost:4321/up   # 200; the log says "migrations applied; realtime starting"
+lsof -ti tcp:4321 -sTCP:LISTEN | xargs kill; rm -f storage/fresh.sqlite3*
+```
+
 `bin/dev` runs `cargo run -- db migrate` before serving, and again on every rebuild (`cargo watch -x 'run -q -- db migrate' -x 'run -- serve'`), so the page is mostly seen after a `git pull` with the server stopped, or after a rollback. Tests (`kernel_web_test.rs`): a fully rolled-back dev DB shows the page (with the migration names, the button and `return_to`), `/up` is 503, the kernel stylesheet still loads, the button applies all and redirects back with the flash, no open redirect; production with one pending: `/up` 503, `/` unaffected, `/dev/migrations` 404.
 
 ## Browser smoke

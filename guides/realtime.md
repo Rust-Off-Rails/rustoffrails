@@ -81,6 +81,25 @@ impl PubSub {
 ```
 
 - **Only `serve` calls `start()`** (one poller per web process). `app worker` only inserts rows. Tests never start the loop: they call `poll_once()` themselves, which makes them deterministic.
+- **`start()` reads `broadcasts`, so `serve` starts it only once migrations are current.** Pending migrations (a fresh clone, a `git pull` with the server stopped): spawn a task that waits like the worker (log once, recheck every 5s) and starts realtime when the pending-migrations page's button has run them. Otherwise start it before building the router and fail fast. Found in a real build: `serve` awaited `start()` first, so a fresh database crashed with `no such table: broadcasts` and the pending-migrations page never rendered. `bin/dev` hid it by migrating first.
+
+  ```rust
+  // serve: realtime reads app tables; on a database behind the code, start it once migrated.
+  if migrations::pending(&state.db).await.is_ok_and(|p| p.is_empty()) {
+      start_realtime(&state).await?;                       // pubsub.start(), then cluster::start
+  } else {
+      let state = state.clone();
+      tokio::spawn(async move {
+          if wait_for_migrations(&state, "realtime", shutdown_signal()).await
+              && let Err(e) = start_realtime(&state).await
+          {
+              tracing::error!(error = %e, "realtime failed to start");
+          }
+      });
+  }
+  ```
+
+  `wait_for_migrations(state, who, shutdown) -> bool` is the worker's loop, shared: it logs `pending migrations: run \`app db migrate\`; <who> waiting` once, then `migrations applied; <who> starting`, and returns `false` on shutdown.
 - `closed()` needs Rust 2024's precise capture `+ use<>`. Without it the returned future borrows `&self`, and the SSE stream can't outlive the handler (E0515).
 - **Graceful shutdown:** `axum::serve(...).with_graceful_shutdown(async move { shutdown_signal().await; pubsub.close(); })`. axum waits for open connections, and an SSE stream never ends on its own, so without `close()` every deploy would hang until the platform's kill timeout. Verified: with two SSE streams open, the server exits immediately on SIGTERM.
 - Lagging receivers get `RecvError::Lagged`. The stream turns that into a `refresh` event.
@@ -142,6 +161,7 @@ pub async fn authorize_stream(s: &AppState, user: &User, stream: &str) -> Result
 }
 ```
 
+- **Logged out → 401, never a redirect.** `shape_errors` treats `/streams/` and `Accept: text/event-stream` as the `Api` flavor ([errors-and-logging](errors-and-logging.md)): an `EventSource` that gets a 303 to the login page can't follow it, fails and retries forever, and the stream path would be saved as `return_to`. The page's own navigation is what sends a logged-out user to log in. Test: a logged-out `GET /streams/<x>` is 401 with no `Location` and no `_return_to` cookie.
 - **Never send `data("")`.** Per the HTML spec, an event whose data buffer is empty is not dispatched, and `EventSource` drops it without any error. The reference app shipped this bug with every HTTP test green; only the real-browser smoke caught it. Send the stream name as data.
 - **Security** ([channels.md#security](channels.md#security)): a foreign `Origin` or `Sec-Fetch-Site: cross-site` is refused; logout, a password change or revocation ends the stream at once with `bye` (the session-ended signal reaches every process); expiry ends it at the next revalidation (`APP_REALTIME_REVALIDATE_SECS`).
 - `src/channels/<plural>.rs` holds the authorizer: load the record (404 if missing), then `policies::authorize(policies::<plural>::can_view(user, &record))`.
@@ -272,6 +292,8 @@ document.addEventListener("htmx:sseOpen", (e) => {
 ```
 
 **The test that catches it** is the multi-tab smoke ([dev-tools](dev-tools.md#browser-smoke)): N tabs in one profile on a live page, one change, every tab must update. Request tests can't see the browser's connection pool.
+
+**`spa` mode in development** browses Vite on :5173, and Vite serves HTTP/1.1 whenever `server.proxy` is set (its docs: `server.https` "downgrades to TLS only when the server.proxy option is also used"). So `spa` dev keeps the ~6-connection budget: `bin/dev` there serves the Rust app over plain http behind the proxy, and the multi-tab check runs against the built app (`pnpm --dir web build`, then `bin/dev`'s Rust server alone over HTTPS on :3000). Not yet measured in a reference `spa` app.
 
 ## Gotchas agents get wrong
 

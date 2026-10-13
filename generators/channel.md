@@ -25,7 +25,7 @@ Both were executed in the reference app (htmx) on 2026-10-12.
    - `sea-orm-cli migrate generate create_broadcasts` (`id`, `stream`, `event`, `created_at`), then migrate and prove rollback;
    - `src/kernel/pubsub.rs` per the spec;
    - `pubsub: PubSub::new(db.clone())` in `AppState::new`;
-   - in `main.rs` `serve`: `state.pubsub.start().await?` before building the router, and `pubsub.close()` inside the graceful-shutdown future;
+   - in `main.rs` `serve`: start realtime (`pubsub.start()`, plus `cluster::start` with `APP_CLUSTER`) **only once migrations are current**: if `migrations::pending` is empty, start it before building the router and fail fast on error; otherwise spawn a task that waits with the worker's `wait_for_migrations` loop and starts it then ([realtime](../guides/realtime.md#kernel-spec-srckernelpubsubrs)). Never `.await?` a table read before the listener is up: on a fresh database the app crashes with `no such table: broadcasts` instead of showing the pending-migrations page. Put `pubsub.close()` inside the graceful-shutdown future;
    - `pubsub::delete_older_than(db, 1 day)` in `CleanupJob`;
    - `src/channels/mod.rs` with `stream` + `authorize_stream`, the route `/streams/{stream}`, `paths::stream(name)`, and a `ROUTES` row with `Access::User`.
 3. **This channel:**

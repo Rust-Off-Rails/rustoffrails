@@ -61,7 +61,7 @@ impl From<DbErr> for AppError {
 - **How it's wired** (verified in the reference app). `IntoResponse` can't see the request, so:
   1. `impl IntoResponse for AppError` returns a bare status response carrying a private `ErrorReport { status, errors: Option<Errors>, detail: Option<String> }` in its **response extensions**. It logs the 500s here (once).
   2. `pub async fn shape_errors(State(state): State<AppState>, req: Request, next: Next) -> Response`, mounted with `from_fn_with_state`, classifies the request into a `ResponseFlavor`:
-     - `Api` when the path starts with `/api`;
+     - `Api` when the path starts with `/api` **or `/streams/`, or `Accept` contains `text/event-stream`**. A logged-out stream must get a 401, not a 303 to the login page: `EventSource` can't follow a redirect to HTML (it errors and retries forever), and the stream path would become the `return_to` page after login;
      - `Inertia` when `X-Inertia` is present;
      - `Htmx` when `HX-Request` is present;
      - `Html` otherwise.
