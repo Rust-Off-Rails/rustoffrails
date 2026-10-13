@@ -1,0 +1,265 @@
+# Test Standards: what every app must prove
+
+[`testing.md`](testing.md) says **how** to write tests (TestApp, factories, layout). This guide says **what** must be tested, how much is enough, and how that's enforced. It's part of the Definition of Done, so none of it is optional.
+
+The rule: **a behavior that isn't tested doesn't exist.** The human writes no code and doesn't read it either. The suite is the only proof they get that the app does what `product/` says.
+
+## 1. Traceability: specs ↔ tests
+
+Every acceptance criterion gets a stable ID, and every test that proves one cites it.
+
+```markdown
+<!-- product/features/books.md -->
+- [x] AC-books-1: A logged-in user can add a book with a title and author
+- [ ] AC-books-2: Adding a book without a title shows "Title can't be blank"
+```
+
+```rust
+/// AC-books-1 (product/features/books.md)
+#[tokio::test]
+async fn logged_in_user_can_add_a_book() { … }
+```
+
+- IDs are `AC-<feature file stem>-<n>`. They are never renumbered or reused. A dropped criterion is struck through (`~~AC-books-3~~`), not deleted.
+- A criterion is ticked `[x]` only when a test citing it passes on both databases.
+- The mechanical check that `/offrails:check` runs:
+
+```sh
+comm -23 <(grep -rhoE 'AC-[a-z0-9_-]+-[0-9]+' product/ | sort -u) \
+         <(grep -rhoE 'AC-[a-z0-9_-]+-[0-9]+' tests/ src/ web/src/ | sort -u)
+```
+
+Any output is an untested criterion, and the DoD fails.
+
+## 2. The required test set by archetype
+
+Find the app's archetype from its `AGENTS.md` header and the product README. An app can match more than one, in which case every matching row applies.
+
+| Archetype | When | Required suites |
+|-----------|------|-----------------|
+| **Web app** (`htmx`) | default | Model, policy, request (HTML), security, jobs/mailers if present, migration |
+| **React app** (`inertia`) | `FRONTEND_MODE: inertia` | Everything in Web app, with request tests asserting **props** rather than HTML. Plus component tests (Vitest) and E2E for critical flows (Playwright) |
+| **SPA + API** (`spa`) | `FRONTEND_MODE: spa` | Model, policy, **API contract**, security. Plus component tests and E2E for critical flows |
+| **Public API** | Third parties or mobile apps call `/api` | Everything in SPA + API, plus **frozen contract snapshots**, versioning tests, auth-token tests, and pagination/limit tests |
+| **API-only** | `FRONTEND_MODE: api` | Everything in Public API, plus: every error path is JSON (no HTML outside `/dev`, `/admin`); bearer-token matrix (missing, garbage, revoked, expired → the same 401 with `WWW-Authenticate: Bearer`; a read-only token can't write anything); per-token and per-IP rate limits; CORS allowlist (preflight and real request, no credentials, foreign origins refused) and CSRF still refusing a foreign `Origin`; the committed `docs/openapi.json` matches and covers every `/api/v1` route ([api](api.md#testing-on-top-of-test-standards)) |
+| **GraphQL** | `API: graphql \| both` | Every query and mutation anonymously → `UNAUTHENTICATED`; another user's record → `NOT_FOUND`; read-only token on mutations → `FORBIDDEN`; validation failures as payload `errors` (no top-level errors); the N+1 guard for every association (1 vs 20 rows, same query count); depth and complexity limits reject abuse **and the standard introspection query passes**; the committed `docs/schema.graphql` matches; with `API: both`, REST and GraphQL agree on the same record ([graphql](graphql.md#required-tests-graphql-archetype-test-standards)) |
+| **Background-heavy** | Specs with schedules, imports, or emails at volume | Every worker: success, retry on error, idempotency (run twice → same result), uniqueness, cron entry fires |
+| **Realtime** | Channels exist | Signals: broadcast emitted on change, subscriber authz (can't subscribe to others' streams). Rooms ([channels](channels.md#testing)): join authz (401 logged out, 403 foreign Origin, others' private topics refused), delivery + storage, presence join/leave and two tabs = one person, replay after reconnect, room rate limit, frame size/flood/garbage closes, text shown as typed; Postgres apps add the 3-node cluster case |
+| **Multi-tenant** | `TENANCY: teams` | **Tenant isolation suite** (§4). It's the most important test file in the app |
+| **Money** | Payments specced | Exact-amount tests in cents, rounding, refunds, idempotent webhooks (same event twice → one effect), signature verification |
+
+### What each suite contains
+
+**Model** (unit, inline `#[cfg(test)]` plus DB tests in `tests/app/models/`):
+- `validate()`: every rule, with its boundary values (`max 200` → 200 passes, 201 fails), empty string, whitespace-only and Unicode.
+- Queries: ordering and pagination stability (ties broken by `id`), soft-delete exclusion, scopes.
+- Uniqueness: duplicate insert → validation error, not a 500 (`sql_err()` mapping).
+- Process functions (`order::checkout`): every branch named in the spec, plus failure in the middle rolling back (the transaction is atomic).
+
+**Policy** (unit, inline in `src/policies/<plural>.rs`): a full truth table. For each action, every relevant actor (owner, other user, admin, other tenant) gets a row. Anonymous visitors never reach a policy, because `RequireUser` stops them first; the access matrix (§3) covers them.
+
+```rust
+#[test]
+fn review_policy_truth_table() {
+    let (r, b) = (review(1), book(2));              // review by user 1, book owned by user 2
+    for (who, id, create, edit, destroy) in [
+        ("author",       1, true, true,  true),
+        ("book owner",   2, true, false, false),
+        ("other reader", 3, true, false, false),
+    ] {
+        let u = user(id);
+        assert_eq!(can_create(&u, &b), create, "{who} create");
+        assert_eq!(can_edit(&u, &r), edit, "{who} edit");
+        assert_eq!(can_destroy(&u, &r), destroy, "{who} destroy");
+    }
+}
+```
+
+**Request** (integration, one file per resource). For **every** route, all of these:
+
+| Case | Expected |
+|------|----------|
+| Happy path | 200 / 303 to the right place / 201; persisted; flash or props correct |
+| Invalid input | 422 (htmx, react) or redirect back with `errors` (inertia); nothing persisted; message shown |
+| Anonymous | Redirect to login (HTML) / 401 (API), unless the route is public |
+| Wrong user | 404 for records outside the actor's scope (don't leak existence); 403 only when the actor can see the record but not perform the action |
+| Missing record | 404 |
+| Side effects | Job enqueued (`assert_enqueued`), email delivered after drain, broadcast emitted |
+
+**API contract** (`spa` / public API): snapshot each endpoint's JSON with [`insta`](https://insta.rs), redacting volatile fields.
+
+```rust
+insta::assert_json_snapshot!(res.json(), { ".id" => "[id]", ".created_at" => "[ts]" });
+```
+
+- `spa` mode: snapshots may change freely, because ts-rs + `tsc` catch frontend drift.
+- **Public API: snapshots are frozen.** Changing one is a breaking change. Log it in `docs/decisions.md` and tell the human, or add a new version instead. Also test error shape (`{ "errors": { field: [msg] } }`), pagination limits and caps, and that unknown fields are ignored.
+
+**Migration**: CI runs `db migrate → db rollback --steps all → db migrate` on both databases. A data migration (one that transforms rows) gets its own test: seed rows in the old shape, migrate, assert the new shape.
+
+**Jobs / mailers**: every worker gets `perform_job` with a realistic payload, plus the failure path (error → `retryable`, attempt count, then `discarded` after `max_attempts`). Every mailer gets subject, recipient, a key line of body text, and the links in it pointing to working routes (follow them with `app.get`).
+
+**Frontend** (`inertia` / `spa` / islands):
+- Vitest component tests for every component with logic (forms, conditional rendering, client validation). Pure presentational components need none. React: `@testing-library/react`. Svelte: `@testing-library/svelte`, with runes-based fakes in `*.svelte.test.ts` ([frontend-svelte](frontend-svelte.md#shared-rules-every-mode)).
+- Playwright E2E for each **critical flow**: sign-up/login, the app's primary create→view→edit→delete loop, and anything involving money. Run against `app serve` with a seeded SQLite database. Keep these few, because they're slow.
+- `htmx` mode: E2E is optional. Request tests assert the `HX-*` response headers and the partials (`hx-request: true` → fragment, not layout).
+
+## 3. Security tests (every app)
+
+These live in `tests/app/security_test.rs`. Most iterate over `ROUTES`, so new routes are covered automatically.
+
+| Test | How |
+|------|-----|
+| **Access matrix** | Every `ROUTES` entry declares an access level: `public`, `user`, `admin` or `dev` ([routing](routing.md)). Request every non-public route anonymously → never 2xx. Every `admin` route as a normal user → 403/404. Every `dev` route with production config → 404. Substitute `1` for path params |
+| CSRF | A cross-site POST to every unsafe `ROUTES` entry → 403, while logged in, so a 403 can't come from auth |
+| Escaping | Create a record whose text fields are `<script>alert(1)</script>`. The page shows it escaped (htmx: `assert_text(evil)` plus `assert_not_contains(evil)`; Askama 0.16 uses numeric entities such as `&#60;`), or the props contain it raw and React escapes it (inertia/spa). Markdown fields go through ammonia |
+| Session | Logout invalidates the server session (the old cookie no longer works). The password-reset token is single-use and expires |
+| Rate limit | 11th login attempt in the window → 429 |
+| Mass assignment | Posting `owner_id`/`role`/`account_id` in a form doesn't change them |
+| Uploads (if any) | Over the spec's limit → 422 with the field message. Over the route's `DefaultBodyLimit` → 413. Wrong type, including a claimed type that doesn't match the magic bytes and SVG → 422. Served with `Content-Disposition`, `nosniff` and an owner check, per [storage](storage.md) |
+| Admin as a plain user | Every `Access::Admin` route requested by a logged-in non-admin → never 2xx |
+| CSRF fallback | Without fetch metadata (`app.without_fetch_metadata().with_origin(…)`): a foreign `Origin` → 403, `APP_URL` → passes |
+
+## 4. Tenant isolation suite (multi-tenant apps)
+
+`tests/app/tenancy_test.rs` creates two tenants, A and B, each with one record of **every** tenant-scoped model. Acting as a user of A, it then requests every route (and every API endpoint) that takes an id, using B's ids. Every response must be 404. It also asserts that list pages and exports never contain B's data. When a model is added, add it to this test's setup; `/offrails:doctor` checks that it's there.
+
+## 5. Coverage and test strength
+
+| Gate | Tool | Threshold | Where |
+|------|------|-----------|-------|
+| Line coverage, whole crate | `cargo llvm-cov nextest` | **≥ 80%** | CI (SQLite job) |
+| Line coverage, `src/models`, `src/policies` | same, exported as JSON and checked with `jq` ([testing](testing.md#coverage-and-mutation-testing)) | **≥ 90%** | CI |
+| Mutation score, `src/policies` + `src/models` | `cargo mutants --file 'src/policies/**' --file 'src/models/**'` | **0 surviving mutants in policies.** Review survivors in models | Weekly CI job and `/offrails:check --deep` |
+| Frontend (TS modes) | `vitest --coverage` | ≥ 70% of `web/src/components`, `web/src/pages` or `routes` | CI |
+
+- Coverage is a floor, not a goal. Never write a test just to execute lines, and never exclude code from coverage to pass the gate without a `docs/decisions.md` entry.
+- **The one standing exclusion is `src/main.rs`** (CLI glue: argument parsing, `serve`, signals): `--ignore-filename-regex 'src/main\.rs$'`. Everything else counts, the kernel included.
+- **The bare `new` skeleton measures ~76%.** Its jobs kernel needs `tests/app/kernel_jobs_test.rs` (new.md step 7) to pass 80%. Generate that test with the kernel; never lower the gate. Measured on the reference app after auth and two resources: 88.8% overall, models 92–97% per file, policies 100%.
+- A surviving mutant in a policy means the truth table is missing a row. Add the row, don't silence the mutant.
+- **Equivalent mutants** are the exception: a mutation that can't change behavior. Example: the spec says any reader may review any book, so `can_create → true` *is* the function. Exclude each one by name in `.cargo/mutants.toml`, with the reason in a comment, and log it in `docs/decisions.md`:
+  ```toml
+  exclude_re = [
+      # Spec (reviews.md): any logged-in reader may review any book, so this policy is constant `true`.
+      "src/policies/reviews.rs:.*replace can_create -> bool with true",
+  ]
+  ```
+- **Mutants are slow.** cargo-mutants rebuilds once per mutant. On the reference app, policies gave 14 mutants and took 11 minutes; models give ~200, which means hours. Locally, `/offrails:check --deep` runs policies only. Models run in the weekly CI job.
+
+## 6. Performance guards
+
+- **N+1 queries:** `TestApp` counts SQL statements (SeaORM's metric callback, [testing](testing.md)). Every index page, list endpoint and show page with a child list gets one test. It seeds 1 record, then 19 more, and asserts the GET's query count doesn't grow:
+  ```rust
+  app.assert_query_count_stable("/books", async |n| {
+      for _ in 0..n { create_book(app.db(), &create_user(app.db()).await).await; }
+  }).await;
+  ```
+  Load related rows with `find_also_related`, or in one `is_in` batch (`blob::by_ids`), never per row.
+- **Suite time:** the SQLite suite should stay under ~60s. A test over 2s is slow. Nextest's `slow-timeout` reports it. Fix it, or move it to `#[ignore]` with a decision entry. The usual culprit is password hashing in factories: hash the factory password **once** per test binary and reuse the digest ([auth gotchas](auth.md#gotchas-agents-get-wrong)). In the reference app that cut a 47s test to under 1s.
+- **Postgres per-test databases** are named `test_<crate>_<hex>`, and `app task test_db_cleanup` drops only this app's databases that have no open connections ([testing](testing.md#database-per-test)). So it's safe on a shared server and while a suite runs. Still, never call it from a test.
+
+## 7. Test quality rules
+
+1. **Behavior, not implementation.** Assert what the user, the client or the database sees. Never assert on private functions or log lines.
+2. **Real database, both backends.** No mocked DB and no mocked SeaORM. External services (SMTP, S3, payment APIs) are replaced at the kernel boundary (`Mailer::Memory`, local `object_store`, a fake HTTP server via `tokio` + `axum` on a random port), never by mocking app code.
+3. **Deterministic.** No sleeps, no real time (pass `now`), no randomness without a fixed seed, no network, no ordering assumptions without `ORDER BY`. **A flaky test is a P0 bug.** CI runs nextest with retries disabled.
+4. **Isolated.** Each test builds its own database through `TestApp::new()`. No shared fixtures and no test-order dependence. Factories set only the fields the test cares about.
+5. **One behavior per test**, named after it. Several asserts are fine if they describe one behavior.
+6. **Bug fix = regression test first.** Reproduce the bug in a failing test (`regression_<short_description>`, citing the issue or spec), then fix it.
+7. **Never weaken a test to make it pass.** Change a test's expectation only when the spec changed, and cite the spec change in the commit.
+8. **Never disable a security check in tests** (CSRF, auth). Use the helpers that satisfy it.
+
+## 8. Compliance: how this is enforced
+
+| Layer | Enforces |
+|-------|----------|
+| Definition of Done ([workflow](../workflow.md#definition-of-done)) | All suites green on SQLite and Postgres; AC traceability check; coverage gates |
+| CI (`.github/workflows/ci.yml`, [testing](testing.md#ci)) | The same gates on every push, plus migration round-trips and the Postgres run; weekly mutation job |
+| `/offrails:check` | Runs the DoD and writes **`docs/test-report.md`** (below) |
+| `/offrails:doctor` | Audits test *quality*: missing archetype suites, missing access-matrix rows, tenant setup incomplete, weakened assertions, `#[ignore]` without a decision |
+| Plugin hooks | The Stop gate keeps the tree compiling. The convention check flags `sleep(` in tests |
+| Real-browser smoke (§9) | Every UI-affecting change, before calling it done |
+
+### `docs/test-report.md` (generated, committed)
+
+This is the human's view of what is proven. `/offrails:check` regenerates it:
+
+```markdown
+# Test report (2026-10-12, a1b2c3d)
+
+| Suite | SQLite | Postgres |
+|-------|--------|----------|
+| Rust (212 tests) | ✅ | ✅ |
+| Frontend (48) | ✅ | n/a |
+| E2E (5) | ✅ | n/a |
+
+Coverage: 86% (models 94%, policies 100%) · Mutants: 0 surviving (policies)
+
+| Feature | Criteria | Proven |
+|---------|----------|--------|
+| books.md | 7 | 7 ✅ |
+| reviews.md | 5 | 4 ⚠️ AC-reviews-5 untested |
+```
+
+## 9. Real-browser smoke
+
+There are two complementary smokes:
+
+- **The app's own flows** (this section): `tests/e2e/` or `web/e2e/`, written per app, covering the spec's critical flows.
+- **The kernel pages** (`/dev`, `/dev/mailbox`, `/admin/jobs`): `.offrails/tools/browser-smoke/run.sh`, shipped by the framework ([dev-tools](dev-tools.md#browser-smoke)). It checks styling after boosted navigation and Back/Forward behavior, and needs no per-app code.
+
+Run both after any UI-affecting change.
+
+`oneshot` request tests can't see styling, hx-boost swaps, `<head>` changes, history (Back/Forward, bfcache), `EventSource` or console errors. These bugs were all found in real apps with every HTTP test green:
+
+| Bug | Why the HTTP tests missed it |
+|-----|---------------------|
+| Live reviews never appeared: SSE events were sent with empty `data` | Browsers silently drop such events. The test helper accepted them; it now requires `data` the way `EventSource` does ([realtime](realtime.md)) |
+| After Back/Forward, a page's live updates stopped | htmx restored a DOM snapshot without a live `EventSource` |
+| Back after deleting a record showed it again | htmx's history snapshot (fix: `historyCacheSize: 0`, [frontend-htmx](frontend-htmx.md)) |
+| Kernel pages (`/dev/mailbox`) rendered unstyled when reached by an `hx-boost` link | A boosted swap keeps the app's `<head>`; links to kernel pages need `hx-boost="false"` |
+| A console 404 for `/favicon.ico` on every first visit | No icon link in the layout |
+
+**Rule:** any change that affects what the browser shows or does (templates, layout, JS, CSS, routes that pages link to, realtime) requires a real-browser smoke of the changed flow before it's done. Assert, at minimum:
+
+1. **Styling is applied:** the computed style of a known element (for example, the primary button's `backgroundColor` is not `rgba(0, 0, 0, 0)`).
+2. **The flow works through the UI:** fill and submit the forms, upload files, follow links and boosted navigation.
+3. **History:** state after Back and Forward, including Back after a delete (expect the 404 page, not the old record).
+4. **Realtime**, if present: two browser contexts, one acting and one watching.
+5. **Console:** no errors, uncaught exceptions or CSP violations (collect `console` errors and `pageerror`). Assert this before any step that deliberately loads a 404.
+
+**How:**
+
+| Situation | Tool |
+|-----------|------|
+| Interactive, while building (an agent with the chrome-devtools MCP) | Drive the flow with the MCP: `new_page` with an `isolatedContext` per user, `fill_form`, `upload_file` (files must sit inside the MCP's workspace roots), `wait_for`, `list_network_requests`, `list_console_messages`, `evaluate_script` |
+| Repeatable, committed, and whenever the MCP can't attach (for example, the user's Chrome profile is locked) | **Playwright Test against the installed Chrome**: `channel: "chrome"`, with no browser download (`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` on install). Playwright always uses a throwaway profile |
+
+Where the committed smoke lives:
+
+- **`inertia` / `spa` / islands:** `web/e2e/smoke.spec.ts`. Playwright is already a blessed dev dependency ([stack](../stack.md)).
+- **`htmx`:** `tests/e2e/`, a separate dev-only package (`package.json` with only `@playwright/test`, `playwright.config.ts`, `smoke.spec.ts`; `node_modules/` and `test-results/` are git-ignored). This is the one sanctioned Node in an htmx app. It never touches the app's build, Docker image or runtime, and the app runs without it.
+  - Why not `pnpm dlx`: a spec file must `import { test } from "@playwright/test"`, and a `dlx` install can't be resolved from the spec's directory.
+  - Why not a puppeteer-core script: Playwright is already the framework's browser tool, and its runner gives web-server startup, traces on failure and auto-waiting assertions for free.
+
+`playwright.config.ts` (htmx; verified with Playwright 1.64 and Chrome on 2026-10-12):
+
+```ts
+import { defineConfig } from "@playwright/test";
+const PORT = 3018;                                   // its own port; never one the human uses
+export default defineConfig({
+  testDir: ".", retries: 0, workers: 1, timeout: 60_000,
+  use: { baseURL: `http://localhost:${PORT}`, channel: "chrome", headless: true, trace: "retain-on-failure" },
+  webServer: {
+    command: "rm -f storage/e2e.sqlite3* && cargo run -q -- db migrate && cargo run -q -- serve",
+    cwd: "../..", url: `http://localhost:${PORT}/up`, timeout: 300_000, reuseExistingServer: false,
+    env: { APP_ENV: "development", PORT: String(PORT), APP_URL: `http://localhost:${PORT}`,
+           DATABASE_URL: "sqlite://storage/e2e.sqlite3?mode=rwc", STORAGE_PATH: "storage/e2e-files", RUST_LOG: "warn" },
+  },
+});
+```
+
+Run it with `pnpm --dir tests/e2e install` (once), then `pnpm --dir tests/e2e exec playwright test`. In CI it's optional: add `npx playwright install chrome` (or use a runner with Chrome) and run it after the Rust jobs.
+
+**Process hygiene:** start dev servers on your own port, and stop them by the PID you started or by that port (`lsof -ti tcp:3018 -sTCP:LISTEN | xargs kill`). **Never `pkill`/`killall` by name or pattern**: every app binary from this framework looks alike, and you'd kill the human's running app.
+

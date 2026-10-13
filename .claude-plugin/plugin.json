@@ -1,0 +1,22 @@
+{
+  "name": "offrails",
+  "displayName": "Rust off Rails",
+  "version": "0.2.0",
+  "description": "Ruby on Rails, rebuilt for agents: a Markdown framework plus skills and hooks that make Claude build full-stack Rust web apps (Axum, SeaORM, SQLite/Postgres, htmx/Inertia/React).",
+  "author": {
+    "name": "Daniel CJ"
+  },
+  "license": "MIT",
+  "keywords": [
+    "rust",
+    "rails",
+    "axum",
+    "seaorm",
+    "htmx",
+    "inertia",
+    "framework",
+    "generators"
+  ],
+  "homepage": "https://rustoffrails.org",
+  "repository": "https://github.com/Rust-Off-Rails/rustoffrails"
+}

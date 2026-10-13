@@ -1,0 +1,12 @@
+{
+  "name": "offrails",
+  "description": "Rust off Rails: the AI-only Rust web framework",
+  "owner": { "name": "Daniel CJ" },
+  "plugins": [
+    {
+      "name": "offrails",
+      "source": "./",
+      "description": "Rails-style skills (/offrails:new, scaffold, feature, check, doctor, deploy, upgrade) and convention hooks for Rust web apps"
+    }
+  ]
+}

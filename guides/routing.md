@@ -1,0 +1,129 @@
+# Routing (`config/routes.rb` → `src/routes.rs`)
+
+Every route lives in `src/routes.rs`. One file, read top to bottom, is the whole URL surface of the app.
+
+## The resource shape
+
+The shape depends on `FRONTEND_MODE`:
+
+- **`htmx`:** HTML forms only send GET and POST, and the framework doesn't use method overrides. Use the table below.
+- **`inertia`:** Inertia's `useForm`/`router` sends real verbs. `update` is `PATCH /posts/{id}` and `destroy` is `DELETE /posts/{id}`. Everything else is the same as below. There is no `/delete` route.
+- **`spa`:** pages are client-side routes. The server exposes only `/api/...` (below) plus the SPA fallback.
+
+`htmx` mode:
+
+| Action  | Method + path               | Handler                 | Path helper |
+|---------|-----------------------------|-------------------------|-------------|
+| index   | `GET  /posts`               | `posts::index`          | `paths::posts()` |
+| new     | `GET  /posts/new`           | `posts::new`            | `paths::new_post()` |
+| create  | `POST /posts`               | `posts::create`         | |
+| show    | `GET  /posts/{id}`          | `posts::show`           | `paths::post(id)` |
+| edit    | `GET  /posts/{id}/edit`     | `posts::edit`           | `paths::edit_post(id)` |
+| update  | `POST /posts/{id}`          | `posts::update`         | |
+| destroy | `POST /posts/{id}/delete`   | `posts::destroy`        | `paths::delete_post(id)` |
+
+JSON API routes (`spa` mode) use real verbs: `GET/POST /api/posts`, `GET/PATCH/DELETE /api/posts/{id}`.
+
+Nested resources go one level deep at most: `/posts/{post_id}/comments` (index/create). Member actions are `/comments/{id}` (shallow nesting, as in Rails `shallow: true`).
+
+Custom actions are a `POST` to a noun: `POST /posts/{id}/publication` (publish), `POST /posts/{id}/publication/delete` (unpublish). This follows the Rails "CRUD on a new resource instead of custom verbs" pattern.
+
+## `src/routes.rs` template
+
+Verified with axum 0.8.9 / tower-http 0.7.1 (the reference app's `routes.rs`, trimmed to one resource):
+
+```rust
+pub fn router(state: AppState) -> anyhow::Result<Router> {
+    let config = state.config.clone();
+    let mut app = Router::new()
+        .route("/", get(home::index))
+        .route("/up", get(health::up))                      // Rails 8 health check
+        // posts
+        .route("/posts", get(posts::index).post(posts::create))
+        .route("/posts/new", get(posts::new))
+        .route("/posts/{id}", get(posts::show).post(posts::update))
+        .route("/posts/{id}/edit", get(posts::edit))
+        .route("/posts/{id}/delete", post(posts::destroy));
+
+    // Framework surfaces: /dev exists only in development; /admin needs an access method.
+    if config.is_development() {
+        app = app.merge(dev::router()).merge(kernel::mailbox::router());
+    }
+    if config.is_development() || config.admin_password.is_some() {
+        app = app.merge(kernel::jobs::web::router());
+    }
+
+    let static_files = Router::new()
+        .fallback_service(ServeDir::new("static"))
+        .layer(from_fn(kernel::assets::cache_headers));     // ?v= → immutable, else no-cache
+    let csrf = CsrfLayer::new()
+        .add_trusted_origin(&config.app_url)?
+        .with_insecure_bypass(|_, uri| uri.path().starts_with("/webhooks/"))
+        .with_rejection_response(|_| AppError::Forbidden.into_response());
+
+    Ok(app
+        .nest_service("/static", static_files)
+        .fallback(errors::not_found)
+        // middleware: see the next section for the full ordered list
+        .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
+        .layer(from_fn(kernel::flash::middleware))
+        .layer(csrf)
+        .layer(from_fn_with_state(state.clone(), error::shape_errors))
+        /* security headers, compression, timeout, catch-panic, request id, trace */
+        .with_state(state))
+}
+
+/// Path helpers. Templates and redirects use these, never string literals.
+pub mod paths {
+    pub fn posts() -> String { "/posts".into() }
+    pub fn new_post() -> String { "/posts/new".into() }
+    pub fn post(id: i64) -> String { format!("/posts/{id}") }
+    pub fn edit_post(id: i64) -> String { format!("/posts/{id}/edit") }
+    pub fn delete_post(id: i64) -> String { format!("/posts/{id}/delete") }
+    pub fn new_session() -> String { "/session/new".into() }   // exists from `new`; error.rs redirects here
+}
+
+/// Who may call a route. The security suite requests every route as each actor (test-standards.md §3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Access { Public, User, Admin, Dev }
+
+/// The route table. `app routes` prints it and writes docs/routes.md. Tests assert every entry is
+/// routable (not 404/405) in development and enforce its access level, so it can't drift.
+pub const ROUTES: &[(&str, &str, &str, Access)] = &[
+    ("GET",  "/",                 "home::index",              Access::Public),
+    ("GET",  "/up",               "health::up",               Access::Public),
+    ("GET",  "/posts",            "posts::index",             Access::Public),
+    ("POST", "/posts",            "posts::create",            Access::User),
+    // …
+    ("GET",  "/admin/jobs",       "kernel::jobs::web::index", Access::Admin),
+    ("GET",  "/dev",              "dev::index",               Access::Dev),
+];
+```
+
+- `router` returns `anyhow::Result` because `add_trusted_origin` validates `APP_URL`. `main` and `TestApp` both call it.
+- **Every route goes in `ROUTES`** with its access level, framework routes included (`/admin/*` are `Admin`, `/dev/*` are `Dev`).
+
+## axum 0.8 gotchas (agents get these wrong)
+
+- Path params are `{id}`. Wildcards are `{*rest}`. `:id` panics at startup.
+- **A param must be the whole segment.** `/files/{id}.eml` panics at startup with "Only one parameter is allowed per path segment" (axum 0.8.9; verified alone and next to `/files/{id}`). Use `/files/{id}/message.eml`, or a `{name}` param you parse yourself.
+- `Path(id): Path<i64>` for one param, `Path((post_id, id)): Path<(i64, i64)>` for two.
+- Body-consuming extractors (`Form`, `Json`, `Multipart`) **must be the last** handler argument.
+- `Redirect::to` sends 303 See Other, which is correct after a POST.
+- Route-level middleware: `.route_layer(...)`. Router-wide middleware: `.layer(...)`. Layers apply bottom-up: the last `.layer` call runs first.
+
+## Middleware
+
+Outermost first. In code, `.layer` calls run bottom-up, so they appear in the **reverse** of this order:
+
+1. `SetRequestIdLayer::new(x-request-id, MakeRequestUuid)`, then `TraceLayer::new_for_http().make_span_with(...)` (span fields `method`, `path`, `request_id`), then `PropagateRequestIdLayer`
+2. `CatchPanicLayer::new()`
+3. `TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, 30s)` (`TimeoutLayer::new` is deprecated in tower-http 0.7)
+4. `CompressionLayer::new()`
+5. Security headers: `SetResponseHeaderLayer::if_not_present` per header ([security](security.md#security-headers))
+6. `error::shape_errors` (`from_fn_with_state`)
+7. `CsrfLayer` (tower-http `csrf` feature; [security](security.md#csrf))
+8. `kernel::flash::middleware` (`htmx` and `inertia` modes)
+9. `DefaultBodyLimit::max(2 MB)`, raised per route for uploads
+
+Authentication is **not** middleware. It's an extractor on each handler (`RequireUser`), so a route's protection is visible in its signature.
