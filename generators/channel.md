@@ -56,23 +56,25 @@ Implements [guides/channels.md](../guides/channels.md).
    - `hub: Hub::new(config.node.clone().unwrap_or_else(node_id))` in `AppState`;
    - `APP_NODE` and `APP_CLUSTER` in `Config` and `.env.example`;
    - in `serve`: `kernel::cluster::start(..)` when `config.cluster`, and `hub.close()` in the graceful-shutdown future;
-   - `src/channels/mod.rs`: the `socket` handler, `member_for`, the `AppRoom` enum with `impl Room`, and `impl Channels for AppState`;
-   - the `/socket` route, `paths::socket()`, and a `ROUTES` row with `Access::User`;
-   - `static/channels.js` (htmx), loaded in the layout before `app.js`, or `web/src/lib/socket.ts` (TS modes);
-   - `/dev/sockets` with its tab;
-   - `Ws`, `serve` and `session_cookie` in `tests/app/support.rs`.
+   - `src/channels/mod.rs`: the `socket`, `socket_sse`, `socket_poll_open`, `socket_poll` and `socket_send` handlers (via `SessionAndUser`), `member_for(user, session)`, the `AppRoom` enum with `impl Room` (typed `In`/`Out`), and `impl Channels for AppState` (`authorize` + `session_valid`);
+   - the routes `/socket`, `/socket/sse`, `/socket/sse/{conn}`, `/socket/poll`, `/socket/poll/{conn}` (GET+POST), `paths::socket()`, and `ROUTES` rows with `Access::User`;
+   - session revocation: `session::destroy`/`destroy_all_for_user` write the `member:<id>` signal; `hub.watch_revocations(..)` and `hub.log_frames(..)` in `AppState::new`; `APP_REALTIME_REVALIDATE_SECS` and `APP_REALTIME_TRANSPORTS` in `Config`;
+   - `static/channels.js` (htmx), loaded in the layout before `app.js`, or `web/src/lib/socket.ts` (TS modes, typed by the rooms' exported `In`/`Out`);
+   - `/dev/sockets` with its tab (transport column and frame log);
+   - `Ws` (offrails.v1), `serve`, `session_cookie` and `session_for` in `tests/app/support.rs`, plus `tests/app/wire_test.rs` (conformance and security, once per app).
 3. **This room:**
    - **data:** a migration and model for anything durable (messages), with a `(parent_id, id)` index for replay;
    - **room code** in `src/channels/<topic>_room.rs`:
      - state (the newest N items in a `VecDeque`, and a `complete` flag);
-     - `load`, `joined` (from memory when it covers `last_seen`), `joined_from_db`;
-     - `handle_in`, in this order: rate limit → validate → **insert** → memory → `out.broadcast` → reply;
+     - typed `In` / `Out` enums (`#[serde(tag = "event", content = "data")]`, plus `TS` in TS modes);
+     - `load`, `joined` (from memory when it covers `since`), `joined_from_db`, both returning `Joined { data, replay: (seq, Out), gap }`;
+     - `handle_in(msg: In)`, in this order: rate limit → validate → **insert** → memory → `out.emit(row_id, Out::…)` → reply; errors are `Rejection { code, message }`;
    - **wiring:**
      - an `AppRoom` variant and its arms;
      - an arm in `authorize` that reuses the page's policy;
    - **the page:**
      - the server renders the newest N items with `data-id`;
-     - the client joins with `last_seen = max(data-id)`;
+     - the client joins with `{ since: max(data-id) }`;
      - put `hx-boost="false"` on the room's form.
 4. **Tests:** every case in [channels.md#testing](../guides/channels.md#testing) for this room. If the app runs on Postgres in production, the cluster case still applies to the kernel.
 5. **Real-browser smoke:**

@@ -193,13 +193,13 @@ axum_server::bind_rustls(addr, tls).handle(handle).serve(app).await?;
 
 Only for apps with channel rooms ([channels](channels.md)). SSE signals need none of this.
 
-- **Proxies:** Fly's proxy and kamal-proxy both pass WebSocket upgrades through with no extra config. The client sends a heartbeat every 30s, which keeps connections alive through proxy idle timeouts (commonly 60s). *Check the current idle timeout of your proxy, and keep the heartbeat below it.*
-- **Deploys:** on SIGTERM, `serve` calls `hub.close()`. Every socket closes with **1012**, clients reconnect with backoff, and they rejoin with `last_seen`, so nothing is lost. Keep the stop timeout from the section above. The sockets close immediately, so they don't eat into it.
+- **Proxies:** Fly's proxy and kamal-proxy both pass WebSocket upgrades through with no extra config. The server pings every 20s (WebSocket control frames), which keeps connections alive through proxy idle timeouts (commonly 60s). *Check the current idle timeout of your proxy, and keep the ping interval below it.* A proxy or CDN that breaks WebSockets (some corporate proxies, misconfigured tunnels) doesn't break the app: clients fall back to SSE + POST, then long-polling; or set `APP_REALTIME_TRANSPORTS=sse,longpoll` to skip the attempt ([channels#transports](channels.md#transports)).
+- **Deploys:** on SIGTERM, `serve` calls `hub.close()`. Every socket gets `bye` `restart` and closes with **1012**; clients reconnect with backoff and rejoin with `since`, and SSE live regions replay what they missed from their cursor ([realtime#resume](realtime.md#resume)), so nothing is lost. Keep the stop timeout from the section above. The sockets close immediately, so they don't eat into it.
 - **More than one machine:** set `APP_CLUSTER=true` (Postgres) and give each machine a stable `APP_NODE`. On Fly, `APP_NODE=$FLY_MACHINE_ID`, which is set in every machine's environment. Kamal sets nothing like it by default, so leave it unset there (`<hostname>:<pid>` is unique per container).
   - No sticky sessions are needed: any node can serve any socket, and the owner of a topic is computed, not routed.
   - (`fly-replay` could route a socket straight to its topic's owner machine to save the hop; not needed, and not implemented.)
 - **One machine on SQLite:** no cluster, and nothing to configure. One Rust process holds tens of thousands of sockets.
-- **Smoke after deploy:** open a page with a room in two browsers, post, then redeploy. Both pages should reconnect and fill in.
+- **Smoke after deploy:** open a page with a room in two browsers, post, then redeploy and change something mid-deploy. Both pages should reconnect and fill in, without a reload.
 
 ## Database choices in production
 

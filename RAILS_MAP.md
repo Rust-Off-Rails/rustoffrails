@@ -106,8 +106,8 @@ Rails isn't the only source. Where Elixir did it better, we copied it:
 | `Oban.Testing` (`assert_enqueued`, `perform_job`, `drain_queue`) | `TestApp` helpers | [jobs](guides/jobs.md#testing-obantesting-equivalents) |
 | Swoosh local adapter + `/dev/mailbox` | `Mailer::Local` + `/dev/mailbox` | [mailers](guides/mailers.md) |
 | Phoenix LiveDashboard | `/dev` (modest: mailbox, jobs, sockets, routes, system) | [dev-tools](guides/dev-tools.md) |
-| Phoenix.Channel + phoenix.js | `/socket` (Phoenix v2 wire format), `Room` actors, `static/channels.js` | [channels](guides/channels.md) |
-| Phoenix.Presence | `Hub::track`/`untrack`, `presence_state`/`presence_diff`; people, not tabs | [channels](guides/channels.md) |
+| Phoenix.Channel + phoenix.js | Inspired by Phoenix Channels; **our own protocol**, offrails.v1: `/socket` (+ SSE and long-polling fallbacks), typed `Room` actors, `seq` resume, `static/channels.js` | [channels](guides/channels.md) |
+| Phoenix.Presence | `Hub::track`/`untrack`, `presence` frames (`here`, `joins`/`leaves`); people, not tabs; minimal metadata | [channels](guides/channels.md) |
 | Phoenix.PubSub | per-topic in-process broadcast + Postgres `NOTIFY` between nodes | [channels](guides/channels.md) |
 | libcluster / Horde | `kernel/cluster.rs`: `cluster_nodes` heartbeats, rendezvous ownership, failover rebuilt from the DB | [channels](guides/channels.md#more-than-one-server-kernelclusterrs) |
 | Phoenix / Rails pending-migrations page (`ActiveRecord::PendingMigrationError`) | Dev-only page with a **Run migrations** button; `/up` 503 in production while pending | [dev-tools](guides/dev-tools.md#pending-migrations) |

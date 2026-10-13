@@ -105,6 +105,8 @@ APP_INLINE_WORKER=true
 # --- realtime (channels.md) ---
 # APP_NODE=web-1               # this process's name on /dev/sockets and in the cluster (default <hostname>:<pid>)
 # APP_CLUSTER=true             # Postgres only: share rooms and presence across nodes; refused at boot on SQLite
+# APP_REALTIME_REVALIDATE_SECS=60    # long-lived sockets/streams re-check their session this often (logout closes them at once)
+# APP_REALTIME_TRANSPORTS=websocket,sse,longpoll   # drop `websocket` behind a proxy that mishandles it; clients fall back
 # --- jobs ---
 APP_QUEUES=default:10,mailers:5
 APP_JOBS_PRUNE_DAYS=7

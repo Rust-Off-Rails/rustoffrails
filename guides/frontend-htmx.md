@@ -216,6 +216,8 @@ document.addEventListener("htmx:beforeSwap", (e) => unmountWithin(e.target as El
 
 ## Gotchas agents get wrong
 
+- **htmx extensions (sse, …) in a page's own `{% block head %}`.** A boosted navigation swaps only `<body>`, so the new page's head scripts never run, and its live regions stay dead with no error. Load every extension in the layout, next to htmx ([realtime#client-side](realtime.md#client-side)).
+
 - **A form clicked before htmx initializes still works.** It submits as a normal POST (303 → full page), so boosted forms degrade safely. During the reference app's first browser run, one sign-up click appeared aborted. It didn't reproduce, either with a normal click or with a click fired at `DOMContentLoaded`. If a browser smoke shows `htmx:abort`, look for a second navigation racing the click (another tool driving the same tab) before changing app code.
 
 - **A boosted form that JavaScript sends some other way** (a channel room's message box, [channels](channels.md#the-js-client)). `preventDefault` in your listener doesn't stop htmx's boosted submit, so the page also navigates (to `?body=…`). Put `hx-boost="false"` on the form. Found by the browser check: the message posted *and* the page reloaded.

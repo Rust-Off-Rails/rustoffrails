@@ -4,7 +4,27 @@ Each entry lists convention changes and what an existing app must do about them.
 
 ## Unreleased
 
-(nothing yet)
+### Realtime: the Off Rails Wire protocol (offrails.v1), resume after downtime, transport fallback, connection security
+
+Spec: `guides/channels.md` (protocol, transports, security), `guides/realtime.md` (resume). Verified in the reference app: 223 tests on SQLite and Postgres 18 (39 realtime: conformance, security, all three transports, a 3-node failover), two Playwright specs (a server restart with changes made while it was down; WebSocket → SSE → long-polling), and a two-context Chrome session.
+
+- **Fixed: signals sent while a tab was disconnected were lost** (a deploy, a restart, a blip): live regions silently went stale. Every signal now carries its id; pages render a cursor (`?since=`); reconnects replay what was missed (or `refresh`); `app.js` carries the cursor across htmx-ext-sse's reconnects.
+- **Fixed: live regions were dead after a boosted navigation.** The sse extension was loaded in a page's own `<head>`, which a boosted swap never runs. It's in the layout now.
+- **Our own protocol, offrails.v1** (replaces the Phoenix v2 array format): negotiated subprotocol, self-describing JSON object frames (`join`/`leave`/`push`/`ping` up; `ok`/`err`/`event`/`presence`/`pong`/`slow`/`bye` down), stable error codes, `bye` before every close, `seq` resume, WebSocket ping control frames instead of app heartbeats.
+- **Typed channels:** rooms declare `In`/`Out` serde enums (`#[derive(TS)]` in TS modes); undeclared events are refused before the room runs.
+- **Transport fallback:** WebSocket → SSE + POST → long-polling, chosen automatically, remembered per tab, upgraded back when possible. `APP_REALTIME_TRANSPORTS` lists what the server offers.
+- **Connection security:** logout, password change and revocation close that session's sockets and streams at once (4401), across processes and nodes; periodic revalidation closes expired sessions (`APP_REALTIME_REVALIDATE_SECS`); pushes re-authorized against current state; per-user caps (connections, topics, joins/min); presence never carries emails; cross-site refused on every transport.
+- **`/dev/sockets`** shows each connection's transport and a live decoded frame log (development only).
+
+**App migration** (reconcile, don't re-create; apps without channels do steps 1–3 only):
+
+1. **SSE resume.** Detect `pub struct Signal { pub stream, pub event }` in `src/kernel/pubsub.rs`. Final shape: `Signal { id, stream, event }` (row id), plus `pubsub::high_water` and `pubsub::missed` (realtime.md#kernel-spec). Converge: add the field (set it in `poll_once`), add the two functions; in `channels::stream` take `Query<StreamQuery>` + `HeaderMap`, subscribe first, replay `missed` with ids (or `refresh`), send `ready` with the cursor, add `.id(sig.id)` to live events, skip only exact replayed ids. No migration (the `broadcasts.id` column already exists).
+2. **Pages render a cursor.** For every page with `sse-connect`: read `pubsub::high_water(&db)` before the page's data and render `sse-connect="…?since={cursor}"`. Add the `createEventSource` override and the `bye` listener to `static/app.js` (realtime.md#client-side). Inertia/SPA: pass the cursor as a prop and use it in `?since=`.
+3. **The sse extension in the layout.** Detect `htmx_sse` inside a template's `{% block head %}`: move the script tag into `templates/layouts/application.html` (after htmx) and delete the block. Add the "every page loads the live-update extension" test.
+4. **Channels: switch client and server together** (the formats are incompatible, and old clients now get `bye` `protocol` "subprotocol offrails.v1 required" + close 1002). Replace `kernel/hub.rs`, `kernel/channels.rs` and `static/channels.js` (or `web/src/lib/socket.ts`) per channels.md; convert each room to typed `In`/`Out` enums, `joined(.., since)` returning `Joined`, `handle_in(.., msg: Self::In, out: &mut Outbox<Self::Out>)` returning `Result<Payload, Rejection>`, `out.emit(seq, …)`; rename events on the page (`ch.channel(topic, { since })`, `ch.on("<out event>")`, `ch.push("<in event>")`, errors are `{code, message}`). `cluster.rs` only changes `String` errors to `Rejection`.
+5. **Connection security.** `Member` gains `#[serde(skip)] session: Option<i64>`; add `SessionAndUser`; `session::destroy`/`destroy_all_for_user` write the `member:<id>` / `session-ended` signal; `AppState::new` calls `hub.watch_revocations(pubsub.subscribe())` and `hub.log_frames(is_development)`; `Channels` gains `session_valid`; the SSE stream ends with `bye` on `session_ended`. Config: `APP_REALTIME_REVALIDATE_SECS` (60), `APP_REALTIME_TRANSPORTS` (all), in `Config` and `.env.example`.
+6. **Fallback transports.** Add the four routes (`/socket/sse`, `/socket/sse/{conn}`, `/socket/poll`, `/socket/poll/{conn}` GET+POST) with `ROUTES` rows, and the handlers calling `kchannels::sse_open` / `relay_post` / `poll_open` / `poll_get`.
+7. **Tests:** port `support::Ws` to offrails.v1, add `wire_test.rs` and the resume/session cases in `kernel_pubsub_test.rs`, and `tests/e2e/realtime.spec.ts` (channels.md#testing).
 
 ## 0.3.0 (2026-10-13)
 

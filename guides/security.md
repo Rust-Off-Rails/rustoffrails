@@ -147,6 +147,7 @@ See `storage.md`. In short: enforce a size limit per route (`DefaultBodyLimit`),
   - silence for 60s closes it;
   - per-person limits for app events (e.g. 10 messages per 10s) live in the room, so they hold across tabs and nodes.
 - **Output:** room payloads carry raw user text. The client renders it with `textContent`, and the server-rendered page escapes it.
+- **For the connection's whole life** ([channels#security](channels.md#security)): logout, a password change or revocation closes that session's sockets **and** SSE streams at once (4401 / `bye`), in every process and node; periodic revalidation closes expired sessions; every push is re-authorized against the database; per-user caps (8 connections, 20 topics, 30 joins/min); presence carries minimal metadata, never emails; the SSE and long-poll fallbacks refuse cross-site requests and bind relays to member + token.
 
 ## Secrets
 

@@ -2,7 +2,7 @@
 
 **Broadcast signals, not HTML.** When data changes, the server announces "book 42's reviews changed" on a stream. Clients that care re-fetch through the normal, already-authorized GET routes. This is Turbo 8's "page refresh" broadcast model. Payloads stay tiny, nothing gets rendered per subscriber, authorization can't leak through a broadcast, and it works identically in all three frontend modes.
 
-> Verified on 2026-10-12 in the reference app (htmx, live reviews on a book page): axum 0.8.9 `Sse`, tokio-stream 0.1.19 `BroadcastStream`, htmx 2.0.11 with htmx-ext-sse 2.2.4, tests on SQLite and Postgres, and a two-browser smoke (an edit in one context appeared in the other without a refresh).
+> Verified on 2026-10-12 in the reference app (htmx, live reviews on a book page): axum 0.8.9 `Sse`, tokio-stream 0.1.19 `BroadcastStream`, htmx 2.0.11 with htmx-ext-sse 2.2.4, tests on SQLite and Postgres, a two-browser smoke (an edit in one context appeared in the other without a refresh), and a Playwright downtime test: a review changed while the page's server was down appeared once it came back, with no reload.
 
 | Rails | Off Rails |
 |-------|-----------|
@@ -17,7 +17,8 @@
 
 - **Streams:** `<singular>:<id>` (`book:42`) for "things about this record", or `<plural>` (`books`) for "the list changed". Build them in one place, the model: `review::stream(book_id) -> String`.
 - **Events:** `<plural>-changed` (`reviews-changed`) for "re-fetch that list". It covers create, update and delete. The client re-fetches either way, so separate verbs add listeners without adding information. Use a specific event only when clients react differently (`book-deleted` → navigate away).
-- **`refresh`** is reserved. The server sends it when a subscriber lagged and may have missed signals, and the client re-fetches everything it shows.
+- **`refresh`** is reserved. The server sends it when a subscriber lagged or reconnected with a cursor older than what's retained, and the client re-fetches everything it shows.
+- **`ready`** and **`bye`** are reserved too: `ready` hands the client its resume cursor on connect; `bye` (data `revoked`) means the session ended and the client must stop reconnecting.
 
 ## Table
 
@@ -37,7 +38,10 @@ The primary key is the only index needed. The migration (`create_broadcasts`) co
 pub mod broadcast_row { /* entity for `broadcasts` */ }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Signal { pub stream: String, pub event: String }
+pub struct Signal { pub id: i64, pub stream: String, pub event: String }   // id = the row id: the resume cursor
+
+pub struct Missed { pub signals: Vec<Signal>, pub gap: bool }
+pub const SESSION_ENDED: &str = "session-ended";   // on stream `member:<id>` (channels.md#security)
 
 #[derive(Clone)]
 pub struct PubSub {
@@ -50,6 +54,11 @@ pub struct PubSub {
 /// INSERT a row. Call it inside the transaction that changed the data.
 pub async fn broadcast(db: &impl ConnectionTrait, stream: &str, event: &str) -> Result<(), DbErr>;
 pub async fn delete_older_than(db: &impl ConnectionTrait, age: chrono::Duration) -> Result<u64, DbErr>;
+/// The newest signal id (0 if none): where a new subscriber's cursor starts.
+pub async fn high_water(db: &impl ConnectionTrait) -> Result<i64, DbErr>;
+/// What a cursor missed on one stream: the latest signal per event name, oldest first, and
+/// `gap` if signals after the cursor may have been pruned (the client must re-fetch everything).
+pub async fn missed(db: &impl ConnectionTrait, stream: &str, after: i64) -> Result<Missed, DbErr>;
 
 impl PubSub {
     pub fn new(db: DatabaseConnection) -> Self;                 // in AppState::new; doesn't poll
@@ -73,31 +82,45 @@ impl PubSub {
   - **The 250ms tick** stays as a backstop, and it's how a separate `app worker` process on SQLite reaches the web process.
   - **Tests** prove the wake-up path with `start_with(Duration::from_secs(60))`: a delivery within seconds can't have come from the poll. Never assert on elapsed time; it flakes under parallel load.
 
+## Resume
+
+A signal sent while a tab is disconnected (a deploy or restart, a network blip, the server briefly unhealthy) must not be lost: otherwise the live region silently goes stale. Every signal carries its row id as the SSE `id`, and **every connection has a cursor**:
+
+1. **The page renders its cursor.** The handler reads `pubsub::high_water(&db)` **before** the data it renders, and the live region connects with `sse-connect="/streams/book:42?since=<cursor>"`. A change between rendering and connecting has a higher id, so it's replayed.
+2. **On connect with a cursor** (`?since=` or `Last-Event-ID`, whichever is newer), the server first sends what was missed: the latest signal per event name after the cursor (they're signals, so one of each is enough), or `refresh` if the cursor is older than what's retained (`CleanupJob` pruned it). Then `ready` (the current cursor), then live signals.
+3. **The client keeps its cursor current** from every event's id and from `ready`, and sends it on every reconnect. Native `EventSource` reconnects send `Last-Event-ID` by themselves; **htmx-ext-sse's own reconnects create a new `EventSource`, which forgets it**, so `static/app.js` overrides `htmx.createEventSource` to put the newest cursor in `?since=` (below).
+
+The server **subscribes before reading the database**, so nothing committed in between is lost, and skips only exact duplicates of replayed ids. Never filter live signals by "id ≤ cursor": on Postgres a transaction can take a lower id and commit later.
+
 ## The stream endpoint (`src/channels/mod.rs`)
 
 All SSE lives under **`/streams/`**: one route, `.route("/streams/{stream}", get(channels::stream))`, with an `Access::User` row in `ROUTES`. It dispatches to a per-resource authorizer by the stream's prefix:
 
 ```rust
+#[derive(serde::Deserialize, Default)]
+pub struct StreamQuery { pub since: Option<i64> }
+
 pub async fn stream(
     State(s): State<AppState>,
-    RequireUser(user): RequireUser,
+    SessionAndUser(found): SessionAndUser,          // the session too: logout and expiry end the stream
     Path(stream): Path<String>,
-) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, AppError> {
+    Query(q): Query<StreamQuery>,
+    headers: HeaderMap,
+) -> Result<Response, AppError> {
+    let cfg = s.socket_config();
+    if let Some(refused) = kchannels::check_fetch_site(&cfg, &headers) { return Ok(refused); }   // cross-site → 403
+    let Some((sess, user)) = found else { return Err(AppError::Unauthorized) };
+    let member = member_for(&user, Some(sess.id));
+    if s.hub.conns_of(&member.key) >= cfg.max_conns_per_user { return Err(AppError::TooManyRequests) }
     authorize_stream(&s, &user, &stream).await?;
-    let events = BroadcastStream::new(s.pubsub.subscribe())
-        .filter_map(move |msg| {
-            let stream = stream.clone();
-            async move {
-                // `data` must be non-empty: browsers silently drop events without data.
-                match msg {
-                    Ok(sig) if sig.stream == stream => Some(Ok(Event::default().event(sig.event).data(stream))),
-                    Ok(_) => None,
-                    Err(_lagged) => Some(Ok(Event::default().event("refresh").data(stream))),
-                }
-            }
-        })
-        .take_until(s.pubsub.closed());                 // ends on shutdown
-    Ok(Sse::new(events).keep_alive(KeepAlive::default()))
+    let guard = kchannels::ConnGuard::register(&s, &member, "sse");     // shows in /dev/sockets, counts in caps
+    let cursor = last_event_id(&headers).max(q.since);
+    let rx = s.pubsub.subscribe();                                       // before reading the database
+    // first: missed signals (with ids) or `refresh`, then `ready` with the cursor
+    // live: signals for this stream with `.id(sig.id)`, skipping exact replayed ids; Lagged → `refresh`
+    // `bye` (data "revoked") when kchannels::session_ended(..) resolves, then the stream ends
+    Ok(Sse::new(first.chain(live.take_until(ended)).chain(bye).take_until(s.pubsub.closed()))
+        .keep_alive(KeepAlive::default()).into_response())
 }
 
 /// Every stream is authorized; unknown prefixes and malformed ids are 404.
@@ -110,9 +133,10 @@ pub async fn authorize_stream(s: &AppState, user: &User, stream: &str) -> Result
 ```
 
 - **Never send `data("")`.** Per the HTML spec, an event whose data buffer is empty is not dispatched, and `EventSource` drops it without any error. The reference app shipped this bug with every HTTP test green; only the real-browser smoke caught it. Send the stream name as data.
+- **Security** ([channels.md#security](channels.md#security)): a foreign `Origin` or `Sec-Fetch-Site: cross-site` is refused; logout, a password change or revocation ends the stream at once with `bye` (the session-ended signal reaches every process); expiry ends it at the next revalidation (`APP_REALTIME_REVALIDATE_SECS`).
 - `src/channels/<plural>.rs` holds the authorizer: load the record (404 if missing), then `policies::authorize(policies::<plural>::can_view(user, &record))`.
 - `filter_map` and `take_until` come from `futures::StreamExt`. `BroadcastStream` comes from `tokio-stream` (feature `sync`). Both crates come with `new`.
-- **Middleware:** tower-http's `TimeoutLayer` times the response **future** (until headers), not the body, so SSE streams aren't cut at 30s. `CompressionLayer`'s default predicate skips `text/event-stream`. Verify with `curl -N -b <cookie jar> localhost:3000/streams/book:1`. You should see `event: …` followed by `data: book:1`.
+- **Middleware:** tower-http's `TimeoutLayer` times the response **future** (until headers), not the body, so SSE streams aren't cut at 30s. `CompressionLayer`'s default predicate skips `text/event-stream`. Verify with `curl -N -b <cookie jar> localhost:3000/streams/book:1`. You should see `event: ready` with an `id:`, then `event: …` lines followed by `data: book:1`.
 
 ## Broadcasting (in model fns)
 
@@ -130,10 +154,10 @@ pub async fn create(db: &DatabaseConnection, book_id: i64, author_id: i64, new: 
 
 ## Client side
 
-**htmx.** Load the vendored sse extension only on pages that stream: the layout has `{% block head %}{% endblock %}`, and the page adds `<script src="{{ ctx.assets.htmx_sse }}" defer></script>`.
+**htmx.** Load the vendored sse extension **in the layout**, on every page (`<script src="{{ ctx.assets.htmx_sse }}" defer></script>` next to htmx). Never in a page's own `{% block head %}`: a boosted navigation swaps only `<body>`, so the new page's head scripts never run and its live regions silently stay dead. The Playwright downtime test caught this; the old smoke test had passed only because it pressed Back/Forward first, which forces a full load.
 
 ```html
-<div hx-ext="sse" sse-connect="{{ self.stream_path() }}">     {# "/streams/book:42" #}
+<div hx-ext="sse" sse-connect="{{ self.stream_path() }}">     {# "/streams/book:42?since=<cursor rendered with the page>" #}
   {% let book_id = row.book.id.clone() %}
   {% include "reviews/_list.html" %}
 </div>
@@ -151,21 +175,38 @@ pub async fn create(db: &DatabaseConnection, book_id: i64, author_id: i64, new: 
 
 - The region's GET (`GET /books/{id}/reviews`) returns **only the fragment** (with its `<section>` wrapper) when `HxRequest` is true, and redirects to the parent page otherwise. It authorizes like the parent page.
 - The trigger element must sit **inside** the `sse-connect` element.
+- **Carry the cursor across htmx-ext-sse reconnects** (`static/app.js`): remember the newest id per stream path from `htmx:sseMessage` events and the `ready` event, and override the factory so every new `EventSource` gets `?since=` = max(rendered cursor, newest seen). Also close the source on `bye`:
+
+```js
+window.htmx.createEventSource = (url) => {
+  const u = new URL(url, location.href);
+  const seen = cursors.get(u.pathname);
+  if (seen !== undefined && seen > Number(u.searchParams.get("since") ?? -1)) u.searchParams.set("since", String(seen));
+  const source = new EventSource(u.toString());
+  source.addEventListener("ready", (e) => remember(u.toString(), e.lastEventId));
+  source.addEventListener("bye", () => source.close());          // session ended: stop reconnecting
+  return source;
+};
+document.addEventListener("htmx:sseMessage", (e) => e.detail?.target?.url && remember(e.detail.target.url, e.detail.lastEventId));
+```
 - htmx's history cache must be off (`historyCacheSize: 0`, `refreshOnHistoryMiss: true` in the layout's `htmx-config`, [frontend-htmx](frontend-htmx.md)). Otherwise a page reached with Back or Forward is a restored DOM snapshot whose `EventSource` is dead, and live updates silently stop. The real-browser smoke caught this too.
 
-**inertia:**
+**inertia** (pass the cursor as a page prop, `signal_cursor`, read before the data):
 
 ```ts
 useEffect(() => {
-  const es = new EventSource(`/streams/book:${book.id}`)
+  // Native EventSource reconnects resend Last-Event-ID by themselves; a manual reopen must pass the
+  // cursor. On any re-open after the first, the server replays (or sends `refresh`), so no extra fetch.
+  const es = new EventSource(`/streams/book:${book.id}?since=${signal_cursor}`)
   const reload = () => router.reload({ only: ["reviews"] })
   es.addEventListener("reviews-changed", reload)
   es.addEventListener("refresh", () => router.reload())
+  es.addEventListener("bye", () => es.close())
   return () => es.close()
-}, [book.id])
+}, [book.id, signal_cursor])
 ```
 
-**spa:** the same `EventSource`, calling `queryClient.invalidateQueries({ queryKey: ["books", id, "reviews"] })`. Put it in a `useStream(stream, handlers)` hook in `web/src/api/stream.ts`.
+**spa:** the same `EventSource` (cursor from the API response), calling `queryClient.invalidateQueries({ queryKey: ["books", id, "reviews"] })`. Put it in a `useStream(stream, cursor, handlers)` hook in `web/src/api/stream.ts`. If you ever rebuild the `EventSource` yourself (e.g. after `CLOSED`), track `e.lastEventId` and pass it as `since`.
 
 ## Gotchas agents get wrong
 
@@ -177,6 +218,8 @@ useEffect(() => {
 - Starting the poll loop in tests. Call `poll_once()`.
 - Leaving `EventSource` open on unmount (React). Always `close()` in cleanup.
 - htmx history snapshots (see above).
+- **No cursor**: a page rendered without `?since=`, or htmx reconnects without the `createEventSource` override, loses every signal sent while it was disconnected (the reference app shipped this; the human noticed a stale review list after a deploy).
+- **The sse extension in a page's head block**: dead after any boosted navigation (see Client side).
 - Fly/Kamal proxies: SSE works over HTTP/1.1 and HTTP/2 with no special config. WebSocket channels have their own notes in [deployment](deployment.md).
 
 ## Testing
@@ -196,9 +239,11 @@ Required cases:
 - a committed change is delivered to a subscriber;
 - another stream's signal isn't;
 - a rolled-back write delivers nothing (assert `next_event` is `None`);
-- logged out → redirect, and an unknown prefix, malformed id or missing record → 404;
+- logged out → redirect, and an unknown prefix, malformed id or missing record → 404; cross-site → 403;
 - `seek_to_end` doesn't replay history;
+- **resume:** a reconnect with `Last-Event-ID` gets the missed signals (one per event name, with ids), then `ready`; the same with `?since=`; a cursor older than retention gets `refresh`; a first connection gets `ready` with the current cursor and no history (`support::next_sse` returns `(event, id)` including `ready`; `next_event` skips `ready`);
+- **session:** logout / password change ends the stream with `bye`; an expired session ends it at revalidation;
 - `close()` ends an open stream (the body returns `None`);
 - `delete_older_than` cleans up.
 
-Plus the real-browser smoke with two contexts ([test-standards §9](test-standards.md#9-real-browser-smoke)).
+Plus the real-browser checks ([test-standards §9](test-standards.md#9-real-browser-smoke)): two contexts see each other's changes live, and the Playwright downtime test (stop the server, change data through another process, restart: the open page catches up without a reload).
