@@ -4,6 +4,12 @@ Each entry lists convention changes and what an existing app must do about them.
 
 ## Unreleased
 
+(nothing yet)
+
+## 0.4.0 (2026-10-13)
+
+Realtime gets its own wire protocol, **offrails.v1**: typed channels, sequence-based resume after downtime (WebSocket `since`, SSE `Last-Event-ID`), automatic fallback to SSE + POST and then long-polling, and connection security (logout or a password change closes that session's sockets and streams; per-user caps; re-authorized pushes). The security hardening was merged with it and re-verified end to end in the reference app (233 tests on Postgres, ZAP 0 warnings, cargo-deny, gitleaks, browser smoke). Apps can be upgraded from any agent with **`offrails upgrade`** (Claude Code, opencode, Codex) and the agent-neutral **`generators/upgrade.md`**; vendoring now uses anchored excludes from a release tag. The **magic-link** accounts variant is verified by a fresh agent's build (Linkdrop), and its 24 doc findings are fixed below.
+
 ### Realtime: the Off Rails Wire protocol (offrails.v1), resume after downtime, transport fallback, connection security
 
 Spec: `guides/channels.md` (protocol, transports, security), `guides/realtime.md` (resume). Verified in the reference app: 223 tests on SQLite and Postgres 18 (39 realtime: conformance, security, all three transports, a 3-node failover), two Playwright specs (a server restart with changes made while it was down; WebSocket → SSE → long-polling), and a two-context Chrome session.
