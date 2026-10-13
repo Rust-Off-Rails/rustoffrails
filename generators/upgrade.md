@@ -62,6 +62,10 @@ Each slice must be green under the [Definition of Done](../workflow.md#definitio
 
 ## 8. Verify nothing is stale
 
+- `sh .offrails/tools/offrails-check` exits 0. Its `FAIL` lines are convergence work for this upgrade, not pre-existing debt to report and leave.
+- **Reconcile `docs/decisions.md`.** Read every line. For each decision this release makes obsolete (a workaround for a bug the release fixes, a deviation the framework now adopts, a limit the release resizes), add a line that supersedes it by date (`YYYY-MM-DD: supersedes 2026-10-04 (stall watchdog): 0.6.0 serves HTTP/2, removed the watchdog`) and remove the code it justified in the same slice. Never edit or delete the old line ([workflow](../workflow.md#decisions)). Keep a workaround only if you can still reproduce its evidence on the new release, and say so in the superseding line.
+- Copy the app header's `NEVER` list from [`blueprints/AGENTS.md`](../blueprints/AGENTS.md) into the app's `AGENTS.md` when it's missing or older.
+
 - Grep the app (templates, views, `web/src`, docs, tests) for the old version string. Anything that displays the framework version must read `.offrails/VERSION`, never a literal.
 - Run the app's own post-upgrade checks (its `AGENTS.md`, "Post-upgrade checks"). If the app's `AGENTS.md` predates that section, add it from [`blueprints/AGENTS.md`](../blueprints/AGENTS.md) and list anything this upgrade taught you to verify next time.
 - `bash "$FW/hooks/fingerprint.sh" .offrails` now equals the framework's.

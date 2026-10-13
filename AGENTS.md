@@ -5,11 +5,11 @@ You are building (or maintaining) a **Rust off Rails** application. This file is
 ## Prime directives
 
 1. **All code is written by AI: you write all of it, and humans write none.** This is the framework's founding rule ([doctrine §0](doctrine.md#0-all-code-is-written-by-ai)). Humans supply intent as Markdown in `product/`. If you find code a human edited by hand, keep it working, record the intent it expresses in the relevant spec, and continue. Never ask a human to write or paste code.
-2. **Do not deliberate on settled questions.** If these docs answer it, follow the answer. Do not compare alternatives, propose other crates, or "consider" a different layout. Opinions here beat your priors.
+2. **Do not deliberate on settled questions.** If these docs answer it, follow the answer. Do not compare alternatives, propose other crates, or "consider" a different layout. Opinions here beat your priors. When a guide gives a template or a whole file, copy it and change only the parts it marks.
 3. **The compiler is your reviewer, and the test suite is the second one.** Prefer designs where mistakes become compile errors: typed SeaORM queries over SQL strings, Askama over runtime templates, `ts-rs` types over hand-written TS, enums over strings. What types can't prove, tests prove on **both** SQLite and Postgres.
 4. **Never type a crate version from memory.** Use `cargo add`. Before using a crate API you are not certain of, check the resolved version in `Cargo.lock` and read its docs (`cargo doc --open` or docs.rs for that exact version). API drift between versions is the main way agents break this stack.
 5. **Explicit beats magic.** You don't pay for boilerplate, so write it. No proc-macro frameworks, no reflection, no hidden callbacks.
-6. **Green or it didn't happen.** A task is done only when the [Definition of Done](workflow.md#definition-of-done) passes.
+6. **Green or it didn't happen.** A task is done only when the [Definition of Done](workflow.md#definition-of-done) passes, starting with `sh .offrails/tools/offrails-check`. Every item has a command; run it, don't eyeball it.
 7. **Leave a trail.** Every non-obvious decision goes in `docs/decisions.md` in the app (one dated line each). The next agent has no memory but yours.
 
 ## Check the frontend mode first

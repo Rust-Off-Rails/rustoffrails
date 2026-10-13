@@ -16,19 +16,34 @@ ACCOUNTS:       {{none | magic-link | magic-link-invite | signup | invite}}  ROL
 EMAIL:          dev: local mailbox (/dev/mailbox); prod: {{smtp via <provider> | not yet (logged only)}}
 ```
 
+## NEVER
+
+Each line is a mistake an agent shipped. The check that catches it is in parentheses.
+
+- **NEVER look a record up without the actor.** `<model>::find_for(db, &user, id)`, never `find(db, id)`; raw `find`/`destroy` stay `pub(in crate::models)` (`guard_test.rs`, `tenancy_test.rs`, `offrails check`).
+- **NEVER call work done while `sh .offrails/tools/offrails-check` prints a `FAIL`,** or any Definition of Done command fails or was skipped without saying so.
+- **NEVER add a retry, watchdog, reload cap, `sleep` or raised limit without evidence** (the failing request, its status and protocol) and a `docs/decisions.md` line citing it (`.offrails/workflow.md#when-something-fails`).
+- **NEVER serve live pages over HTTP/1.1 in development.** `bin/dev` serves HTTPS + HTTP/2; past ~6 tabs, HTTP/1.1 starves (`curl -sk -o /dev/null -w '%{http_version}' https://localhost:3000/up` prints `2`).
+- **NEVER pick files by loose prefix, depend on `HashMap` order, or hash files per request** (`kernel/assets.rs` uniqueness test).
+- **NEVER change a header line (`FRONTEND_MODE`, `ISLANDS`, `UI_LIBRARY`, `TENANCY`, `FRAMEWORK`) without the code to match**, and never leave `FRAMEWORK` behind `.offrails/VERSION` (`offrails check`).
+- **NEVER tick an acceptance criterion without a test that cites its id,** or write a Security row without a test name (`offrails check`).
+- **NEVER edit `.offrails/` or delete a `docs/decisions.md` line.** Supersede it with a new line (`.offrails/workflow.md#decisions`).
+- **NEVER `pkill`/`killall` by name.** Stop your own PID, or `lsof -ti tcp:$PORT -sTCP:LISTEN | xargs kill`.
+
 ## You are an agent working on a Rust off Rails app
 
 1. **Read `.offrails/AGENTS.md` now**, then follow its load order. It overrides your general habits.
 2. **The human writes no code.** Their intent lives in `product/`. Update the spec before you build, and ask questions per `.offrails/interview.md`.
 3. Follow only the `FRONTEND_MODE` branch of each guide, and the `UI_LIBRARY` branch of the JS guides.
-4. Done means `.offrails/workflow.md#definition-of-done`, green.
-5. Log decisions not covered by `.offrails/` in `docs/decisions.md`.
+4. Done means `.offrails/workflow.md#definition-of-done`, green, with each item's command run. Start with `sh .offrails/tools/offrails-check`.
+5. Log decisions not covered by `.offrails/` in `docs/decisions.md`; supersede, never edit.
 
 ## Quick commands
 
 ```sh
 bin/setup                      # first run
-bin/dev                        # develop (http://localhost:3000{{TS modes only: ", or :5173 via Vite"; htmx: nothing}})
+bin/dev                        # develop (https://localhost:3000, HTTP/2; APP_TLS=off for http{{TS modes only: ", or :5173 via Vite"; htmx: nothing}})
+sh .offrails/tools/offrails-check   # mechanical gates: header, specs ↔ tests, tenancy, scoped lookups
 cargo nextest run              # tests (SQLite)
 docker compose up --build      # the whole app, production-shaped, on Postgres (http://localhost:3000)
 docker compose up -d db && TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres cargo nextest run   # tests on Postgres

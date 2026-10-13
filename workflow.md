@@ -29,14 +29,11 @@ Work in **vertical slices**: one resource or behavior end-to-end, green, then th
 All must pass, in this order. Gates and thresholds are defined in [`guides/test-standards.md`](guides/test-standards.md).
 
 ```sh
+sh .offrails/tools/offrails-check                   # header, every AC cited, Security-table tests exist, tenancy suites, no unscoped lookups (exit 0)
 cargo fmt --all
 cargo clippy --all-targets -- -D warnings
 cargo nextest run                                   # SQLite; also re-exports ts-rs types
 TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres cargo nextest run   # Postgres (docker compose up -d db): required locally when reachable; CI always runs it
-
-# acceptance-criteria traceability: must print nothing (test-standards.md §1)
-comm -23 <(grep -rhoE 'AC-[a-z0-9_-]+-[0-9]+' product/ | sort -u) \
-         <(grep -rhoE 'AC-[a-z0-9_-]+-[0-9]+' tests/ src/ web/src/ 2>/dev/null | sort -u)
 
 # coverage gate (test-standards.md §5): ≥ 80% lines overall, ≥ 90% for src/models and src/policies
 cargo llvm-cov nextest --summary-only --ignore-filename-regex 'src/main\.rs$' --fail-under-lines 80
@@ -56,20 +53,22 @@ pnpm --dir web test --run
 pnpm --dir web build
 ```
 
-Plus:
+Plus, each with the command that proves it (paste its output, or say which item you skipped and why):
 
-- [ ] Apps with a UI: the accessibility suite ([test-standards §10](guides/test-standards.md#10-accessibility-wcag-22-aa-in-every-theme)) passes with zero violations on every route, in light **and** dark, desktop and mobile.
-- [ ] Every acceptance criterion (`AC-<feature>-<n>`) has a test citing its ID, and is ticked only when that test passes on both databases.
-- [ ] New migrations roll back cleanly (`db rollback` then `db migrate`).
-- [ ] No `unwrap()`/`expect()` outside tests and startup code in `main.rs`/`config.rs`.
-- [ ] No raw SQL outside `src/kernel/` and logged escape hatches.
-- [ ] (inertia/spa) Nothing under `web/src/types/` was edited by hand, and no TS type duplicates a Rust type.
-- [ ] No `todo!()`, `unimplemented!()`, or `// TODO` without a linked spec "Open question".
-- [ ] New routes appear in `docs/routes.md` (`cargo run -- routes`).
-- [ ] New env vars appear in `.env.example`, in `Config`, and in the deploy config.
-- [ ] Decisions not covered by `.offrails/` are logged in `docs/decisions.md`.
-- [ ] **Security-relevant changes** (auth, sessions, permissions, tenancy, payments, uploads, realtime, APIs, webhooks, outbound fetches, anything new in `headers_test.rs`) run **`/offrails:security`** or its checklist, fill the spec's `## Security` threat model, and add an **attack test** for each threat: failing first, then fixed. A Non-negotiable ([security](guides/security.md#non-negotiables)) is never weakened without a decision **and** the human's explicit OK. The ZAP baseline runs in CI; run it locally when you add routes or change headers.
-- [ ] If the change is user-visible, you ran the app and exercised it, not just the tests. **UI-affecting changes need a real-browser smoke of the changed flow** ([test-standards §9](guides/test-standards.md#9-real-browser-smoke)): styling applied, Back/Forward, console free of errors and CSP violations. curl alone isn't enough. Emails: check `/dev/mailbox/latest.json`. Jobs: `app jobs list --state discarded` is empty ([dev-tools](guides/dev-tools.md)).
+| Check | Command (prints nothing / exits 0 when it passes) |
+|-------|---------------------------------------------------|
+| Accessibility, apps with a UI: zero violations on every route, light **and** dark, desktop and mobile ([test-standards §10](guides/test-standards.md#10-accessibility-wcag-22-aa-in-every-theme)) | `pnpm --dir web exec playwright test a11y` (TS modes) · `pnpm --dir tests/e2e exec playwright test a11y` (htmx), against a running app |
+| Every `AC-<feature>-<n>` has a test citing it; ticked only when that test passes on both databases | `sh .offrails/tools/offrails-check` (the `[ac]` lines) |
+| New migrations roll back cleanly | `cargo run -- db rollback --steps <n> && cargo run -- db migrate` |
+| No `unwrap()`/`expect()` outside tests and startup | `cargo clippy -q --lib --bins -- -W clippy::unwrap_used -W clippy::expect_used` (non-test code only); every hit is startup code with a message saying why it can't fail |
+| No raw SQL outside `src/kernel/` and logged escape hatches | `grep -rn -e 'Statement::from_string' -e 'execute_unprepared' src/ \| grep -v '^src/kernel/'` |
+| (inertia/spa) `web/src/types/` untouched by hand; no TS type duplicates a Rust type | `cargo test --lib export_bindings && git diff --exit-code web/src/types/` |
+| No `todo!()`, `unimplemented!()`, or `// TODO` without a linked spec "Open question" | `grep -rn -e 'todo!(' -e 'unimplemented!(' -e '// TODO' src/ web/src/ 2>/dev/null` |
+| New routes are in `docs/routes.md` | `cargo run -- routes && git diff --exit-code docs/routes.md` |
+| New env vars are in `.env.example` (commented out is fine), `Config` and the deploy config | `grep -rhoE 'var\("[A-Z_]+"' src/config.rs \| cut -d'"' -f2 \| sort -u \| while read -r v; do grep -qE "^(# ?)?$v=" .env.example \|\| echo "missing in .env.example: $v"; done` |
+| Decisions not covered by `.offrails/` are logged | `git diff --stat docs/decisions.md` shows a line for each new choice ([conventions](#decisions)) |
+| **Security-relevant changes** (auth, sessions, permissions, tenancy, payments, uploads, realtime, APIs, webhooks, outbound fetches, anything new in `headers_test.rs`) | `/offrails:security` or its checklist; the spec's `## Security` STRIDE table names an **attack test** per threat (failing first, then fixed), and `offrails-check` finds each one. A Non-negotiable ([security](guides/security.md#non-negotiables)) is never weakened without a decision **and** the human's explicit OK. ZAP runs in CI; run it locally when you add routes or change headers |
+| User-visible changes: you ran the app and exercised it. **UI changes: a real-browser smoke** of the changed flow ([test-standards §9](guides/test-standards.md#9-real-browser-smoke)) | `BASE=https://localhost:<port> bash .offrails/tools/browser-smoke/run.sh` (styling, Back/Forward, no console errors or CSP violations); live pages: `… run.sh live-tabs`. Emails: `curl -sk $BASE/dev/mailbox/latest.json`. Jobs: `cargo run -- jobs list --state discarded` is empty |
 
 ## When something fails
 
@@ -77,7 +76,20 @@ Plus:
 - **"no such table" / "relation does not exist" at runtime:** run `cargo run -- db migrate`.
 - **Passes on SQLite, fails on Postgres (or the reverse):** you broke a portability rule in `guides/database.md`. Fix the code, not the test.
 - **The same error three times:** stop, reread the relevant guide, and reduce the change to the smallest failing piece.
+- **Evidence first, workarounds last.** Before you add a retry, a timeout, a watchdog, a reload cap, a `sleep`, a polling fallback or a raised limit, capture the evidence of the actual failure: the request and its status (`curl -skv`, the browser's network panel, `chrome://net-export`), the server log line with its `request_id`, the protocol (`%{http_version}`). Then fix the cause. A workaround that stays needs a `docs/decisions.md` line citing that evidence and the cause it covers for. Without one, the next agent deletes it. (A 0.3 app shipped a stall watchdog and reload caps around what was HTTP/1.1 connection starvation; [realtime](guides/realtime.md#many-tabs-stall-http11-vs-http2).)
 - **Genuinely blocked** (needs a credential, an external account, or a product decision): stop and tell the human exactly what you need and why. Don't stub around it silently.
+
+## Decisions
+
+`docs/decisions.md` is the memory between agents. One dated line per choice `.offrails/` didn't dictate, newest last:
+
+```
+2026-10-13: board cards load lazily past 50 (because boards with 400 cards took 2 s; spec: product/features/boards.md)
+```
+
+- **Superseding:** never edit or delete an old line. Add a new one that names it: `2026-11-02: supersedes 2026-10-13 (lazy cards): HTTP/2 fixed the stall, cards load eagerly again`. A reader takes the newest line on a topic.
+- **Workarounds** (retries, watchdogs, caps, fallbacks, raised limits) cite the evidence and the cause they cover for ([evidence first](#when-something-fails)). When the cause is fixed, the line is superseded and the workaround removed in the same change.
+- **Upgrades** reconcile this file: a decision that a new framework release makes obsolete gets a superseding line ([upgrade](generators/upgrade.md)).
 
 ## Human code edits
 
