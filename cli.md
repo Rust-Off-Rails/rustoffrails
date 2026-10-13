@@ -53,9 +53,10 @@ The binary embeds the `migration` crate. The Docker entrypoint (`bin/docker-entr
 | `rails g …`                   | `generators/<name>.md` |
 | `rails routes`                | `cargo run -- routes` (or `/dev/routes` in the browser) |
 | Mission Control – Jobs        | `/admin/jobs`, or `cargo run -- jobs stats` / `jobs list --state discarded` ([jobs-dashboard](guides/jobs-dashboard.md)) |
-| letter_opener_web             | http://localhost:3000/dev/mailbox ([mailers](guides/mailers.md)) |
+| letter_opener_web             | https://localhost:3000/dev/mailbox (`http://` with `APP_TLS=off`) ([mailers](guides/mailers.md)) |
 | `rails test`                  | `cargo nextest run` (SQLite) / `TEST_DATABASE_URL=postgres://… cargo nextest run` |
 | `rubocop`                     | `cargo fmt --check && cargo clippy --all-targets -- -D warnings` |
+| (none: specs ↔ code gates)    | `sh .offrails/tools/offrails-check` or `offrails check`: header consistency, every AC cited, Security-table tests exist, tenancy suites, no unscoped lookups. Exit 1 on any `FAIL`; runs in CI ([workflow](workflow.md#definition-of-done)) |
 | `brakeman`                    | `guides/security.md` checklist (+ optional `cargo audit`) |
 | `rails assets:precompile`     | `htmx`: `bin/tailwindcss -i assets/app.css -o static/app.css --minify`. `inertia`/`spa`: `pnpm --dir web build` |
 | `yarn test`                   | `pnpm --dir web test --run` (Vitest) |

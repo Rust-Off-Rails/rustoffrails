@@ -219,7 +219,7 @@ pub fn can_destroy(user: &User, book: &Book) -> bool { can_edit(user, book) }
 ```
 
 - Call `policies::authorize(policies::books::can_edit(&user, &book))?` in **every** handler that reads private data or writes. Views and props get booleans (`can_edit: bool`) to show or hide buttons. Hiding a button is not authorization.
-- **Visible but not yours → 403. Not visible → 404.** When the actor may see a record but not change it (another reader's book), `authorize` gives 403. For private, owned data, **scope instead of check**: `post::find_for_user(&db, user.id, id)` filters by owner in the query and returns `NotFound`, so another user's id doesn't reveal that the record exists.
+- **Visible but not yours → 403. Not visible → 404.** When the actor may see a record but not change it (another reader's book), `authorize` gives 403. For private, owned data, **scope instead of check**: `post::find_for(&db, &user, id)` filters by owner in the query and returns `NotFound`, so another user's id doesn't reveal that the record exists. The raw `find` is `pub(in crate::models)`, so a handler can't compile the unscoped call ([models](models.md#scoped-lookups-tenancy)).
 - Nested resources authorize against the parent first (`reviews::create` loads the book and checks `books::can_view`).
 - Policies are pure and unit-tested with a truth table: every action × every actor (owner, other user, admin, other tenant). Run `cargo mutants` on `src/policies` with zero survivors ([test-standards](test-standards.md#5-coverage-and-test-strength)). A policy that is constant by spec (`can_view → true`) produces an *equivalent mutant*; list it in `.cargo/mutants.toml` with the reason.
 
@@ -228,7 +228,8 @@ pub fn can_destroy(user: &User, book: &Book) -> bool { can_edit(user, book) }
 - Tables: `accounts (id, name, …)`, `memberships (account_id, user_id, role, unique(account_id, user_id))`. Every tenant-owned table gets `account_id NOT NULL` + an index.
 - URL: `/a/{account_id}/…` (or subdomain, only if the spec says so).
 - `CurrentAccount(Account, Membership)` extractor: resolves from the path, and `Forbidden` if the user has no membership.
-- **Every query on tenant data takes `account_id` and filters by it.** No exceptions, not even "admin" screens. The tenant isolation suite ([test-standards §4](test-standards.md#4-tenant-isolation-suite-every-app-with-accounts)) proves user A can't read account B's records.
+- **Every query on tenant data goes through an actor-scoped model fn** (`find_for(db, &user, id)`, `all_for`, `destroy_for`) that filters by the user's memberships. Raw `find`/`destroy` are model-private ([models](models.md#scoped-lookups-tenancy)). No exceptions, not even "admin" screens: an admin path is its own scoped fn (`all_for_admin`).
+- **Generated with accounts, for every `TENANCY`:** `tests/app/tenancy_test.rs` (every id route in `ROUTES` with another tenant's ids → 404 or its specced status) and `tests/app/guard_test.rs` (no unscoped lookups in handlers). Templates: [test-standards §4](test-standards.md#4-tenant-isolation-suite-every-app-with-accounts). `offrails check` fails without them.
 
 ## Gotchas agents get wrong
 

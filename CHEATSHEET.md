@@ -24,6 +24,7 @@ migration/   templates/   static/   web/ (TS modes)   tests/app/ (ONE test binar
 ## Definition of Done ([workflow.md](workflow.md#definition-of-done))
 
 ```sh
+sh .offrails/tools/offrails-check                        # header, ACs cited, Security tests, tenancy suites, scoped lookups
 cargo fmt --all && cargo clippy --all-targets -- -D warnings
 cargo nextest run                                         # SQLite
 TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres cargo nextest run   # Postgres (docker compose up -d db)
@@ -33,7 +34,7 @@ cargo deny check && gitleaks git . --redact --no-banner   # + pnpm audit --prod 
 # TS:   pnpm --dir web exec biome check --write . && pnpm --dir web typecheck && pnpm --dir web test --run && pnpm --dir web build
 ```
 
-Plus: every `AC-<feature>-<n>` cited by a test · rollback then migrate works · no `unwrap`/`expect` outside tests and startup · no raw SQL outside `src/kernel/` · axe a11y suite in light **and** dark ([§10](guides/test-standards.md#10-accessibility-wcag-22-aa-in-every-theme)) · UI changes checked in a real browser ([§9](guides/test-standards.md#9-real-browser-smoke)) · decisions logged.
+Plus (each has its command in the DoD table): every `AC-<feature>-<n>` cited by a test · rollback then migrate works · no `unwrap`/`expect` outside tests and startup · no raw SQL outside `src/kernel/` · axe a11y suite in light **and** dark ([§10](guides/test-standards.md#10-accessibility-wcag-22-aa-in-every-theme)) · UI changes checked in a real browser ([§9](guides/test-standards.md#9-real-browser-smoke)) · decisions logged.
 
 ## Security non-negotiables ([security.md](guides/security.md#non-negotiables))
 
@@ -66,5 +67,5 @@ Never weaken without a decision entry **and** the human's OK: strict CSP (no `un
 app serve | worker | health | routes
 app db migrate | rollback [--steps N] | status | seed | setup | reset | console
 app jobs stats|list|show|retry|cancel|delete|run|pause|resume|prune      app task <name> [args…]
-bin/setup   bin/dev   docker compose up                                    offrails new | upgrade [--check] | update | doctor
+bin/setup   bin/dev   docker compose up                      offrails new | check | upgrade [--check] | update | doctor
 ```

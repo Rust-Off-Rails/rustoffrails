@@ -31,7 +31,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: shellcheck (installer, offrails command, release + CI scripts)
-        run: shellcheck -s sh install.sh tools/offrails tools/release/release.sh tools/ci/test-install.sh
+      - name: shellcheck (installer, offrails command, offrails-check, release + CI scripts)
+        run: shellcheck -s sh install.sh tools/offrails tools/offrails-check tools/release/release.sh tools/ci/test-install.sh tools/ci/test-offrails-check.sh
+      - name: offrails-check passes a complete app and fails each broken fixture with its message
+        run: sh tools/ci/test-offrails-check.sh
       - name: Install into this runner and clean containers (ubuntu:24.04, debian:trixie-slim)
         run: tools/ci/test-install.sh

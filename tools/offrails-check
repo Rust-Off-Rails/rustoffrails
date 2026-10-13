@@ -1,0 +1,249 @@
+#!/bin/sh
+# offrails-check: mechanical gates for a Rust off Rails app. Exits non-zero on any error.
+#
+#   sh .offrails/tools/offrails-check [APP_DIR]      (in CI, and step 1 of the Definition of Done)
+#   offrails check [APP_DIR]                         (the same script, through the CLI)
+#
+# It checks what prose can't enforce: the AGENTS.md header is consistent, every built acceptance
+# criterion and every Security-table test exists, apps with accounts have the tenancy suites,
+# and handlers make no unscoped lookups. It reads files only; it never builds or runs the app.
+set -eu
+
+usage() {
+  cat <<'EOF'
+Usage: offrails-check [APP_DIR]
+
+Checks a Rust off Rails app (default: the current directory):
+  header       AGENTS.md header is complete and consistent (.offrails/VERSION, UI_LIBRARY, web/)
+  ac           every AC-<feature>-<n> in product/ (not struck through) is cited by a test
+  security     every feature has the STRIDE Security table, and every test it names exists
+  tenancy      TENANCY != none: tests/app/tenancy_test.rs and guard_test.rs exist and are registered
+  guard        TENANCY != none: no unscoped lookups in src/{controllers,channels,graphql,api}
+  routes       docs/routes.md lists every ROUTES path (warning only)
+
+Exit status: 0 when there are no errors (warnings allowed), 1 otherwise, 2 on bad usage.
+EOF
+}
+
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+  -*) usage >&2; exit 2 ;;
+esac
+APP=${1:-.}
+[ -d "$APP" ] || { printf 'offrails-check: %s is not a directory\n' "$APP" >&2; exit 2; }
+cd "$APP"
+
+errors=0
+warnings=0
+fail() { errors=$((errors + 1)); printf 'FAIL [%s] %s\n' "$1" "$2"; [ -z "${3:-}" ] || printf '     fix: %s\n' "$3"; }
+warn() { warnings=$((warnings + 1)); printf 'WARN [%s] %s\n' "$1" "$2"; [ -z "${3:-}" ] || printf '     fix: %s\n' "$3"; }
+pass() { printf 'ok   [%s] %s\n' "$1" "$2"; }
+
+# Directories that may hold tests (Rust unit tests live in src/, browser tests in tests/e2e or web/).
+test_dirs() { for d in tests src web/src web/e2e e2e; do [ -d "$d" ] && printf '%s\n' "$d"; done; return 0; }
+
+# ---- header ------------------------------------------------------------------------------------
+if [ ! -f AGENTS.md ]; then
+  fail header "no AGENTS.md here: not a Rust off Rails app (run from the app root or pass APP_DIR)"
+  printf '\noffrails-check: %s error(s), %s warning(s)\n' "$errors" "$warnings"
+  exit 1
+fi
+
+# hdr KEY: the word after "KEY:" in the AGENTS.md header (first occurrence), or empty.
+hdr() {
+  awk -v k="$1:" '{ for (i = 1; i < NF; i++) if ($i == k) { print $(i + 1); exit } }' AGENTS.md
+}
+
+MODE=$(hdr FRONTEND_MODE)
+ISLANDS=$(hdr ISLANDS)
+UI=$(hdr UI_LIBRARY)
+TENANCY=$(hdr TENANCY)
+header_ok=1
+
+for key in FRAMEWORK FRONTEND_MODE ACCOUNTS TENANCY; do
+  if ! grep -q "$key:" AGENTS.md; then
+    fail header "AGENTS.md header has no $key line" "restore it from .offrails/blueprints/AGENTS.md"
+    header_ok=0
+  fi
+done
+
+case "$MODE" in
+  htmx|inertia|spa|api|"") ;;
+  *) fail header "FRONTEND_MODE is '$MODE'; expected htmx | inertia | spa | api"; header_ok=0 ;;
+esac
+case "$TENANCY" in
+  per-user|teams|shared|none|"") ;;
+  *) fail header "TENANCY is '$TENANCY'; expected per-user | teams | shared | none"; header_ok=0 ;;
+esac
+
+needs_ui=0
+case "$MODE" in inertia|spa) needs_ui=1 ;; esac
+[ "$ISLANDS" = yes ] && needs_ui=1
+if [ "$needs_ui" = 1 ]; then
+  case "$UI" in
+    react|svelte) ;;
+    *) fail header "FRONTEND_MODE: $MODE, ISLANDS: ${ISLANDS:-no} needs UI_LIBRARY: react | svelte (found '${UI:-none}')" \
+         "set UI_LIBRARY to the library web/ is written in"; header_ok=0 ;;
+  esac
+  if [ ! -d web ]; then
+    fail header "FRONTEND_MODE: $MODE, ISLANDS: ${ISLANDS:-no} needs a web/ directory, and there is none" \
+      "set ISLANDS: no (and FRONTEND_MODE) to what the app really is, or generate web/ per .offrails/guides"
+    header_ok=0
+  fi
+fi
+
+fw_line=$(grep -m1 'FRAMEWORK:' AGENTS.md || true)
+fw_header=$(printf '%s\n' "$fw_line" | grep -o '[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*' | head -n1 || true)
+fw_vendored=$(head -n1 .offrails/VERSION 2>/dev/null | tr -d '[:space:]' || true)
+if [ -z "$fw_vendored" ]; then
+  fail header ".offrails/VERSION is missing" "vendor the framework (generators/new.md step 1) or run offrails upgrade"
+  header_ok=0
+elif [ -n "$fw_line" ] && [ "$fw_header" != "$fw_vendored" ]; then
+  fail header "AGENTS.md says FRAMEWORK ${fw_header:-?}, but .offrails/VERSION is $fw_vendored" \
+    "finish the upgrade (.offrails/generators/upgrade.md), then set the FRAMEWORK line to $fw_vendored"
+  header_ok=0
+fi
+[ "$header_ok" = 1 ] && pass header "FRONTEND_MODE=$MODE TENANCY=${TENANCY:-?} FRAMEWORK=$fw_vendored"
+
+# ---- acceptance criteria -------------------------------------------------------------------------
+if [ -d product ]; then
+  dirs=$(test_dirs)
+  ac_total=0; ac_missing=0; ac_unticked=0
+  # Definition lines: "- [x] AC-x-1: …", "- [ ] AC-x-1: …" or "- AC-x-1: …". Struck (~~AC-…~~) ones are dropped.
+  ac_lines=$(grep -rhE '^[[:space:]]*[-*][[:space:]]+(\[[ xX]\][[:space:]]+)?AC-[A-Za-z0-9_-]+-[0-9]+' product 2>/dev/null \
+    | grep -v '~~AC-' || true)
+  ac_ids=$(printf '%s\n' "$ac_lines" | grep -oE 'AC-[A-Za-z0-9_-]+-[0-9]+' | sort -u || true)
+  for id in $ac_ids; do
+    ac_total=$((ac_total + 1))
+    file=$(grep -rlE "$id([^0-9]|\$)" product | head -n1)
+    # shellcheck disable=SC2086  # $dirs is a newline-separated list of directory names
+    if [ -z "$dirs" ] || ! grep -rqE "$id([^0-9]|\$)" $dirs 2>/dev/null; then
+      ac_missing=$((ac_missing + 1))
+      fail ac "$id ($file) is not cited by any test" \
+        "write the test that proves it, with '/// $id' in its doc comment (strike the criterion through if the human dropped it)"
+    elif printf '%s\n' "$ac_lines" | grep -E "$id([^0-9]|\$)" | grep -q '\[ \]'; then
+      ac_unticked=$((ac_unticked + 1))
+      warn ac "$id ($file) is cited by a test but still unticked" "tick it ([x]) once that test passes on SQLite and Postgres"
+    fi
+  done
+  [ "$ac_missing" = 0 ] && pass ac "$ac_total acceptance criteria, all cited by tests"
+else
+  warn ac "no product/ directory: no specs to trace"
+fi
+
+# ---- Security tables ----------------------------------------------------------------------------
+if [ -d product/features ]; then
+  sec_total=0; sec_bad=0
+  for spec in product/features/*.md; do
+    [ -f "$spec" ] || continue
+    section=$(awk '/^## /{ s = ($0 ~ /^## Security/) } s' "$spec")
+    if [ -z "$section" ]; then
+      sec_bad=$((sec_bad + 1))
+      fail security "$spec has no '## Security' section" \
+        "add the threat model table from .offrails/blueprints/feature-spec.md (every threat: a control and a test)"
+      continue
+    fi
+    if ! printf '%s\n' "$section" | grep -qE '^\|.*STRIDE.*\|.*Test[[:space:]]*\|'; then
+      sec_bad=$((sec_bad + 1))
+      fail security "$spec: the Security section isn't the STRIDE table (| STRIDE | Threat | Control | Test |)" \
+        "rewrite it as the table from .offrails/blueprints/feature-spec.md, one row per threat, naming a test in each"
+      continue
+    fi
+    rows=$(printf '%s\n' "$section" | grep -E '^\|' | grep -vE '^\|[[:space:]]*-' | grep -v 'STRIDE')
+    # One row per line; the Test cell is the last one. "…" and {{placeholders}} are unfinished rows.
+    while IFS= read -r row; do
+      [ -n "$row" ] || continue
+      cell=$(printf '%s\n' "$row" | awk -F'|' '{ print $(NF - 1) }')
+      # shellcheck disable=SC2016  # literal backticks
+      names=$(printf '%s\n' "$cell" | grep -oE '`[A-Za-z0-9_:]+`' | tr -d '`' | sed 's/.*:://' \
+        | grep -E '^[a-z_][a-z0-9_]*$' || true)
+      threat=$(printf '%s\n' "$row" | awk -F'|' '{ gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); print $3 }')
+      if [ -z "$names" ]; then
+        sec_bad=$((sec_bad + 1))
+        fail security "$spec: threat \"$threat\" names no test (\`test_name\` in the Test column)" \
+          "write the test that proves the control and name it there"
+        continue
+      fi
+      for name in $names; do
+        sec_total=$((sec_total + 1))
+        # shellcheck disable=SC2046  # word-split the directory list on purpose
+        if ! grep -rqE "fn ${name}[[:space:]]*[(<]" $(test_dirs) 2>/dev/null; then
+          sec_bad=$((sec_bad + 1))
+          fail security "$spec names test \`$name\` (threat \"$threat\"), and no test has that name" \
+            "write the test (it's the control's proof), or rename the entry to the test that exists"
+        fi
+      done
+    done <<ROWS
+$rows
+ROWS
+  done
+  [ "$sec_bad" = 0 ] && pass security "$sec_total Security-table tests, all present"
+fi
+
+# ---- tenancy suites -----------------------------------------------------------------------------
+if [ -n "$TENANCY" ] && [ "$TENANCY" != none ]; then
+  for f in tenancy_test guard_test; do
+    if [ ! -f "tests/app/$f.rs" ]; then
+      fail tenancy "TENANCY: $TENANCY but tests/app/$f.rs is missing" \
+        "generate it from .offrails/guides/test-standards.md#4-tenant-isolation-suite-every-app-with-accounts"
+    elif ! grep -qE "^[[:space:]]*mod $f;" tests/app/main.rs 2>/dev/null; then
+      fail tenancy "tests/app/$f.rs exists but tests/app/main.rs has no 'mod $f;', so it never runs" \
+        "add 'mod $f;' to tests/app/main.rs"
+    else
+      pass tenancy "tests/app/$f.rs present and registered"
+    fi
+  done
+  if [ -f tests/app/tenancy_test.rs ] && ! grep -q 'ROUTES' tests/app/tenancy_test.rs; then
+    fail tenancy "tests/app/tenancy_test.rs doesn't iterate ROUTES, so new routes go untested" \
+      "rebuild it from the §4 template (it loops over ROUTES)"
+  fi
+fi
+
+# ---- guard patterns -----------------------------------------------------------------------------
+if [ -n "$TENANCY" ] && [ "$TENANCY" != none ]; then
+  hdirs=""
+  for d in src/controllers src/channels src/graphql src/api; do [ -d "$d" ] && hdirs="$hdirs $d"; done
+  guard_hits=0
+  if [ -n "$hdirs" ]; then
+    for pattern in 'RequireUser(_' 'ApiUser(_' '::find(' '::destroy(' '::all(' '::find_system(' 'Entity::find'; do
+      # shellcheck disable=SC2086  # $hdirs is a space-separated list of directory names
+      hits=$(grep -rnF --include='*.rs' -e "$pattern" $hdirs 2>/dev/null \
+        | grep -vF '// unscoped:' \
+        | awk -F: '{ line = $0; sub(/^[^:]*:[^:]*:[[:space:]]*/, "", line); if (line !~ /^\/\//) print $1 ":" $2 }' || true)
+      for h in $hits; do
+        guard_hits=$((guard_hits + 1))
+        errors=$((errors + 1))
+        # shellcheck disable=SC2016  # literal backticks
+        printf 'FAIL [guard] %s: `%s` in a handler (unscoped data access)\n' "$h" "$pattern"
+      done
+    done
+    if [ "$guard_hits" = 0 ]; then
+      pass guard "no unscoped lookups in$hdirs"
+    else
+      printf '     fix: look records up with <model>::find_for(db, &user, id) / all_for / destroy_for\n'
+      printf '          (.offrails/guides/models.md#scoped-lookups-tenancy). Public by spec: end the line\n'
+      printf "          with '// unscoped: <AC id or reason>'.\n"
+    fi
+  fi
+fi
+
+# ---- docs/routes.md -----------------------------------------------------------------------------
+if [ -f src/routes.rs ] && grep -q 'pub const ROUTES' src/routes.rs; then
+  paths=$(awk '/pub const ROUTES/{ s = 1 } s; s && /^\];/{ exit }' src/routes.rs | grep -oE '"/[^"]*"' | tr -d '"' | sort -u)
+  if [ ! -f docs/routes.md ]; then
+    warn routes "docs/routes.md is missing" "cargo run -- routes"
+  else
+    stale=""
+    for p in $paths; do
+      grep -qF -- "$p" docs/routes.md || stale="$stale $p"
+    done
+    if [ -n "$stale" ]; then
+      warn routes "docs/routes.md is missing ROUTES path(s):$stale" "cargo run -- routes"
+    else
+      pass routes "docs/routes.md lists every ROUTES path"
+    fi
+  fi
+fi
+
+printf '\noffrails-check: %s error(s), %s warning(s)\n' "$errors" "$warnings"
+[ "$errors" = 0 ]

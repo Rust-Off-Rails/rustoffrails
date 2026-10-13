@@ -256,7 +256,7 @@ Generate these in order. Each module compiles against the ones before it. The or
 | `compose.yaml` | **The whole app, production-shaped**: `docker compose up --build` runs the `app` service (built from the `Dockerfile`, `APP_ENV=production`, healthcheck `app health`) against a `db` service (Postgres, the production major, healthcheck `pg_isready`, a named volume, published on `127.0.0.1:${DB_PORT:-5432}` so `TEST_DATABASE_URL` works from the host). Profiles: `worker` (a separate `app worker` container; run with `APP_INLINE_WORKER=false`) and `mail` (Mailpit; `SMTP_URL=smtp://mailpit:1025`). Ports overridable (`APP_PORT`, `DB_PORT`, `MAILPIT_PORT`). The full file is in [deployment](../guides/deployment.md#docker-compose-the-whole-app-locally). `bin/dev` stays the fast native loop |
 | `Dockerfile` | Per [deployment](../guides/deployment.md#dockerfile-shape) (trixie images). Delete the `web` stage in plain htmx and `api` modes, and the Tailwind line in `api` mode |
 | Deploy config | Only for the chosen `DEPLOY_TARGET`. Skip it if "decide later" |
-| `.github/workflows/ci.yml` | Per [testing](../guides/testing.md#ci): SQLite, Postgres, frontend (TS modes), **security** (cargo-deny + gitleaks over the full history) and Docker jobs. The Docker job boots the production image and runs the **ZAP baseline** against it ([security](../guides/security.md#automated-enforcement)) |
+| `.github/workflows/ci.yml` | Per [testing](../guides/testing.md#ci), with `sh .offrails/tools/offrails-check` as the SQLite job's first check: SQLite, Postgres, frontend (TS modes), **security** (cargo-deny + gitleaks over the full history) and Docker jobs. The Docker job boots the production image and runs the **ZAP baseline** against it ([security](../guides/security.md#automated-enforcement)) |
 | `deny.toml` | cargo-deny: advisories (`yanked = "deny"`, `unmaintained = "all"`), permissive licenses, `[licenses.private] ignore = true`, the [stack](../stack.md) "Banned" list as `[bans] deny` (plus `openssl`, `openssl-sys`, `native-tls`), crates.io-only sources. Set `publish = false` in `Cargo.toml` and `migration/Cargo.toml`. The full file is in [security](../guides/security.md#automated-enforcement) |
 | `.gitleaks.toml` | `[extend] useDefault = true` and an allowlist of build/runtime paths only (`target/`, `storage/`, `node_modules/`, `web/dist/`, `static/vendor/`) |
 | `.zap/rules.tsv` | The triaged ZAP baseline rules (htmx `eval` 10110, anti-CSRF tokens 10202, COEP 90004 → `IGNORE`; 10049/10111/10112 → `INFO`), each with its reason. Plus `.zap/.gitignore` for scan output (`/zap-report.*`, `/zap.yaml`, `/gen.conf`) |
@@ -305,6 +305,7 @@ The layout is one binary, `tests/app/` ([testing](../guides/testing.md)):
 Also, generated with the kernel and never skipped:
 
 - `tests/app/kernel_jobs_test.rs`: the full list in [jobs](../guides/jobs.md#testing-obantesting-equivalents) (claims race, outcomes, retries, uniqueness, `insert_all`, Lifeline, Pruner, Cron once across nodes, the runtime: run + shutdown, cancel-while-executing aborts, pause/resume, shutdown leaves work to Lifeline; the admin API).
+- `tests/app/guard_test.rs` and `tests/app/tenancy_test.rs` when `TENANCY` isn't `none`: generated in step 8 by [`authentication.md`](authentication.md) from [test-standards §4](../guides/test-standards.md#4-tenant-isolation-suite-every-app-with-accounts), registered in `main.rs`.
 - `tests/app/kernel_web_test.rs`: the dashboard pages, fragments, actions, bulk confirmation, flashes and gone-job redirect ([jobs-dashboard](../guides/jobs-dashboard.md#mounting-and-access)); the mailbox (tabs, iframe CSP, `/message.eml`, attachments, Cc/Bcc, new-mail banner, previews, JSON, mailer selection, `deliver_later_until`) ([mailers](../guides/mailers.md#testing)); `/dev` pages; `no-store` everywhere; app links into kernel pages carry `hx-boost="false"`; the pending-migrations page and `/up` 503 ([dev-tools](../guides/dev-tools.md#pending-migrations)); and the axum fact that `/{id}.eml` panics.
 
 ## 8. Accounts
@@ -314,7 +315,7 @@ If `ACCOUNTS` isn't "none", run [`authentication.md`](authentication.md) now.
 ## 9. Verify & report
 
 1. `bin/setup` (creates `.env`, builds the CSS, migrates and seeds the dev DB).
-2. The [Definition of Done](../workflow.md#definition-of-done), on SQLite **and** Postgres. Without a local Postgres, run `docker run -d --name pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:<major>`, then `TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres cargo nextest run`.
+2. `sh .offrails/tools/offrails-check` exits 0, then the [Definition of Done](../workflow.md#definition-of-done), on SQLite **and** Postgres. Without a local Postgres, run `docker run -d --name pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:<major>`, then `TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres cargo nextest run`.
 3. Prove the migrations are reversible on both databases: `cargo run -- db rollback --steps <n>` then `cargo run -- db migrate`. For Postgres, set `DATABASE_URL` to a scratch database.
 4. Run the app: `cargo run -- serve`, then:
    - `curl -i localhost:3000/up` returns 200;

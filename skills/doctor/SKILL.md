@@ -9,7 +9,7 @@ context: fork
 
 Only for Rust off Rails apps (a `.offrails/` directory exists). Mode: $ARGUMENTS (with `--fix`, fix the violations; otherwise only report them).
 
-Read `.offrails/AGENTS.md`, `structure.md`, `stack.md` and `workflow.md`, plus the app's `AGENTS.md`. Then check each item and record a verdict (ok / violation with `file:line` / n/a):
+**Start with the script:** `sh .offrails/tools/offrails-check` (apps before 0.6.0: `sh ${CLAUDE_PLUGIN_ROOT}/tools/offrails-check`). Report its `FAIL` lines as violations verbatim; they are mechanical facts (header consistency, uncited ACs, missing Security-table tests, missing tenancy suites, unscoped lookups in handlers). Then read `.offrails/AGENTS.md`, `structure.md`, `stack.md` and `workflow.md`, plus the app's `AGENTS.md`, and check each remaining item and record a verdict (ok / violation with `file:line` / n/a):
 
 **Structure** (`structure.md`)
 - No top-level directories beyond the tree; nothing outside the app's `FRONTEND_MODE`.
@@ -37,7 +37,7 @@ Read `.offrails/AGENTS.md`, `structure.md`, `stack.md` and `workflow.md`, plus t
 **Tests** (`guides/test-standards.md`)
 - The app's archetypes (§2) are identified, and each one's required suites exist.
 - `tests/app/security_test.rs` has the access matrix over `ROUTES`, and every `ROUTES` entry declares its access level.
-- Multi-tenant apps: the tenant isolation suite covers every tenant-scoped model.
+- Apps with accounts: `tenancy_test.rs`'s `Tenant` holds a record of every tenant-owned model, and its `EXPECTED` entries each cite an AC that really makes that route shared (the script checks the files exist, not that they're complete).
 - Public API: contract snapshots exist and none changed without a decision entry.
 - No `sleep` in tests, no `#[ignore]` without a decision, and no assertions weakened in recent history (`git log -p tests/`).
 
@@ -47,7 +47,6 @@ Read `.offrails/AGENTS.md`, `structure.md`, `stack.md` and `workflow.md`, plus t
 - Spot-check contrast of code blocks, terminal cards and focus rings in both themes.
 
 **Specs ↔ code**
-- Every `AC-…` ID in `product/features/*.md` is cited by a test (test-standards §1). List those that aren't.
 - Env vars agree across `Config`, `.env.example` and the deploy config.
 - Code that looks human-written (check `git log`) has its intent captured in a spec or decision.
 

@@ -1,0 +1,154 @@
+#!/bin/sh
+# shellcheck disable=SC2016  # backticks in expected messages are literal
+# Tests tools/offrails-check against generated app trees: one that must pass, and one per
+# failure class that must fail with its message. Run from the repo root: sh tools/ci/test-offrails-check.sh
+set -eu
+
+ROOT=$(cd "$(dirname "$0")/../.." && pwd -P)
+CHECK="$ROOT/tools/offrails-check"
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+failures=0
+
+# A minimal app that satisfies every gate.
+make_app() {
+  d="$WORK/$1"
+  mkdir -p "$d/.offrails" "$d/product/features" "$d/tests/app" "$d/src/controllers" "$d/docs"
+  echo "0.6.0" > "$d/.offrails/VERSION"
+  cat > "$d/AGENTS.md" <<'EOF'
+# AGENTS.md
+
+```
+APP:            fixture
+FRAMEWORK:      Rust off Rails 0.6.0 (.offrails/, vendored 2026-10-13)
+FRONTEND_MODE:  htmx
+ISLANDS:        no
+ACCOUNTS:       signup  ROLES: none  TENANCY: per-user
+```
+EOF
+  cat > "$d/product/features/notes.md" <<'EOF'
+# Feature: notes
+
+## Acceptance criteria
+
+- [x] AC-notes-1: A reader can add a note
+- [x] AC-notes-2: Only the author sees a note
+- [ ] ~~AC-notes-3: dropped by the human~~
+
+## Security (agent-written threat model)
+
+| STRIDE | Threat | Control | Test |
+|--------|--------|---------|------|
+| Information disclosure | another reader's note | `note::find_for` | `notes::another_readers_note_is_404` |
+
+## Assumptions (agent-written)
+EOF
+  cat > "$d/tests/app/main.rs" <<'EOF'
+mod guard_test;
+mod notes_test;
+mod tenancy_test;
+EOF
+  cat > "$d/tests/app/notes_test.rs" <<'EOF'
+/// AC-notes-1
+#[tokio::test]
+async fn a_reader_can_add_a_note() {}
+/// AC-notes-2
+#[tokio::test]
+async fn another_readers_note_is_404() {}
+EOF
+  echo '// for (method, template, handler, access) in ROUTES {}' > "$d/tests/app/tenancy_test.rs"
+  echo '// guard' > "$d/tests/app/guard_test.rs"
+  cat > "$d/src/controllers/notes.rs" <<'EOF'
+pub async fn show(RequireUser(user): RequireUser, Path(id): Path<i64>) -> Result<Response, AppError> {
+    let n = note::find_for(&s.db, &user, id).await?;
+    // a comment mentioning note::find(&db, id) is fine
+    let total = note::Entity::find().count(&s.db).await?; // unscoped: AC-notes-9 public counter
+}
+EOF
+  cat > "$d/src/routes.rs" <<'EOF'
+pub const ROUTES: &[(&str, &str, &str, Access)] = &[
+    ("GET", "/notes/{id}", "notes::show", Access::User),
+];
+EOF
+  echo '| GET | /notes/{id} | notes::show | user |' > "$d/docs/routes.md"
+  printf '%s\n' "$d"
+}
+
+# expect <name> <dir> <0|1> [message fragment…]
+expect() {
+  name=$1 dir=$2 want=$3; shift 3
+  set +e
+  out=$(sh "$CHECK" "$dir" 2>&1)
+  got=$?
+  set -e
+  ok=1
+  [ "$got" = "$want" ] || ok=0
+  for frag in "$@"; do
+    printf '%s\n' "$out" | grep -qF -- "$frag" || { ok=0; printf '  missing: %s\n' "$frag"; }
+  done
+  if [ "$ok" = 1 ]; then
+    printf 'ok   %s\n' "$name"
+  else
+    failures=$((failures + 1))
+    printf 'FAIL %s (exit %s, want %s)\n%s\n\n' "$name" "$got" "$want" "$out"
+  fi
+}
+
+expect "a complete app passes" "$(make_app pass)" 0 "0 error(s)"
+
+d=$(make_app no-agents); rm "$d/AGENTS.md"
+expect "a directory without AGENTS.md fails" "$d" 1 "no AGENTS.md here"
+
+d=$(make_app version); echo "0.5.0" > "$d/.offrails/VERSION"
+expect "FRAMEWORK line vs .offrails/VERSION" "$d" 1 "says FRAMEWORK 0.6.0, but .offrails/VERSION is 0.5.0"
+
+d=$(make_app islands); sed 's/ISLANDS:        no/ISLANDS:        yes/' "$d/AGENTS.md" > "$d/a" && mv "$d/a" "$d/AGENTS.md"
+expect "ISLANDS: yes without UI_LIBRARY or web/" "$d" 1 "needs UI_LIBRARY: react | svelte" "needs a web/ directory"
+
+d=$(make_app ac); echo "- [ ] AC-notes-4: Notes can be searched" >> "$d/product/features/notes.md"
+expect "an uncited criterion fails (ticked or not)" "$d" 1 "AC-notes-4 (product/features/notes.md) is not cited by any test"
+
+d=$(make_app ac-prefix); sed 's|/// AC-notes-1$|/// AC-notes-10|' "$d/tests/app/notes_test.rs" > "$d/t" && mv "$d/t" "$d/tests/app/notes_test.rs"
+expect "AC-notes-10 doesn't count as citing AC-notes-1" "$d" 1 "AC-notes-1 (product/features/notes.md) is not cited"
+
+d=$(make_app sec-missing); awk '/^## Security/{ skip = 1 } /^## Assumptions/{ skip = 0 } !skip' "$d/product/features/notes.md" > "$d/n" && mv "$d/n" "$d/product/features/notes.md"
+expect "a feature without a Security section fails" "$d" 1 "has no '## Security' section"
+
+d=$(make_app sec-prose); sed 's/^| STRIDE.*/- Spoofing: handled (test: matrix)/' "$d/product/features/notes.md" > "$d/n" && mv "$d/n" "$d/product/features/notes.md"
+expect "a prose Security section fails" "$d" 1 "isn't the STRIDE table"
+
+d=$(make_app sec-name); sed 's/another_readers_note_is_404`/note_ids_are_unguessable`/' "$d/product/features/notes.md" > "$d/n" && mv "$d/n" "$d/product/features/notes.md"
+expect "a Security test that doesn't exist fails" "$d" 1 'names test `note_ids_are_unguessable`'
+
+d=$(make_app tenancy); rm "$d/tests/app/tenancy_test.rs"
+expect "TENANCY without tenancy_test.rs fails" "$d" 1 "TENANCY: per-user but tests/app/tenancy_test.rs is missing"
+
+d=$(make_app unregistered); sed '/guard_test/d' "$d/tests/app/main.rs" > "$d/m" && mv "$d/m" "$d/tests/app/main.rs"
+expect "an unregistered guard_test.rs fails" "$d" 1 "has no 'mod guard_test;'"
+
+d=$(make_app none); rm "$d/tests/app/tenancy_test.rs" "$d/tests/app/guard_test.rs"
+sed 's/TENANCY: per-user/TENANCY: none/' "$d/AGENTS.md" > "$d/a" && mv "$d/a" "$d/AGENTS.md"
+grep -v -e guard_test -e tenancy_test "$d/tests/app/main.rs" > "$d/m" && mv "$d/m" "$d/tests/app/main.rs"
+expect "TENANCY: none needs no tenancy suites" "$d" 0 "0 error(s)"
+
+d=$(make_app guard)
+cat >> "$d/src/controllers/notes.rs" <<'EOF'
+pub async fn index(RequireUser(_user): RequireUser) -> Result<Response, AppError> {
+    let n = note::find(&s.db, id).await?;
+    note::destroy(&s.db, n).await?;
+    let all = note::Entity::find().all(&s.db).await?;
+}
+EOF
+expect "unscoped lookups in handlers fail" "$d" 1 \
+  'notes.rs:6: `RequireUser(_`' 'notes.rs:7: `::find(`' 'notes.rs:8: `::destroy(`' 'notes.rs:9: `Entity::find`'
+
+d=$(make_app routes); : > "$d/docs/routes.md"
+expect "a stale docs/routes.md only warns" "$d" 0 "docs/routes.md is missing ROUTES path(s): /notes/{id}"
+
+echo
+if [ "$failures" = 0 ]; then
+  echo "offrails-check: all fixture cases behave"
+else
+  echo "offrails-check: $failures fixture case(s) misbehave"
+  exit 1
+fi

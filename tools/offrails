@@ -18,6 +18,7 @@ offrails: Rust off Rails, the opinionated web stack for the AI era
 Usage:
   offrails new <name> [pitch…]   start a new app with your coding agent (Claude Code, opencode or Codex)
   offrails upgrade [--check]     in an app: bring it up to the installed framework (runs your agent)
+  offrails check [dir]           in an app: the mechanical gates (header, specs ↔ tests, tenancy, guard)
   offrails doctor                check prerequisites and versions
   offrails version               show the installed framework version
   offrails update [options]      install the latest framework release (then run `offrails upgrade` in each app)
@@ -125,6 +126,16 @@ cmd_doctor() {
   fi
 }
 
+# The app's vendored copy matches its conventions; apps from before 0.6.0 use the installed one.
+cmd_check() {
+  dir=${1:-.}
+  if [ -f "$dir/.offrails/tools/offrails-check" ]; then
+    exec sh "$dir/.offrails/tools/offrails-check" "$dir"
+  fi
+  [ -f "$FW/tools/offrails-check" ] || die "no offrails-check in $FW; run: offrails update"
+  exec sh "$FW/tools/offrails-check" "$dir"
+}
+
 cmd_update() {
   if [ -n "${OFFRAILS_SOURCE:-}" ] || ! have curl; then
     [ -f "$FW/install.sh" ] || die "no installer found; download $INSTALLER_URL"
@@ -157,6 +168,7 @@ cmd_uninstall() {
 
 case "${1:-help}" in
   new) shift; cmd_new "$@" ;;
+  check) shift; cmd_check "$@" ;;
   doctor) cmd_doctor ;;
   version|--version|-V) cmd_version ;;
   update) shift; cmd_update "$@" ;;
