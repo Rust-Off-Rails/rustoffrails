@@ -27,7 +27,7 @@ bash "$FW/hooks/fingerprint.sh" "$FW"
 head -n1 .offrails/VERSION "$FW/VERSION"
 ```
 
-If the fingerprints match, the app is current: say so and stop. (`offrails upgrade --check` does exactly this.)
+If the fingerprints match, the app is current: say so and stop. (`offrails upgrade --check` does exactly this against `~/.offrails/current`; `offrails upgrade --check --fw "$FW"` against any other release, e.g. a tag export: `git -C <framework checkout> archive v0.6.0 | tar -x -C /tmp/offrails-0.6.0`. Exit 0 = current, 10 = an upgrade is due.)
 
 ## 2. Start clean
 

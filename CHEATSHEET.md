@@ -27,7 +27,7 @@ migration/   templates/   static/   web/ (TS modes)   tests/app/ (ONE test binar
 sh .offrails/tools/offrails-check                        # header, ACs cited, Security tests, tenancy suites, scoped lookups
 cargo fmt --all && cargo clippy --all-targets -- -D warnings
 cargo nextest run                                         # SQLite
-TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres cargo nextest run   # Postgres (docker compose up -d db)
+TEST_DATABASE_URL=postgres://postgres:postgres@localhost:${DB_PORT:-5432}/postgres cargo nextest run   # Postgres (docker compose up -d db)
 cargo llvm-cov nextest --fail-under-lines 80 …            # ≥80% total, ≥90% models + policies
 cargo deny check && gitleaks git . --redact --no-banner   # + pnpm audit --prod in TS modes
 # htmx: bin/tailwindcss -i assets/app.css -o static/app.css --minify

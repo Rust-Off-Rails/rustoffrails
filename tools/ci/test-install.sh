@@ -39,6 +39,14 @@ HOME="$H" OFFRAILS_SOURCE="$T/dist" sh install.sh --yes --no-toolchain --no-agen
 HOME="$H" "$H/.local/bin/offrails" doctor >"$T/doctor" 2>&1 || true
 grep -q "framework      ok" "$T/doctor" && pass "local: offrails doctor reports the framework" || { bad "local: offrails doctor"; cat "$T/doctor"; }
 HOME="$H" "$H/.local/bin/offrails" new Bad_Name >/dev/null 2>&1 && bad "local: invalid app name accepted" || pass "local: invalid app name rejected"
+# upgrade --check: against the installed framework, and against another one with --fw (a tag export)
+A="$T/app"; mkdir -p "$A"; cp -R "$H/.offrails/current/" "$A/.offrails"
+(cd "$A" && HOME="$H" "$H/.local/bin/offrails" upgrade --check >"$T/up1" 2>&1) \
+  && grep -q "Up to date" "$T/up1" && pass "local: upgrade --check, app current" || { bad "local: upgrade --check (current)"; cat "$T/up1"; }
+cp -R "$H/.offrails/current/" "$T/export"; echo "changed" >>"$T/export/workflow.md"
+set +e; (cd "$A" && HOME="$H" "$H/.local/bin/offrails" upgrade --check --fw "$T/export" >"$T/up2" 2>&1); rc=$?; set -e
+[ "$rc" = 10 ] && grep -q "installed framework" "$T/up2" && pass "local: upgrade --check --fw <dir> sees a different framework (exit 10)" || { bad "local: upgrade --check --fw (rc=$rc)"; cat "$T/up2"; }
+(cd "$A" && HOME="$H" "$H/.local/bin/offrails" upgrade --check --fw "$T/nope" >/dev/null 2>&1) && bad "local: --fw with a missing dir accepted" || pass "local: --fw with a missing dir refused"
 HOME="$H" "$H/.local/bin/offrails" uninstall -y >/dev/null 2>&1; [ ! -e "$H/.offrails" ] && [ ! -e "$H/.local/bin/offrails" ] && pass "local: uninstall removes everything" || bad "local: uninstall"
 
 mkdir -p "$T/tampered"; cp "$T/dist/"* "$T/tampered/"

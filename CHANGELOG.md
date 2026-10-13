@@ -26,6 +26,11 @@ From Railboard, a Kanban built by headless Claude on 0.5.0:
 - ts-rs without `.cargo/config.toml`: per-type `#[ts(export, export_to = …)]` and `#[ts(type = "number")]` on every `i64` ([frontend-inertia](guides/frontend-inertia.md)).
 - Models rule 8: inserts that can hit a unique index use `on_conflict_do_nothing_on(..)` (SeaORM 2.0.4 `TryInsertResult`), never insert-then-catch ([models](guides/models.md#rules)).
 
+From the website's upgrade to 0.5.0:
+
+- `offrails upgrade [--check] --fw <dir>` checks or upgrades against any release (a tag export, the plugin root), not only `~/.offrails/current`; `--check` exits 0 when current, 10 when an upgrade is due ([upgrade](generators/upgrade.md)).
+- The Definition of Done and testing.md say what to do when localhost:5432 is taken: run the compose `db` on another port (`DB_PORT=54329 docker compose up -d db`) and point `TEST_DATABASE_URL` at it; never stop someone else's Postgres.
+
 **App migration** (0.3.x, 0.4.x and 0.5.0 apps; reconcile: *detect* → *final shape* → *converge*, one slice each, green between them):
 
 1. **Run the check.** `sh "$FW/tools/offrails-check"` (before re-vendoring) lists most of the work below. After re-vendoring it's `sh .offrails/tools/offrails-check`, and it must exit 0 at the end.
@@ -66,7 +71,6 @@ Apps with a UI: *detect* no axe suite, or one that runs a single color scheme. *
 
 Apps with live regions: *detect* `sse-connect` attributes changed from JS, live regions without `hx-sync`, or a stream with no named `ping` event. *Converge* per "Robust live regions"; add the `ping` merge to the stream endpoint and the badge + watchdog to `static/app.js`; add the `pageshow` guard to the layout's script. Apps upgraded from 0.3.0 should double-check 0.4.0 note #5 (the first-login race: a caught unique violation aborts a Postgres transaction).
 
-(nothing yet)
 
 ## 0.4.0 (2026-10-13)
 

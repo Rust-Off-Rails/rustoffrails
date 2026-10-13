@@ -17,7 +17,8 @@ offrails: Rust off Rails, the opinionated web stack for the AI era
 
 Usage:
   offrails new <name> [pitch…]   start a new app with your coding agent (Claude Code, opencode or Codex)
-  offrails upgrade [--check]     in an app: bring it up to the installed framework (runs your agent)
+  offrails upgrade [--check] [--fw <dir>]  in an app: bring it up to the installed framework, or to <dir>
+                                 (a release tag export or the plugin root; runs your agent)
   offrails check [dir]           in an app: the mechanical gates (header, specs ↔ tests, tenancy, guard)
   offrails doctor                check prerequisites and versions
   offrails version               show the installed framework version
@@ -29,6 +30,7 @@ Examples:
   offrails new bookshelf "people track the books they've read"
   offrails update --version 0.3.0
   cd my-app && offrails upgrade --check
+  cd my-app && offrails upgrade --check --fw /tmp/offrails-0.6.0   # a tag export: git archive v0.6.0 | tar -x -C …
 EOF
 }
 
@@ -66,8 +68,18 @@ cmd_new() {
 }
 
 cmd_upgrade() {
+  check=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --check) check=1 ;;
+      --fw) [ $# -ge 2 ] || die "usage: offrails upgrade [--check] [--fw <framework dir>]"; FW=$2; shift ;;
+      --fw=*) FW=${1#--fw=} ;;
+      *) die "usage: offrails upgrade [--check] [--fw <framework dir>]" ;;
+    esac
+    shift
+  done
   [ -f .offrails/VERSION ] || die "run this in a Rust off Rails app (no .offrails/ here)"
-  [ -f "$FW/hooks/fingerprint.sh" ] || die "framework not installed; run the installer: curl -fsSL $INSTALLER_URL | sh"
+  [ -f "$FW/hooks/fingerprint.sh" ] || die "no framework at $FW (--fw needs a release: tag export or plugin root); or run the installer: curl -fsSL $INSTALLER_URL | sh"
   app_v=$(head -n1 .offrails/VERSION); fw_v=$(framework_version)
   app_fp=$(sh "$FW/hooks/fingerprint.sh" .offrails 2>/dev/null || bash "$FW/hooks/fingerprint.sh" .offrails)
   fw_fp=$(sh "$FW/hooks/fingerprint.sh" "$FW" 2>/dev/null || bash "$FW/hooks/fingerprint.sh" "$FW")
@@ -77,7 +89,7 @@ cmd_upgrade() {
     return 0
   fi
   printf 'This app vendors Rust off Rails %s; the installed framework is %s (content %s vs %s).\n' "$app_v" "$fw_v" "$app_fp" "$fw_fp"
-  [ "${1:-}" = "--check" ] && return 10
+  [ -n "$check" ] && return 10
   launch_agent "/offrails:upgrade" \
     "Upgrade this Rust off Rails app from $app_v to $fw_v. Follow $FW/generators/upgrade.md step by step with FW=$FW (a release; never use a framework working tree). Read $FW/CHANGELOG.md for the App migration steps between those versions. Reconcile, don't re-create; never edit applied migrations. Start from a clean git tree, show me the plan before changing anything, and finish with the Definition of Done on SQLite and Postgres."
 }
