@@ -6,6 +6,8 @@ Every Off Rails app has this exact layout. Don't add top-level directories. Don'
 myapp/
 ├── AGENTS.md                  # from blueprints/AGENTS.md: mode header + pointer to .offrails/
 ├── CLAUDE.md                  # one line: "@AGENTS.md"
+├── .cursor/rules/offrails.mdc # Cursor: always-applied pointer to AGENTS.md
+├── .github/copilot-instructions.md  # Copilot: pointer to AGENTS.md
 ├── .offrails/                 # this framework, vendored, read-only
 ├── product/                   # HUMAN-OWNED. Specs in Markdown. The only thing humans edit
 │   ├── README.md              # what the app is, who it's for, ## Decisions

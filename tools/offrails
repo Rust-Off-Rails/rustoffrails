@@ -1,0 +1,139 @@
+#!/bin/sh
+# offrails: the Rust off Rails command. Installed by install.sh to ~/.local/bin/offrails.
+# It never writes app code; it starts your coding agent with the right instructions.
+set -eu
+
+OFFRAILS_HOME="${OFFRAILS_HOME:-$HOME/.offrails}"
+BIN_DIR="${OFFRAILS_BIN_DIR:-$HOME/.local/bin}"
+FW="$OFFRAILS_HOME/current"
+INSTALLER_URL="https://rustoffrails.org/install.sh"
+
+have() { command -v "$1" >/dev/null 2>&1; }
+die()  { printf 'offrails: %s\n' "$*" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+offrails: Rust off Rails, the opinionated web stack for the AI era
+
+Usage:
+  offrails new <name> [pitch…]   start a new app with your coding agent (Claude Code, else Codex)
+  offrails doctor                check prerequisites and versions
+  offrails version               show the installed framework version
+  offrails update [options]      install the latest release (options are passed to the installer)
+  offrails uninstall             remove the framework and this command
+  offrails help                  this help
+
+Examples:
+  offrails new bookshelf "people track the books they've read"
+  offrails update --version 0.3.0
+EOF
+}
+
+framework_version() { head -n1 "$FW/VERSION" 2>/dev/null || echo "not installed"; }
+
+cmd_version() {
+  printf 'Rust off Rails %s\n' "$(framework_version)"
+  printf 'framework: %s\n' "$(cd "$FW" 2>/dev/null && pwd -P || echo "$FW (missing)")"
+}
+
+cmd_new() {
+  [ $# -ge 1 ] || die "usage: offrails new <name> [pitch…]"
+  name=$1; shift
+  case "$name" in
+    *[!abcdefghijklmnopqrstuvwxyz0123456789_-]*|[!abcdefghijklmnopqrstuvwxyz]*) die "app name must start with a letter and use lowercase letters, digits, '-' or '_' (got '$name')" ;;
+  esac
+  pitch="$*"
+  [ -f "$FW/AGENTS.md" ] || die "framework not installed; run the installer: curl -fsSL $INSTALLER_URL | sh"
+  if have claude; then
+    exec claude "/offrails:new $name${pitch:+ $pitch}"
+  fi
+  prompt="Read $FW/AGENTS.md and make me a new Rust off Rails app called $name${pitch:+: $pitch}"
+  if have codex; then
+    exec codex "$prompt"
+  fi
+  printf 'No Claude Code or Codex on your PATH. Paste this into your coding agent:\n\n  %s\n\n' "$prompt"
+}
+
+row() { printf '  %-14s %-10s %s\n' "$1" "$2" "$3"; }
+probe() { # name, required(yes/no), binary, version command…
+  n=$1; req=$2; bin=$3; shift 3
+  if have "$bin"; then
+    v=$("$@" 2>/dev/null | head -n1 | sed 's/^[^0-9]*//; s/[ (,].*//')
+    row "$n" "ok" "${v:-installed}"
+  elif [ "$req" = yes ]; then
+    row "$n" "MISSING" "required"; doctor_fail=1
+  else
+    row "$n" "-" "optional"
+  fi
+}
+
+cmd_doctor() {
+  doctor_fail=0
+  printf 'Rust off Rails %s\n\n' "$(framework_version)"
+  row "tool" "status" "version / note"
+  probe rustc yes rustc rustc --version
+  probe cargo yes cargo cargo --version
+  probe sea-orm-cli yes sea-orm-cli sea-orm-cli --version
+  probe cargo-nextest yes cargo-nextest cargo nextest --version
+  probe cargo-watch no cargo-watch cargo watch --version
+  probe docker no docker docker --version
+  probe node no node node --version
+  probe pnpm no pnpm pnpm --version
+  probe claude no claude claude --version
+  probe codex no codex codex --version
+  if [ -f "$FW/AGENTS.md" ]; then row "framework" "ok" "$(cd "$FW" && pwd -P)"; else row "framework" "MISSING" "run the installer"; doctor_fail=1; fi
+  if have claude; then
+    if claude plugin list --json 2>/dev/null | grep -q '"offrails@offrails"'; then row "plugin" "ok" "offrails@offrails"; else row "plugin" "-" "not installed (offrails update)"; fi
+  fi
+  if have node; then
+    major=$(node --version 2>/dev/null | sed 's/^v//; s/\..*//')
+    [ "${major:-0}" -ge 24 ] 2>/dev/null || printf '\n  note: inertia/spa/islands apps need Node 24 LTS.\n'
+  fi
+  echo
+  if [ "$doctor_fail" = 0 ]; then
+    echo "All required tools are present."
+  else
+    echo "Some required tools are missing. Run: offrails update"
+    return 1
+  fi
+}
+
+cmd_update() {
+  if [ -n "${OFFRAILS_SOURCE:-}" ] || ! have curl; then
+    [ -f "$FW/install.sh" ] || die "no installer found; download $INSTALLER_URL"
+    exec sh "$FW/install.sh" "$@"
+  fi
+  tmp=$(mktemp)
+  if curl -fsSL "$INSTALLER_URL" -o "$tmp"; then
+    sh "$tmp" "$@"; rc=$?; rm -f "$tmp"; exit "$rc"
+  fi
+  rm -f "$tmp"
+  printf 'offrails: could not download %s; using the installed copy\n' "$INSTALLER_URL" >&2
+  exec sh "$FW/install.sh" "$@"
+}
+
+cmd_uninstall() {
+  printf 'This removes %s and %s/offrails.\nYour apps, Rust and the cargo tools are not touched.\n' "$OFFRAILS_HOME" "$BIN_DIR"
+  if [ "${1:-}" != "-y" ] && [ "${1:-}" != "--yes" ]; then
+    printf 'Continue? [y/N] '
+    read -r a </dev/tty || a=n
+    case "$a" in y|Y|yes) ;; *) echo "Cancelled."; return 0 ;; esac
+  fi
+  rm -rf "$OFFRAILS_HOME"
+  rm -f "$BIN_DIR/offrails"
+  echo "Removed."
+  if have claude; then
+    echo "To remove the Claude Code plugin too:"
+    echo "  claude plugin uninstall offrails@offrails && claude plugin marketplace remove offrails"
+  fi
+}
+
+case "${1:-help}" in
+  new) shift; cmd_new "$@" ;;
+  doctor) cmd_doctor ;;
+  version|--version|-V) cmd_version ;;
+  update|upgrade) shift; cmd_update "$@" ;;
+  uninstall) shift; cmd_uninstall "$@" ;;
+  help|-h|--help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac

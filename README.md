@@ -50,7 +50,21 @@ We take the best ideas of two great ecosystems and bring them together in one st
 
 ## Using it
 
-### With Claude Code (recommended): install the plugin
+### Install (one line)
+
+```sh
+curl -fsSL https://rustoffrails.org/install.sh | sh
+```
+
+It checks for Rust (and offers rustup), installs the cargo tools the framework uses as prebuilt binaries, downloads and **SHA-256-verifies** the framework into `~/.offrails/`, installs the Claude Code plugin if `claude` is on your PATH, and adds an `offrails` command. No sudo, no telemetry, and it's safe to re-run. Add `--dry-run` to see the plan first. [INSTALL.md](INSTALL.md) explains every step, with a manual equivalent.
+
+```sh
+offrails new bookshelf "people track the books they've read"   # starts Claude Code (or Codex) with /offrails:new
+offrails doctor                                                # prerequisites and versions
+offrails update                                                # latest release
+```
+
+### Or by hand: Claude Code plugin
 
 ```
 /plugin marketplace add Rust-Off-Rails/rustoffrails      # or a local checkout: /plugin marketplace add /path/to/rustoffrails
@@ -120,7 +134,8 @@ blueprints/        files copied into every new app (AGENTS.md, spec template…)
 skills/            /offrails:* skills (thin entry points into the docs above)
 hooks/             convention guards (no-ops outside Off Rails apps)
 evals/             `claude plugin eval` cases: does the framework steer agents right?
-tools/             helper scripts vendored with the docs: brand/ (favicons + social card), browser-smoke/ (kernel pages)
+tools/             helper scripts: offrails (the CLI), brand/ (favicons + social card), browser-smoke/ (kernel pages), release/, ci/
+install.sh         the one-line installer (served at rustoffrails.org/install.sh); INSTALL.md explains it
 VERSION, CHANGELOG.md   framework version; apps record theirs in .offrails/VERSION
 ```
 
@@ -136,8 +151,12 @@ Every doc change goes under `## Unreleased` in `CHANGELOG.md` the moment it's ma
 
 Releasing:
 1. Rename `Unreleased` to the new version.
-2. Bump `VERSION` and `.claude-plugin/plugin.json` together.
-3. Run `claude plugin tag --push`.
+2. Bump `VERSION` and `.claude-plugin/plugin.json` together, and commit.
+3. `tools/release/release.sh --dry-run` to check, then `tools/release/release.sh`. It builds a reproducible `rustoffrails.tar.gz` (the whole framework, skills and hooks included), `install.sh` and `checksums.txt`, tags `v<version>`, and creates the GitHub release with `gh`. `install.sh` downloads `releases/latest/download/…`, so a release is all it takes.
+4. Publish the release's `install.sh` at `https://rustoffrails.org/install.sh` (the website serves it).
+5. `claude plugin tag --push` for the plugin marketplace.
+
+Installer tests: `tools/ci/test-install.sh` (local shells + clean Linux containers; `--full` also runs the real rustup + cargo-binstall path).
 
 Installed plugins update only when the version changes.
 
