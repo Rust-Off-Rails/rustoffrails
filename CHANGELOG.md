@@ -4,6 +4,8 @@ Each entry lists convention changes and what an existing app must do about them.
 
 ## Unreleased
 
+## 0.6.0 (2026-10-13)
+
 Hardening from a 0.3.0 Kanban built by another agent that shipped "green" with three P0 defects. The rule this release follows: **mechanical over prose**. Each fix is a command that proves it, a template, a compile error or a failing check.
 
 - **Fixed: live pages stalled past ~6 tabs.** Browsers allow about 6 HTTP/1.1 connections per origin across all tabs, and each live page holds one or two open (signals + socket). The 7th tab's stream, then its page loads, queued forever. Browsers only speak HTTP/2 over TLS, so `serve` now does **direct TLS with HTTP/2** (`axum-server` + rustls, ALPN `h2`, `APP_TLS_CERT`/`APP_TLS_KEY`), `bin/dev` serves **HTTPS by default** (`bin/dev-cert` makes a local certificate with mkcert or openssl; `APP_TLS=off` for http), and `APP_URL`'s scheme follows. Measured in the reference app: HTTP/1.1 5 of 12 tabs updated; HTTP/2 12/12 and 40/40 ([realtime](guides/realtime.md#many-tabs-stall-http11-vs-http2)). A multi-tab smoke ships with it (`tools/browser-smoke/run.sh live-tabs`).
