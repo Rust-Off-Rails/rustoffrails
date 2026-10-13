@@ -4,6 +4,8 @@ Each entry lists convention changes and what an existing app must do about them.
 
 ## Unreleased
 
+## 0.6.1 (2026-10-13)
+
 Fixes from a peer's Kanban on 0.6.0 (and its 5,000-watcher load test), from the website's upgrade to 0.6.0, and two agent-experience requests. Every app-facing fix is proven in the reference app (bookshelf) unless marked otherwise.
 
 - **Fixed (P0): login silently failed over dev HTTPS.** 0.6.0's `bin/dev-cert` fell back to an openssl **self-signed** certificate when mkcert was missing. After "Proceed to localhost (unsafe)", Chrome drops `Set-Cookie`: the magic link returned 303, the account was created, and the user bounced back to login. Our smoke missed it because it ran Chrome with `--ignore-certificate-errors`. Now **dev serves HTTPS only with a locally trusted certificate**: `bin/dev-cert` uses mkcert and refuses (exit 3) when mkcert is missing or its CA isn't installed, unless `DEV_CERT_SELF_SIGNED=1`; `bin/dev` runs it on every start and otherwise serves plain HTTP/1.1, saying why, how to install mkcert, and that HTTP/1.1 limits live pages to ~6 tabs. It prints the exact URL with its scheme, again as `✓ ready: …` once the port answers ([dev-tools](guides/dev-tools.md#https-in-development)).
