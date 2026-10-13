@@ -27,7 +27,7 @@ Require a clean git tree. If it isn't clean, ask the human to commit first, or c
 
 ## 3. Read what changed
 
-Read `$FW/CHANGELOG.md` from the app's version up to the new one. Each release lists **App migration** steps written for an agent, in reconcile style (detect → final shape → converge). Then diff the docs (`diff -ru .offrails "$FW" -x .git -x .claude-plugin -x skills -x hooks -x evals -x brand -x .github`) to catch anything the changelog doesn't mention.
+Read `$FW/CHANGELOG.md` from the app's version up to the new one. Each release lists **App migration** steps written for an agent, in reconcile style (detect → final shape → converge). Then diff the docs (`diff -ru .offrails "$FW" -x .git -x .claude-plugin -x skills -x hooks -x evals -x brand`) to catch anything the changelog doesn't mention.
 
 ## 4. Reconcile, don't re-create
 

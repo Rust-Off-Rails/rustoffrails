@@ -24,7 +24,7 @@ The cost is generation time, not runtime: an idle queue polls once a second, and
 
 ```sh
 cargo new <dir> --name <crate_name> && cd <dir>   # also runs git init (edition 2024); --name only if the dir differs
-rsync -a --delete --exclude /.git --exclude /.claude-plugin --exclude /skills --exclude /hooks --exclude /evals --exclude /brand --exclude /.github "$FW"/ .offrails/
+rsync -a --delete --exclude /.git --exclude /.claude-plugin --exclude /skills --exclude /hooks --exclude /evals --exclude /brand "$FW"/ .offrails/
 date -u +"vendored %F" >> .offrails/VERSION    # first line stays the framework version
 ```
 

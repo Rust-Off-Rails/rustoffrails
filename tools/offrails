@@ -16,16 +16,18 @@ usage() {
 offrails: Rust off Rails, the opinionated web stack for the AI era
 
 Usage:
-  offrails new <name> [pitch…]   start a new app with your coding agent (Claude Code, else Codex)
+  offrails new <name> [pitch…]   start a new app with your coding agent (Claude Code, opencode or Codex)
+  offrails upgrade [--check]     in an app: bring it up to the installed framework (runs your agent)
   offrails doctor                check prerequisites and versions
   offrails version               show the installed framework version
-  offrails update [options]      install the latest release (options are passed to the installer)
+  offrails update [options]      install the latest framework release (then run `offrails upgrade` in each app)
   offrails uninstall             remove the framework and this command
   offrails help                  this help
 
 Examples:
   offrails new bookshelf "people track the books they've read"
   offrails update --version 0.3.0
+  cd my-app && offrails upgrade --check
 EOF
 }
 
@@ -36,6 +38,20 @@ cmd_version() {
   printf 'framework: %s\n' "$(cd "$FW" 2>/dev/null && pwd -P || echo "$FW (missing)")"
 }
 
+# launch_agent <claude-prompt> <generic-prompt>: Claude Code (plugin skill) > opencode > Codex > print.
+launch_agent() {
+  if [ -z "${OFFRAILS_AGENT:-}" ] || [ "$OFFRAILS_AGENT" = claude ]; then
+    if have claude; then exec claude "$1"; fi
+  fi
+  if [ -z "${OFFRAILS_AGENT:-}" ] || [ "$OFFRAILS_AGENT" = opencode ]; then
+    if have opencode; then exec opencode run "$2"; fi
+  fi
+  if [ -z "${OFFRAILS_AGENT:-}" ] || [ "$OFFRAILS_AGENT" = codex ]; then
+    if have codex; then exec codex "$2"; fi
+  fi
+  printf 'No supported agent found (Claude Code, opencode, Codex). Paste this into your coding agent:\n\n  %s\n\n' "$2"
+}
+
 cmd_new() {
   [ $# -ge 1 ] || die "usage: offrails new <name> [pitch…]"
   name=$1; shift
@@ -44,14 +60,25 @@ cmd_new() {
   esac
   pitch="$*"
   [ -f "$FW/AGENTS.md" ] || die "framework not installed; run the installer: curl -fsSL $INSTALLER_URL | sh"
-  if have claude; then
-    exec claude "/offrails:new $name${pitch:+ $pitch}"
+  launch_agent "/offrails:new $name${pitch:+ $pitch}" \
+    "Read $FW/AGENTS.md and make me a new Rust off Rails app called $name${pitch:+: $pitch}"
+}
+
+cmd_upgrade() {
+  [ -f .offrails/VERSION ] || die "run this in a Rust off Rails app (no .offrails/ here)"
+  [ -f "$FW/hooks/fingerprint.sh" ] || die "framework not installed; run the installer: curl -fsSL $INSTALLER_URL | sh"
+  app_v=$(head -n1 .offrails/VERSION); fw_v=$(framework_version)
+  app_fp=$(sh "$FW/hooks/fingerprint.sh" .offrails 2>/dev/null || bash "$FW/hooks/fingerprint.sh" .offrails)
+  fw_fp=$(sh "$FW/hooks/fingerprint.sh" "$FW" 2>/dev/null || bash "$FW/hooks/fingerprint.sh" "$FW")
+  if [ "$app_fp" = "$fw_fp" ]; then
+    printf 'Up to date: this app vendors Rust off Rails %s (same content as the installed framework).\n' "$app_v"
+    printf 'For newer releases: offrails update, then offrails upgrade again.\n'
+    return 0
   fi
-  prompt="Read $FW/AGENTS.md and make me a new Rust off Rails app called $name${pitch:+: $pitch}"
-  if have codex; then
-    exec codex "$prompt"
-  fi
-  printf 'No Claude Code or Codex on your PATH. Paste this into your coding agent:\n\n  %s\n\n' "$prompt"
+  printf 'This app vendors Rust off Rails %s; the installed framework is %s (content %s vs %s).\n' "$app_v" "$fw_v" "$app_fp" "$fw_fp"
+  [ "${1:-}" = "--check" ] && return 10
+  launch_agent "/offrails:upgrade" \
+    "Upgrade this Rust off Rails app from $app_v to $fw_v. Follow $FW/generators/upgrade.md step by step with FW=$FW (a release; never use a framework working tree). Read $FW/CHANGELOG.md for the App migration steps between those versions. Reconcile, don't re-create; never edit applied migrations. Start from a clean git tree, show me the plan before changing anything, and finish with the Definition of Done on SQLite and Postgres."
 }
 
 row() { printf '  %-14s %-10s %s\n' "$1" "$2" "$3"; }
@@ -132,7 +159,8 @@ case "${1:-help}" in
   new) shift; cmd_new "$@" ;;
   doctor) cmd_doctor ;;
   version|--version|-V) cmd_version ;;
-  update|upgrade) shift; cmd_update "$@" ;;
+  update) shift; cmd_update "$@" ;;
+  upgrade) shift; cmd_upgrade "$@" ;;
   uninstall) shift; cmd_uninstall "$@" ;;
   help|-h|--help) usage ;;
   *) usage >&2; exit 2 ;;
