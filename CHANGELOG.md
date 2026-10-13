@@ -4,7 +4,7 @@ Each entry lists convention changes and what an existing app must do about them.
 
 ## Unreleased
 
-(nothing yet)
+- Instant navigation recipe (`guides/frontend-htmx.md`), gotcha from CI: wrap `document.startViewTransition` so a transition skipped by a quick second click doesn't leave unhandled `AbortError` rejections (htmx drops the transition object); make the last boosted click win. **App migration:** apps that adopted the recipe: *detect* `globalViewTransitions` without a `startViewTransition` wrapper in `static/app.js`; *converge* per step 6 of the recipe.
 
 ## 0.5.0 (2026-10-13)
 
