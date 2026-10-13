@@ -1,0 +1,14 @@
+name: "Feature idea (as a spec)"
+description: Propose something the framework should do, the way you'd write a product spec.
+labels: ["idea"]
+body:
+  - type: textarea
+    id: problem
+    attributes: { label: The problem, description: "Who needs this and why?" }
+    validations: { required: true }
+  - type: textarea
+    id: prior
+    attributes: { label: How others do it, description: "Rails, Phoenix/Elixir, Laravel, Django… links welcome." }
+  - type: textarea
+    id: acceptance
+    attributes: { label: What "done" looks like, description: "Acceptance criteria an agent could test." }

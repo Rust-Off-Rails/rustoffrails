@@ -1,0 +1,15 @@
+name: "Doc bug"
+description: A guide, generator or snippet is wrong, outdated, inconsistent or unclear.
+labels: ["doc-bug"]
+body:
+  - type: input
+    id: file
+    attributes: { label: File and section, placeholder: "guides/jobs.md#uniqueness" }
+    validations: { required: true }
+  - type: textarea
+    id: problem
+    attributes: { label: What's wrong, description: "Include the evidence: the compiler error, the crate version, the docs.rs link." }
+    validations: { required: true }
+  - type: textarea
+    id: fix
+    attributes: { label: Suggested fix }

@@ -1,0 +1,26 @@
+name: "Agent got stuck / built the wrong thing"
+description: You followed Rust off Rails and your agent stalled, improvised, or produced broken code. This is our most valuable kind of report.
+labels: ["doc-bug", "dogfood"]
+body:
+  - type: input
+    id: agent
+    attributes: { label: Agent and model, placeholder: "Claude Code 2.x + Opus / Codex / Cursor …" }
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes: { label: Framework version, description: "First line of .offrails/VERSION (or `offrails version`)" }
+    validations: { required: true }
+  - type: input
+    id: mode
+    attributes: { label: App header, description: "FRONTEND_MODE / UI_LIBRARY / API / PROD_DATABASE from the app's AGENTS.md" }
+  - type: textarea
+    id: step
+    attributes: { label: Where it went wrong, description: "Which skill/generator/guide and step (e.g. generators/new.md §4, /offrails:scaffold)." }
+    validations: { required: true }
+  - type: textarea
+    id: what
+    attributes: { label: What happened vs what should have happened, description: "Paste the relevant agent transcript excerpt and the error. Remove secrets." }
+    validations: { required: true }
+  - type: input
+    id: versions
+    attributes: { label: Resolved crate/package versions involved (if relevant), placeholder: "sea-orm 2.0.4, axum 0.8.9 …" }
