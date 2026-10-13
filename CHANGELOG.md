@@ -4,6 +4,26 @@ Each entry lists convention changes and what an existing app must do about them.
 
 ## Unreleased
 
+(nothing yet)
+
+## 0.3.0 (2026-10-13)
+
+The open-source release. Rust off Rails is public at https://github.com/Rust-Off-Rails/rustoffrails and installs with one line: `curl -fsSL https://rustoffrails.org/install.sh | sh`.
+
+### One-line install and the `offrails` command
+- **`install.sh`** (POSIX sh): shows its plan first, `--dry-run`, `--yes`; Rust via rustup (no sudo); sea-orm-cli, cargo-nextest and cargo-watch as prebuilt binaries via cargo-binstall; a SHA-256-verified framework release in `~/.offrails/<version>` with a `current` symlink; installs the Claude Code plugin when `claude` is present; prints the AGENTS.md prompt for Codex and Cursor. Idempotent, no telemetry. See [INSTALL.md](INSTALL.md).
+- **`offrails`**: `new <name> "<pitch>"`, `doctor`, `version`, `update`, `uninstall`.
+- New apps also get `.cursor/rules/offrails.mdc` and `.github/copilot-instructions.md`, pointing to `AGENTS.md`.
+
+**App migration:** optional. Add the two agent pointer files above.
+
+### Open source
+- Dual licensed **MIT OR Apache-2.0**; `SECURITY.md` (GitHub private vulnerability reporting), `CONTRIBUTING.md` (contributions are intent plus evidence), Code of Conduct, issue forms ("Agent got stuck" first), and CI: links, hook tests, plugin validation, gitleaks, installer tests, OpenSSF Scorecard.
+- Brand: the `\R/` derailing mark and the hopping "off" wordmark, drawn as code (`brand/`).
+- Doctrine §0, **"All code is written by AI"**, is now the founding rule.
+- Plugin: `/offrails:security` skill; hooks for security tripwires, banned crates in `Cargo.toml`, append-only committed migrations, raw `.begin()`, and no `pkill`; content-fingerprint drift detection; `/offrails:upgrade` reconciles instead of re-creating.
+
+
 ### Security as the gold standard: Non-negotiables, the header matrix, automated enforcement
 
 Spec: `guides/security.md` (Non-negotiables, the header matrix, Automated enforcement, Gotchas), plus `blueprints/feature-spec.md` (a `## Security` STRIDE section), `workflow.md`, `guides/test-standards.md` §3, `guides/testing.md` CI, `generators/new.md`, `stack.md`, `structure.md`, `guides/routing.md` and `guides/auth.md`. Plugin: the `/offrails:security` skill and security tripwires in the hooks. Verified on the reference app (branch `security`): 207 tests on SQLite and Postgres 18; cargo-deny `advisories/bans/licenses/sources ok`; gitleaks clean over the history; ZAP baseline 0 FAIL, 0 WARN, 61 PASS; checked in Chrome.
