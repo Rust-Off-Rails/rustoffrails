@@ -58,6 +58,7 @@ pnpm --dir web build
 
 Plus:
 
+- [ ] Apps with a UI: the accessibility suite ([test-standards §10](guides/test-standards.md#10-accessibility-wcag-22-aa-in-every-theme)) passes with zero violations on every route, in light **and** dark, desktop and mobile.
 - [ ] Every acceptance criterion (`AC-<feature>-<n>`) has a test citing its ID, and is ticked only when that test passes on both databases.
 - [ ] New migrations roll back cleanly (`db rollback` then `db migrate`).
 - [ ] No `unwrap()`/`expect()` outside tests and startup code in `main.rs`/`config.rs`.

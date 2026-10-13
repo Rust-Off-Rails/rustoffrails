@@ -9,9 +9,12 @@ Each entry lists convention changes and what an existing app must do about them.
 - Fixes from a real 0.3.0 → 0.4.0 upgrade (bookshelf, via `/offrails:upgrade`): `fingerprint.sh` and vendoring ignore the plugin cache's `.in_use/` marker; the error-page `app.js` snippet is now shown in errors-and-logging; ZAP's "Suspicious Comments" gotcha; the 0.4.0 migration notes' detect lines for #2, #3 and #6 are greppable (and `HX-Push-Url` lives at the end of `error::shape_errors`); the test-harness DB helpers are named (`create_database`, `drop_database`); a macOS ZAP variant; a deterministic first-login transaction test; the upgrade recipe adds a missing "Post-upgrade checks" section.
 
 - **Robust live regions** (`guides/realtime.md`), from a Kanban built with opencode + Muse Spark on 0.3.0: never reconnect by editing `sse-connect` (it leaks `EventSource`s), the ~6-per-origin connection budget (one stream per page), `hx-sync` on live regions, a named `ping` heartbeat event (+ a hidden `sse-swap="ping" hx-swap="none"` observer and a 60s watchdog), a connection-state badge, and the `pageshow` guard in the app layout.
+- **Accessibility gate** (`guides/test-standards.md` §10): axe-core (WCAG 2.2 AA) on every route, in light **and** dark, desktop and mobile; keyboard, motion and form rules; a required `a11y` CI job. Lighthouse checks one color scheme only, which let a light-theme contrast bug through on rustoffrails.org.
 - **Migrations:** repairing an earlier migration: the repair's `down` restores the predecessor's exact schema, so full rollback works (`guides/migrations.md` rule 2).
 
 **App migration:** none required. If your app's docs or scripts say `docker compose up -d postgres`, use `db`.
+
+Apps with a UI: *detect* no axe suite, or one that runs a single color scheme. *Converge:* add the §10 suite and the `a11y` CI job, then fix what it finds.
 
 Apps with live regions: *detect* `sse-connect` attributes changed from JS, live regions without `hx-sync`, or a stream with no named `ping` event. *Converge* per "Robust live regions"; add the `ping` merge to the stream endpoint and the badge + watchdog to `static/app.js`; add the `pageshow` guard to the layout's script. Apps upgraded from 0.3.0 should double-check 0.4.0 note #5 (the first-login race: a caught unique violation aborts a Postgres transaction).
 

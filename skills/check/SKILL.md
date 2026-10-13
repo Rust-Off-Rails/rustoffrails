@@ -15,6 +15,7 @@ Only for Rust off Rails apps (a `.offrails/` directory exists).
    - **traceability** (§1): every `AC-…` ID in `product/` is cited by a test;
    - **coverage** (§5): `cargo llvm-cov nextest` thresholds;
    - **frontend coverage** in TS modes;
+   - **accessibility** (§10): axe on every route in light and dark, desktop and mobile (apps with a UI);
    - with `$ARGUMENTS` containing `--deep`, also **mutation testing** (§5).
 5. Walk the checklist under the commands and check each item against the diff (`git diff`, plus untracked files). Also check that the change added the tests its archetype requires (test-standards §2–4).
 6. Regenerate `docs/test-report.md` (test-standards §8).

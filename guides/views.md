@@ -209,7 +209,7 @@ Handlers set them per page: `ctx.titled(&book.title).described(&book.blurb)`. Pa
 Content and marketing sites also need:
 
 - **Self-hosted fonts** (`static/fonts/*.woff2`, `font-display: swap`). The default CSP (`font-src 'self'`, `style-src 'self'`) blocks Google Fonts, and loosening the CSP for fonts isn't worth it. Preload only the one or two faces above the fold.
-- **Lighthouse ≥ 95** in all four categories, mobile and desktop, against a release build. Run the CLI and record the scores in `docs/test-report.md`.
+- **Lighthouse ≥ 95** in all four categories, mobile and desktop, against a release build. Lighthouse checks one color scheme only, so it doesn't replace the axe suite in both themes ([test-standards §10](test-standards.md#10-accessibility-wcag-22-aa-in-every-theme)). Run the CLI and record the scores in `docs/test-report.md`.
 
 ## Dark mode
 

@@ -300,3 +300,36 @@ Run it with `pnpm --dir tests/e2e install` (once), then `pnpm --dir tests/e2e ex
 
 **Process hygiene:** start dev servers on your own port, and stop them by the PID you started or by that port (`lsof -ti tcp:3018 -sTCP:LISTEN | xargs kill`). **Never `pkill`/`killall` by name or pattern**: every app binary from this framework looks alike, and you'd kill the human's running app.
 
+
+## 10. Accessibility (WCAG 2.2 AA), in every theme
+
+Accessibility is checked like security: automatically, on every route, and in **every color scheme the app ships**. Lighthouse alone isn't enough. It audits **one** page in **one** scheme (the default light), so a dark-theme-only or light-theme-only contrast bug passes with a 100. A real one: rustoffrails.org's "first prompt" terminal card had near-white text on a white card in the light theme, with Lighthouse at 100.
+
+**What every app with a UI runs** (in `tests/e2e/` or `web/e2e/`, the same Playwright package as §9; `@axe-core/playwright`, versions via `pnpm add`):
+
+```ts
+import AxeBuilder from "@axe-core/playwright";
+const ROUTES = ["/", "/start", "/books", "/books/1"];          // every public route, plus logged-in ones with a fixture user
+for (const scheme of ["light", "dark"] as const)
+  for (const width of [1280, 390])
+    for (const route of ROUTES)
+      test(`a11y ${route} ${scheme} ${width}`, async ({ page }) => {
+        await page.emulateMedia({ colorScheme: scheme, reducedMotion: "reduce" });
+        await page.setViewportSize({ width, height: 900 });
+        // If the app has a theme toggle stored in a cookie, also set it, so the toggle's paths are covered too
+        await page.goto(route);
+        const r = await new AxeBuilder({ page })
+          .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
+        expect(r.violations, JSON.stringify(r.violations.map(v => [v.id, v.nodes.length]))).toEqual([]);
+      });
+```
+
+- **Zero violations.** An exception needs a `docs/decisions.md` entry naming the rule, the element and why, plus the human's OK. Never disable a rule globally.
+- **Keyboard:** Tab reaches every interactive element in a sensible order, with a **visible** focus ring (no `outline: none` without a replacement). The skip link moves focus to `<main>`. Menus and dialogs open with Enter/Space, close with Escape, and return focus.
+- **Motion:** under `prefers-reduced-motion: reduce`, no animations or transitions (View Transitions included).
+- **Forms:** every input has a `<label>`; errors are linked with `aria-describedby` and announced (`aria-live` or focus); invalid fields get `aria-invalid`.
+- **Contrast** includes code blocks, terminal cards, placeholders, disabled states, focus rings and text over images, in both themes. Decorative-but-readable text (like a terminal transcript) still has to meet 4.5:1.
+- **CI:** an `a11y` job boots the release build and runs the suite. It's a required check.
+- **Kernel pages** (`/dev`, `/dev/mailbox`, `/admin/jobs`) are held to the same standard: they're the framework's own UI.
+
+`/offrails:check` runs it with the e2e suite, and `/offrails:doctor` reports any public route missing from `ROUTES` above.

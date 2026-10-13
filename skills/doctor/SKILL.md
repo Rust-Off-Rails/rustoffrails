@@ -41,6 +41,11 @@ Read `.offrails/AGENTS.md`, `structure.md`, `stack.md` and `workflow.md`, plus t
 - Public API: contract snapshots exist and none changed without a decision entry.
 - No `sleep` in tests, no `#[ignore]` without a decision, and no assertions weakened in recent history (`git log -p tests/`).
 
+**Accessibility** (`guides/test-standards.md` §10)
+- An axe suite exists, covers every public route in both color schemes and both widths, and runs in CI as a required check.
+- No global rule disables; every exception has a decision entry.
+- Spot-check contrast of code blocks, terminal cards and focus rings in both themes.
+
 **Specs ↔ code**
 - Every `AC-…` ID in `product/features/*.md` is cited by a test (test-standards §1). List those that aren't.
 - Env vars agree across `Config`, `.env.example` and the deploy config.
