@@ -45,7 +45,8 @@ pub struct Config {
     pub trusted_proxy: bool,          // APP_TRUSTED_PROXY: trust the rightmost X-Forwarded-For hop (rate limiting)
     pub log_format: LogFormat,        // LOG_FORMAT = pretty | json (default: json in production)
     pub revision: Option<String>,     // APP_REVISION: git sha of the build, shown on /dev/system
-    pub tls: Option<(String, String)>, // APP_TLS_CERT + APP_TLS_KEY (PEM paths): serve HTTPS directly (deployment.md#direct-tls-optional); both or neither
+    pub tls: Option<TlsFiles>, // APP_TLS_CERT + APP_TLS_KEY (PEM paths): `serve` speaks HTTPS + h2 itself (deployment.md#direct-tls-optional); both or neither, one alone fails the boot.
+                               // The development APP_URL default follows it: https://localhost:{PORT} when set (CSRF compares origins).
     // apps with an API (api.md):
     // pub cors_origins: Vec<String>, // APP_CORS_ORIGINS: exact origins, comma-separated; `*` fails at boot (config::parse_cors_origins)
     // added with the first attachment field (storage.md):

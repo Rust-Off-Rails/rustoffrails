@@ -219,7 +219,7 @@ pub struct SocketConfig {
     pub idle_timeout: Duration,      // 60s without any frame or pong
     pub ping_every: Duration,        // 20s (WebSocket control frames)
     pub revalidate_every: Duration,  // 60s (APP_REALTIME_REVALIDATE_SECS)
-    pub max_conns_per_user: usize,   // 8, all transports, per node
+    pub max_conns_per_user: usize,   // 128, all transports, per node (a tab can hold 2: size for tabs)
     pub max_topics: usize,           // 20 per connection
     pub max_joins_per_min: u32,      // 30 per connection
 }
@@ -285,7 +285,7 @@ Every transport (the WebSocket upgrade, `/socket/sse` + POST, and long-polling) 
 | **Logout, password change, revocation close connections at once** | `session::destroy` / `destroy_all_for_user` write a `member:<id>` / `session-ended` signal (pubsub, so every process and node sees it). The hub wakes that member's connections; each re-checks **its own** session: the revoked one gets `bye` `revoked` + **4401**, the same person's other devices stay | logout closes that session's sockets only; password change closes all; logout ends SSE streams with `bye`; logout ends relays |
 | **Expiry closes connections** | every `revalidate_every` (60s, `APP_REALTIME_REVALIDATE_SECS`) each connection calls `session_valid` (fails closed) | expired session closed by revalidation (socket and SSE) |
 | **Authorization against current state** | joins and **every push** call `authorize` against the database now; a refused push also leaves the topic | push after the book is deleted → `forbidden`, then `not_joined` |
-| **Per-user caps** | ≤ 8 connections per member (all transports, per node), ≤ 20 topics per connection, ≤ 30 joins per minute per connection, ≤ 100 frames per 10s, frames ≤ 4 KiB | each limit |
+| **Per-user caps** | ≤ 128 connections per member (all transports, per node; each tab can hold 2, and a cap of 8 broke users at ~5 tabs, see [realtime](realtime.md#many-tabs-stall-http11-vs-http2)), ≤ 20 topics per connection, ≤ 30 joins per minute per connection, ≤ 100 frames per 10s, frames ≤ 4 KiB | each limit |
 | **Presence leaks nothing** | only members of the topic (who passed `authorize`) receive its presence; `meta` is minimal: initials or a display name, **never an email** unless the spec says so | no `@` in presence frames |
 | **Relays can't be hijacked** | `{conn, token}`: owner member + 256-bit token, constant-time comparison | wrong token, other member, unknown conn |
 | **Untrusted input stays data** | typed `In` enums (unknown events refused before the room), text rendered with `textContent` | `bad_event`; HTML delivered raw, rendered escaped |

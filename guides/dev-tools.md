@@ -97,6 +97,15 @@ HTTP tests can't see boosted navigation, `<head>` swaps, the back/forward cache 
 
    It goes app page → "Dev tools" link (styled?) → seeds 3 mails with the **Send a test email** button → opens one (styled, sandboxed iframe) → **Clear all** → Back (no resurrected rows) → Forward → **Enqueue a test job** → opens and deletes it → Back (redirected to the list, flash shown), and fails on any CSP violation. Every step waits with `waitForNavigation`/`waitForSelector`, with no fixed sleeps, and seeds only through the dev-only buttons, so it needs no app routes.
 
+3. **Multi-tab live updates** (any app with live pages): open N tabs in one profile on a live page, change something once, and assert every tab updates. It catches the HTTP/1.1 connection pool and an undersized per-user cap ([realtime](realtime.md#many-tabs-stall-http11-vs-http2)). The app supplies a small scenario module (`path`, `login`, `mutate`, `seen`); the reference app's is `tests/e2e/live-tabs.scenario.mjs`:
+
+   ```sh
+   SCENARIO=tests/e2e/live-tabs.scenario.mjs BASE=https://localhost:3000 TABS=12 \
+     bash .offrails/tools/browser-smoke/run.sh live-tabs
+   ```
+
+   It exits 1 if any tab misses the update, and says whether the page was on HTTP/1.1. Run it with 12 and 40 tabs after any realtime change.
+
 **Why it lives in `.offrails/tools/` and not in the app:** htmx-mode apps have no Node toolchain or `package.json`, and this check isn't part of the Definition of Done or CI. So `run.sh` installs `puppeteer-core` (pinned, verified 2026-10-12: 25.13.0, which needs **Node ≥ 22.12**; Node 24 LTS recommended) once into `~/.cache/offrails/browser-smoke` and runs a copy of the script from there. The app's dependency tree, lockfiles and stack rules are untouched, and inertia/spa apps use the same script. It's optional tooling for agents and humans; the guaranteed checks remain the Rust tests above. Verified against the bookshelf app: 11/11 checks pass. Removing `hx-boost="false"` from the dev link, or omitting `includeIndicatorStyles:false`, makes it fail.
 
 ## For agents

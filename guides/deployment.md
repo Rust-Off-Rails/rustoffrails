@@ -177,7 +177,7 @@ volumes:
 
 ## Direct TLS (optional)
 
-The default is plain HTTP inside the container and TLS at the platform's proxy. For a single box with no proxy, set `APP_TLS_CERT` and `APP_TLS_KEY` (PEM paths) and `serve` uses `axum-server`'s rustls acceptor: HTTPS with **h2 and http/1.1 via ALPN**, graceful shutdown through its `Handle`.
+The default is plain HTTP inside the container and TLS at the platform's proxy (which gives the browser h2). **In development, and on any box with no proxy,** set `APP_TLS_CERT` and `APP_TLS_KEY` (PEM paths) and `serve` uses `axum-server`'s rustls acceptor: HTTPS with **h2 and http/1.1 via ALPN**, graceful shutdown through its `Handle`.
 
 ```rust
 let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -187,6 +187,7 @@ let handle = axum_server::Handle::new();
 axum_server::bind_rustls(addr, tls).handle(handle).serve(app).await?;
 ```
 
+- **Why it matters beyond the box:** live pages need HTTP/2 in the browser, or realtime breaks at about 6 tabs ([realtime](realtime.md#many-tabs-stall-http11-vs-http2)). `bin/dev` serves HTTPS by default for that reason.
 - Install a crypto provider first: with sqlx/lettre in the tree, rustls can't pick one alone and panics at the first handshake.
 - Certificates come from your own ACME client (renew, then restart, or call `tls.reload_from_pem_file`). If you need automatic certificates, put Kamal-proxy or Caddy in front instead, and leave `APP_TLS_*` unset.
 - Verified 2026-10-13 with a self-signed certificate: `curl -k` negotiated h2, `--http1.1` worked, and `app health` passed.

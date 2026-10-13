@@ -104,6 +104,8 @@ cargo add axum --features multipart
 cargo add axum-extra --features cookie,typed-header,form
 cargo add tower
 cargo add tower-http --features fs,trace,compression-gzip,set-header,timeout,request-id,catch-panic,csrf
+cargo add axum-server --features tls-rustls          # direct TLS: HTTP/2 for realtime, in dev and on proxy-less boxes
+cargo add rustls --no-default-features --features aws_lc_rs,std
 cargo add sea-orm --features sqlx-sqlite,sqlx-postgres,runtime-tokio-rustls,macros,with-chrono,with-json,with-uuid
 cargo add askama serde_json thiserror anyhow tracing dotenvy rand base64 sha2 croner serde_html_form
 cargo add serde --features derive
@@ -193,7 +195,25 @@ Generate these in order. Each module compiles against the ones before it. The or
 
     Each kernel router (jobs web, mailbox, dev) ends with `.layer(kernel::ui::no_store())`.
 11. `src/tasks/mod.rs`, then `tasks/seed.rs` (empty and idempotent) and `tasks/test_db_cleanup.rs` (calls `kernel::db::drop_idle_test_databases`, which drops this app's leftover, idle `test_<crate>_<hex>` Postgres databases; see [testing](../guides/testing.md#database-per-test)). `kernel/db.rs` also has `ping(db)` for `/up`, so no SQL lives outside the kernel
-12. `src/lib.rs` (`pub mod` lines only), `src/main.rs`: the full CLI from [`cli.md`](../cli.md). `serve` uses `into_make_service_with_connect_info::<SocketAddr>()`, which `ClientIp` needs for rate limiting, and shuts down gracefully on Ctrl-C or SIGTERM. It serves plain HTTP/1.1 + h2c with `axum::serve`. Direct TLS is **not** part of `new`: `axum-server` + `rustls` are added the first time a deploy needs it ([deployment](../guides/deployment.md#direct-tls-optional)). Until then, `Config` still parses `APP_TLS_CERT`/`APP_TLS_KEY`, and `serve` refuses to start with a clear message if they're set, so a misconfigured box fails loudly instead of serving plain HTTP. Include `app health` (the container healthcheck: `GET /up` on 127.0.0.1:$PORT, no curl needed in the image).
+12. `src/lib.rs` (`pub mod` lines only), `src/main.rs`: the full CLI from [`cli.md`](../cli.md). `serve` uses `into_make_service_with_connect_info::<SocketAddr>()`, which `ClientIp` needs for rate limiting, and shuts down gracefully on Ctrl-C or SIGTERM. With `APP_TLS_CERT`/`APP_TLS_KEY` unset it serves plain HTTP with `axum::serve` (behind a TLS proxy). **With them set, it serves HTTPS itself, h2 + http/1.1 via ALPN** ([deployment](../guides/deployment.md#direct-tls-optional)). This is part of `new` in every app, because any app with live updates needs HTTP/2 in the browser, in development too ([realtime](../guides/realtime.md#many-tabs-stall-http11-vs-http2)). Copy this branch exactly:
+
+    ```rust
+    match config.tls.clone() {
+        None => axum::serve(listener, service).with_graceful_shutdown(stop).await?,
+        Some(tls) => {
+            // sqlx/lettre bring ring, axum-server brings aws-lc-rs: rustls can't pick a provider alone.
+            let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+            let cfg = axum_server::tls_rustls::RustlsConfig::from_pem_file(&tls.cert, &tls.key).await
+                .with_context(|| format!("loading APP_TLS_CERT={} / APP_TLS_KEY={}", tls.cert, tls.key))?;
+            let handle = axum_server::Handle::new();
+            let graceful = handle.clone();
+            tokio::spawn(async move { stop.await; graceful.graceful_shutdown(Some(Duration::from_secs(30))); });
+            axum_server::bind_rustls(addr, cfg).handle(handle).serve(service).await?;
+        }
+    }
+    ```
+
+    `service` is `router.into_make_service_with_connect_info::<SocketAddr>()` and `stop` is the shutdown future (signal, then close pubsub and sockets). Include `app health` (the container healthcheck: `GET /up` on 127.0.0.1:$PORT, no curl needed in the image). With TLS on, it only checks that the port accepts a connection, because a plain-text probe can't talk to a TLS listener.
 
 ## 5. Frontend by mode
 
@@ -230,7 +250,8 @@ Generate these in order. Each module compiles against the ones before it. The or
 | `.env.example` | Every `Config` var, with dev defaults ([config](../guides/config.md#envexample)) |
 | `bin/setup-tailwind` | htmx mode or islands. Pinned `TAILWIND_VERSION`, downloads and verifies `bin/tailwindcss` ([frontend-htmx](../guides/frontend-htmx.md#setup-done-by-generatorsnewmd)) |
 | `bin/setup` | `set -euo pipefail`. In order: <ul><li>check tools (install nextest/watch if missing)</li><li>copy `.env.example` to `.env` if missing</li><li>`mkdir -p storage`</li><li>`bin/setup-tailwind && bin/tailwindcss -i assets/app.css -o static/app.css --minify` (htmx), or `pnpm --dir web install` (TS modes)</li><li>print `Compiling (the first build takes several minutes)…`: a cold build of this stack takes about 10 minutes</li><li>`cargo run -- db setup`</li></ul> |
-| `bin/dev` | First `cargo run -q -- db migrate` (prints "Compiling and migrating…"), then the server via `cargo watch -q -w src -w templates -w migration -x 'run -q -- db migrate' -x 'run -- serve'` (migrates on every rebuild), plus `bin/tailwindcss … --watch=always` or Vite, as background jobs with `trap 'kill 0' EXIT`. Prints `→ http://localhost:${PORT:-3000}` and `…/dev (mailbox, jobs, routes)` |
+| `bin/dev` | **HTTPS + HTTP/2 by default:** unless `APP_TLS=off`, run `bin/dev-cert` if `storage/dev-certs/cert.pem` is missing and export `APP_TLS_CERT`/`APP_TLS_KEY`, and print `https://…`. Then: first `cargo run -q -- db migrate` (prints "Compiling and migrating…"), then the server via `cargo watch -q -w src -w templates -w migration -x 'run -q -- db migrate' -x 'run -- serve'` (migrates on every rebuild), plus `bin/tailwindcss … --watch=always` or Vite, as background jobs with `trap 'kill 0' EXIT`. Prints `→ http://localhost:${PORT:-3000}` and `…/dev (mailbox, jobs, routes)` |
+| `bin/dev-cert` | A local certificate for HTTPS in development: `mkcert` when installed (a locally trusted CA), else `openssl req -x509` self-signed with SAN `localhost`, `127.0.0.1`, `::1`, written to `storage/dev-certs/` (git-ignored with `storage/`). Copy it from the [realtime](../guides/realtime.md#many-tabs-stall-http11-vs-http2) guide |
 | `bin/docker-entrypoint` | `#!/bin/sh`, `set -e`, `app db migrate` unless `SKIP_MIGRATIONS=true`, then `exec "$@"` ([deployment](../guides/deployment.md)) |
 | `compose.yaml` | **The whole app, production-shaped**: `docker compose up --build` runs the `app` service (built from the `Dockerfile`, `APP_ENV=production`, healthcheck `app health`) against a `db` service (Postgres, the production major, healthcheck `pg_isready`, a named volume, published on `127.0.0.1:${DB_PORT:-5432}` so `TEST_DATABASE_URL` works from the host). Profiles: `worker` (a separate `app worker` container; run with `APP_INLINE_WORKER=false`) and `mail` (Mailpit; `SMTP_URL=smtp://mailpit:1025`). Ports overridable (`APP_PORT`, `DB_PORT`, `MAILPIT_PORT`). The full file is in [deployment](../guides/deployment.md#docker-compose-the-whole-app-locally). `bin/dev` stays the fast native loop |
 | `Dockerfile` | Per [deployment](../guides/deployment.md#dockerfile-shape) (trixie images). Delete the `web` stage in plain htmx and `api` modes, and the Tailwind line in `api` mode |

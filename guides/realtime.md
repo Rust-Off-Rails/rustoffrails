@@ -204,7 +204,7 @@ document.addEventListener("htmx:sseMessage", (e) => e.detail?.target?.url && rem
 **Robust live regions (htmx).** Verified in real browsers on a Kanban board (opencode, framework 0.3.0); each rule fixes a failure that curl and request tests can't see:
 
 - **Never reconnect by editing `sse-connect`** (removing it, re-adding it, or changing its URL). htmx has no `MutationObserver`: the old `EventSource` closes only on `htmx:beforeCleanupElement`, which fires only for htmx-managed swaps, so every "reconnect" **leaks one open stream**. To force a reconnect, swap the whole `sse-connect` element through htmx (e.g. refresh its parent with `hx-get`), or reload the page.
-- **The connection budget.** Over HTTP/1.1 (local dev, or any proxy that downgrades), a browser allows **about 6 open connections per origin**, across all tabs. Each `EventSource` holds one forever. Leaked or duplicated streams, or 6 tabs of the same app, exhaust the budget, and new streams then **queue silently forever**: no error ever fires. Rules: **one `sse-connect` per page** (multiplex several signal streams through one connection by listening to several event names on it); never open streams in hidden, offscreen or duplicated elements; production behind HTTP/2 (Cloudflare, Fly, kamal-proxy with TLS) multiplexes and avoids the cap, but don't rely on it in dev.
+- **The connection budget** (see [Many tabs stall](#many-tabs-stall-http11-vs-http2): serve HTTPS so the browser gets h2). Over HTTP/1.1 (plain-HTTP dev, or any proxy that downgrades), a browser allows **about 6 open connections per origin**, across all tabs. Each `EventSource` holds one forever. Leaked or duplicated streams, or 6 tabs of the same app, exhaust the budget, and new streams then **queue silently forever**: no error ever fires. Rules: **one `sse-connect` per page** (multiplex several signal streams through one connection by listening to several event names on it); never open streams in hidden, offscreen or duplicated elements; production behind HTTP/2 (Cloudflare, Fly, kamal-proxy with TLS) multiplexes and avoids the cap, but don't rely on it in dev.
 - **Serialize refetches:** put `hx-sync="this:replace"` on every live region (or `this:abort`), so two signals in quick succession can't land out of order. Without it, two concurrent refetches race and the slower (older) response wins.
 - **A named heartbeat the page can see.** SSE `KeepAlive` comments are invisible to page JS, so a client watchdog can't tell "idle" from "dead" (one agent's watchdog reloaded healthy idle boards every ~50s). Have the stream also send a named `ping` event every 25s, observe it with a hidden element (`<span hidden sse-swap="ping" hx-swap="none"></span>`; `hx-swap="none"` is a real no-op in htmx 2.0.11), and treat **no `ping` for 60s** as dead → reload the region or the page.
 - **Show the connection state.** A small badge driven by `htmx:sseOpen` (live) and `htmx:sseError` (reconnecting…), so a dead stream is visible instead of a silently stale page.
@@ -227,6 +227,52 @@ useEffect(() => {
 
 **spa:** the same `EventSource` (cursor from the API response), calling `queryClient.invalidateQueries({ queryKey: ["books", id, "reviews"] })`. Put it in a `useStream(stream, cursor, handlers)` hook in `web/src/api/stream.ts`. If you ever rebuild the `EventSource` yourself (e.g. after `CLOSED`), track `e.lastEventId` and pass it as `since`.
 
+## Many tabs stall (HTTP/1.1 vs HTTP/2)
+
+**The failure:** with a handful of tabs open on a live page, the extra tabs sit on "connecting…" forever, and even their normal requests hang. No error is ever logged.
+
+**The cause:** over **HTTP/1.1** a browser allows **about 6 connections per origin, across all tabs of one profile**, and every open live page holds one for its stream (SSE, or the SSE/long-poll channel transports). **HTTP/2** multiplexes every tab over one connection. **Browsers only speak HTTP/2 over TLS**, so axum's `http2` feature on a plain-HTTP listener changes nothing for a browser (h2c is only for non-browser clients).
+
+**Measured** (reference bookshelf app, a book page with live reviews, 12 tabs in one Chrome profile, one review edited from tab 1, `.offrails/tools/browser-smoke/run.sh live-tabs`):
+
+| Served as | Tabs that got the update |
+|---|---|
+| plain HTTP (HTTP/1.1) | **5/12** (the rest never) |
+| HTTPS, h2 via ALPN | **12/12** and **40/40**, every run |
+
+The same numbers came from a Kanban app built by another agent (6/12 vs 12/12 and 40/40).
+
+**Where you get h2 automatically:** behind Cloudflare, Caddy, kamal-proxy with TLS, Fly, Render or Railway, the browser already speaks h2 to the proxy. **Development is where you must do it yourself:** `bin/dev` serves HTTPS by default (`APP_TLS=off` for plain HTTP), using `bin/dev-cert` and the `serve` TLS branch from [`new.md`](../generators/new.md) step 4.12:
+
+```sh
+#!/bin/sh
+# bin/dev-cert: a local certificate so the browser gets HTTP/2. mkcert = trusted, no warning.
+set -eu
+dir="${1:-storage/dev-certs}"; mkdir -p "$dir"
+if command -v mkcert >/dev/null 2>&1; then
+  mkcert -cert-file "$dir/cert.pem" -key-file "$dir/key.pem" localhost 127.0.0.1 ::1
+else
+  openssl req -x509 -newkey rsa:2048 -nodes -days 825 -keyout "$dir/key.pem" -out "$dir/cert.pem" \
+    -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:::1" >/dev/null 2>&1
+fi
+```
+
+Prove it: `curl -sk -o /dev/null -w '%{http_version}' https://localhost:$PORT/up` prints `2`.
+
+**Size the per-user connection cap for tabs.** Each tab can hold two realtime connections (a signal stream and a channel socket). The reference app's cap of **8** per user returned **429 on `/streams/…` from about the fifth tab**, the same symptom as the HTTP/1.1 pool. The cap is **128** now: it still bounds abuse, and a real person's tabs fit. Any cap must be tested with the multi-tab smoke at ≥ 40 tabs.
+
+**Client rule (if you ever suspend streams in hidden tabs):** only on HTTP/1.1, never on h2/h3, where streams are cheap and suspending only loses updates. A tab that **loads** hidden never gets a `visibilitychange`, so close its stream on open:
+
+```js
+// static/app.js: protocol-aware stream suspension (only needed if you suspend at all)
+const multiplexed = () => /^h[23]/.test(performance.getEntriesByType("navigation")[0]?.nextHopProtocol || "");
+document.addEventListener("htmx:sseOpen", (e) => {
+  if (document.visibilityState !== "visible" && !multiplexed()) e.detail.source.close();
+});
+```
+
+**The test that catches it** is the multi-tab smoke ([dev-tools](dev-tools.md#browser-smoke)): N tabs in one profile on a live page, one change, every tab must update. Request tests can't see the browser's connection pool.
+
 ## Gotchas agents get wrong
 
 - `Event::default().data("")`: the event never fires in a browser. Always send non-empty data.
@@ -239,6 +285,8 @@ useEffect(() => {
 - htmx history snapshots (see above).
 - **No cursor**: a page rendered without `?since=`, or htmx reconnects without the `createEventSource` override, loses every signal sent while it was disconnected (the reference app shipped this; the human noticed a stale review list after a deploy).
 - **The sse extension in a page's head block**: dead after any boosted navigation (see Client side).
+- **Plain-HTTP dev with live pages:** realtime breaks at ~6 tabs. `bin/dev` serves HTTPS (h2) by default; keep it ([Many tabs stall](#many-tabs-stall-http11-vs-http2)).
+- **A per-user connection cap sized for one tab:** 429 on streams from the fifth tab. Size it for tabs (128) and prove it with the multi-tab smoke.
 - **Reconnecting by editing `sse-connect`, unserialized refetches, no visible heartbeat, more than one stream per page:** see "Robust live regions" above. Together they turn into "the board silently goes stale after a while".
 - Fly/Kamal proxies: SSE works over HTTP/1.1 and HTTP/2 with no special config. WebSocket channels have their own notes in [deployment](deployment.md).
 

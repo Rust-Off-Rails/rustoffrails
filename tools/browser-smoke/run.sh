@@ -4,7 +4,9 @@
 # on the dev machine only: puppeteer-core goes to a cache dir, nothing is added to the app (htmx
 # apps stay Node-free). Uses a throwaway Chrome profile.
 #
-#   BASE=http://localhost:3000 bash .offrails/tools/browser-smoke/run.sh
+#   BASE=http://localhost:3000 bash .offrails/tools/browser-smoke/run.sh                 # kernel pages
+#   SCENARIO=tests/e2e/live-tabs.scenario.mjs BASE=https://localhost:3000 TABS=12 \
+#     bash .offrails/tools/browser-smoke/run.sh live-tabs                                 # N tabs, one change
 #   CHROME=/usr/bin/google-chrome BASE=… bash .offrails/tools/browser-smoke/run.sh   # Linux
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -22,5 +24,10 @@ if [ "$(cat "$cache/.version" 2>/dev/null)" != "$version" ]; then
   echo "$version" > "$cache/.version"
 fi
 # ESM resolves imports next to the script, so run a copy from the cache dir.
-cp "$here/smoke-dev-tools.mjs" "$cache/smoke-dev-tools.mjs"
-exec node "$cache/smoke-dev-tools.mjs"
+case "${1:-dev-tools}" in
+  dev-tools) script=smoke-dev-tools.mjs ;;
+  live-tabs) script=smoke-live-tabs.mjs ;;
+  *) echo "unknown smoke '$1' (dev-tools | live-tabs)" >&2; exit 2 ;;
+esac
+cp "$here/$script" "$cache/$script"
+exec node "$cache/$script"
