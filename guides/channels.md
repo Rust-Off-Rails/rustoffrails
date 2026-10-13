@@ -267,6 +267,9 @@ A client tries the WebSocket first and falls back automatically:
 
 Realtime connections are long-lived and authenticated once, so every rule a request gets for free has to be enforced for the connection's whole life. **Security is the gold standard here; each rule has a test** (`tests/app/wire_test.rs`, `kernel_pubsub_test.rs`).
 
+
+Every transport (the WebSocket upgrade, `/socket/sse` + POST, and long-polling) authenticates through the same session extractor as ordinary requests (`load_session`, via `SessionAndUser`). So all of them inherit the production `__Host-session_token` name and ignore a planted plain `session_token`, and their responses pass through the security middleware (`no-store`, the full header matrix; [security](security.md#the-header-matrix)). Never parse the session cookie by hand in realtime code.
+
 | Rule | How | Test |
 |------|-----|------|
 | **Same-origin only, every transport** | WebSocket: `Origin` must equal APP_URL's origin (missing = refused). SSE / long-poll GETs: refuse a foreign `Origin` or `Sec-Fetch-Site: cross-site`. POSTs: the CSRF layer. Session cookies are `SameSite=Lax` too | cross-site Origin on WebSocket, SSE stream, SSE relay, long-poll, relay POST |
