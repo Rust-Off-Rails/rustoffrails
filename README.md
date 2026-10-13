@@ -1,4 +1,4 @@
-<p align="center"><img src="brand/lockup-on-light.svg" alt="Rust off Rails" height="72"></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="brand/lockup-on-dark.svg"><img src="brand/lockup-on-light.svg" alt="Rust off Rails" height="72"></picture></p>
 
 # Rust off Rails
 
