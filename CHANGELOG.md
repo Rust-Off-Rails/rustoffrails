@@ -4,6 +4,13 @@ Each entry lists convention changes and what an existing app must do about them.
 
 ## Unreleased
 
+(nothing yet)
+
+## 0.5.0 (2026-10-13)
+
+Learned from real apps built by other agents and from a real upgrade: an accessibility gate in both themes, robust live regions (from a Kanban built with opencode), a context diet for agents (`CHEATSHEET.md` + a TL;DR on every guide), instant navigation for content sites, and a migration repair convention. rustoffrails.org runs it, with a hosted read-only MCP server at https://rustoffrails.org/mcp.
+
+
 - Docs: the Postgres compose service is `db` everywhere (`docker compose up -d db`); `fingerprint.sh` ignores a `.git` *file* (worktrees, submodules); the Copilot pointer file has an exact body; `generators/upgrade.md` defines a non-interactive path; the pre-deploy checklist requires green CI on the exact commit.
 
 - Fixes from a real 0.3.0 → 0.4.0 upgrade (bookshelf, via `/offrails:upgrade`): `fingerprint.sh` and vendoring ignore the plugin cache's `.in_use/` marker; the error-page `app.js` snippet is now shown in errors-and-logging; ZAP's "Suspicious Comments" gotcha; the 0.4.0 migration notes' detect lines for #2, #3 and #6 are greppable (and `HX-Push-Url` lives at the end of `error::shape_errors`); the test-harness DB helpers are named (`create_database`, `drop_database`); a macOS ZAP variant; a deterministic first-login transaction test; the upgrade recipe adds a missing "Post-upgrade checks" section.
