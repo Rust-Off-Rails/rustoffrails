@@ -1,5 +1,13 @@
 # Database: one codebase, SQLite and Postgres
 
+> **TL;DR**
+> - `DATABASE_URL` picks SQLite or Postgres at runtime; both drivers are always compiled in; tests run on both.
+> - Everything goes through SeaORM; backend-specific SQL only in `src/kernel/` or behind an explicit backend `match`.
+> - SQLite: WAL, `foreign_keys = ON`, `busy_timeout`; in-memory test DBs use one connection.
+> - Write transactions on SQLite start with `kernel::db::begin` (`BEGIN IMMEDIATE`), or they fail with "database is locked" when the job worker writes.
+>
+> Read the rest when touching connections, the kernel's db module, portability, or moving data between backends.
+
 `DATABASE_URL`'s scheme picks the backend at runtime. Nothing is recompiled. Both drivers are always compiled in.
 
 | `DATABASE_URL` | Backend |

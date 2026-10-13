@@ -1,5 +1,13 @@
 # Caching (Solid Cache / `Rails.cache` → `kernel/cache.rs`)
 
+> **TL;DR**
+> - Don't cache until it's measured or the spec requires it; log every cache in `docs/decisions.md`.
+> - `state.cache.fetch(&key, ttl, || async {…})`: moka in memory (L1, only for TTL ≥ 60s) in front of the `cache_entries` table.
+> - Never cache HTML containing the flash, forms or the current user; never fill a cache inside a transaction that may roll back.
+> - Bound keys built from user input (hash them, short TTL).
+>
+> Read the rest when adding a cache, designing keys, or using HTTP caching.
+
 **Don't cache until it's measured or the spec requires it.** Most Off Rails pages are a few indexed queries. A cache is a second source of truth with invalidation bugs attached. When you add one, log the reason in `docs/decisions.md`.
 
 | Rails | Off Rails |

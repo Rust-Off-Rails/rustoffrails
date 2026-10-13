@@ -1,5 +1,14 @@
 # Channels, Presence and the Hub (`kernel/hub.rs` + the Off Rails Wire protocol)
 
+> **TL;DR**
+> - Signals ([realtime](realtime.md)) stay the default; use channels only when the client talks back (chat, games) or you need presence.
+> - One connection per tab speaking `offrails.v1` (negotiated subprotocol, JSON frames with `t`), with WebSocket → SSE+POST → long-poll fallback; resume with durable `seq` cursors.
+> - Each room is an actor in `kernel/hub.rs`; typed `In`/`Out` enums; write to the DB first, then emit.
+> - Security: Origin required on the handshake, session checked at upgrade and re-validated, every join and push authorized, per-user caps, revocation closes the socket (4401).
+> - Multi-node is opt-in (`kernel/cluster.rs`, Postgres `NOTIFY`, rendezvous ownership).
+>
+> Read the rest when building chat, presence or collaborative features, or touching the wire protocol.
+
 [realtime.md](realtime.md) covers **signals**: "book 42's reviews changed, re-fetch". That's enough for live lists, counters and notifications, and it stays the default. Channels are for what signals can't do: **the client talks back** (chat, typing, games, collaborative tools) or the page needs **who's here** (presence). The design is inspired by Phoenix Channels (one multiplexed connection per tab, topics joined with authorization, a state-owning process per room, presence that's correct across nodes), but the wire protocol is our own: **offrails.v1**, typed end to end, resumable, with transport fallback.
 
 > Verified on 2026-10-12 in the reference app (htmx, "who's reading" avatars and a per-book discussion): axum 0.8.9 `ws`, tokio 1.53, sea-orm 2.0.4 with sqlx 0.9's `PgListener`, tokio-tungstenite 0.29 as the test client. 223 tests on SQLite and Postgres 18 (39 for realtime: protocol conformance, security, all three transports, a 3-node cluster with a node killed mid-conversation), two Playwright specs (a server restart with changes made while it was down; WebSocket → SSE → long-polling fallback), and a manual two-context Chrome session.

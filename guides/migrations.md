@@ -1,5 +1,13 @@
 # Migrations (`db/migrate` → `migration/` crate)
 
+> **TL;DR**
+> - `sea-orm-cli migrate generate <verb_noun>`; write the migration and the entity together; `cargo run -- db migrate`.
+> - Committed migrations are append-only (CI enforces it): change the schema with a new migration; a repair migration's `down` restores the predecessor's exact schema.
+> - Every migration has a working `down` (prove rollback, then migrate, on both backends); every FK has an index and an explicit `on_delete`; NOT NULL by default.
+> - Stick to SQLite-safe schema changes (rebuild tables for what SQLite's `ALTER` can't do); data backfills go in `src/tasks/`.
+>
+> Read the rest when writing or repairing a migration, or changing a framework table.
+
 Migrations are Rust, written with `sea-orm-migration`'s schema DSL, which emits correct DDL for SQLite and Postgres. They live in the `migration/` workspace crate (the standard SeaORM layout) and are embedded in the app binary, so **deploying the binary deploys the migrations**.
 
 ## Commands

@@ -1,5 +1,12 @@
 # Generator: `scaffold` / `resource` / `model`
 
+> **TL;DR**
+> - `scaffold Book title:string … owner:references`: `?` = nullable, `!` = unique; `owner`/`user`/`author` references are set from the session, never from params.
+> - Spec with AC IDs first, then migration → model (+ policy, factory) → failing tests (the standard request set per test-standards) → controller → routes → views for the app's mode.
+> - `resource` = without views; `model` = migration + model + tests; nested resources one level deep, shallow member routes.
+>
+> Read the rest whenever you add a CRUD resource, a model or a nested resource.
+
 ```
 scaffold Book title:string author:string published_on:date? rating:integer owner:references
 ```

@@ -1,5 +1,14 @@
 # Deployment
 
+> **TL;DR**
+> - One Docker image runs web, worker and migrations; `bin/docker-entrypoint` runs `app db migrate`, then the command. `/up` is the health check.
+> - Generate config only for the chosen `DEPLOY_TARGET` (Kamal, Fly, Render, Railway); `docker compose up` runs the whole app locally.
+> - Schema changes are expand → migrate → contract; SQLite in production means one machine with a volume and backups.
+> - Before deploying: green DoD, **green CI on the exact commit**, the image builds and answers `/up`, every env var is in `.env.example` + `Config` + the deploy config. Outward-facing steps need the human's yes.
+> - Behind Cloudflare: turn off script injection (Web Analytics, Rocket Loader, email obfuscation) instead of loosening the CSP. Open-source apps keep the real deploy config git-ignored.
+>
+> Read the rest when shipping, choosing a target, running migrations remotely, or rolling back.
+
 One Docker image runs everything: web, worker, migrations. The deploy target was chosen in the [interview](../interview.md) (`DEPLOY_TARGET` in the app's `AGENTS.md`). **Generate config only for the chosen target.** If it's "later", generate the Dockerfile and entrypoint only, and stop there.
 
 | Rails 8 | Off Rails |

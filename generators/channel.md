@@ -1,5 +1,12 @@
 # Generator: `channel` (live updates, rooms, presence)
 
+> **TL;DR**
+> - Signal (the default): `channel book:{id} reviews-changed` → a broadcast in the model fn, the stream's authorization, and a live region that re-fetches.
+> - Room (`--room [--presence]`) → an `offrails.v1` channel with typed `In`/`Out` messages, join/push authorization and resume.
+> - Use a room only when the client talks back or needs presence; otherwise a signal.
+>
+> Read the rest when adding live updates, chat or presence.
+
 ```
 channel book:{id} reviews-changed            # signal: "viewers see new reviews appear without refreshing"
 channel book:{id} --room --presence          # room: "readers chat about the book and see who's reading"

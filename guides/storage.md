@@ -1,5 +1,13 @@
 # Storage (Active Storage → `object_store` + `blobs`)
 
+> **TL;DR**
+> - Active Storage equivalent: `object_store` (local disk in dev, memory in tests, S3-compatible in prod) plus a `blobs` table; added with the first `attachment` field.
+> - Storage keys are always random (never user filenames); validate size and type; raise `DefaultBodyLimit` on upload routes; an empty file input isn't an upload.
+> - Purge blobs in a job after commit, never inside the request transaction; serve with authorization and a safe `Content-Disposition`.
+> - object_store 0.14: import `ObjectStoreExt` for `put`/`get`/`delete`.
+>
+> Read the rest when adding uploads, serving files, or listing attachments without N+1.
+
 > Verified on 2026-10-12 in the reference app (book covers): object_store 0.14.2 (`aws` feature), axum 0.8.9 `Multipart`, tests on SQLite and Postgres, and an upload through the real browser form.
 
 | Rails | Off Rails |

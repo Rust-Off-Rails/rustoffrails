@@ -1,5 +1,13 @@
 # Realtime (Action Cable / Turbo Streams → signals over SSE)
 
+> **TL;DR**
+> - Broadcast **signals, not HTML**: `pubsub::broadcast(&txn, "book:42", "reviews-changed")` inside the transaction; clients re-fetch through normal authorized GETs (Turbo 8's refresh model).
+> - SSE at `/streams/{stream}`; every signal has an id, pages render a `?since=` cursor, and reconnects replay what was missed (or get `refresh`). Data is never empty.
+> - htmx: the sse extension in the layout; one `sse-connect` per page; never reconnect by editing the attribute; `hx-sync` on live regions; a named `ping` heartbeat with a watchdog; the history cache off; a `pageshow` guard.
+> - Delivery is instant in-process on SQLite and via `NOTIFY` on Postgres, with polling as the backstop. For chat or presence, see [channels](channels.md).
+>
+> Read the rest when adding a live region or stream, or debugging stale pages.
+
 **Broadcast signals, not HTML.** When data changes, the server announces "book 42's reviews changed" on a stream. Clients that care re-fetch through the normal, already-authorized GET routes. This is Turbo 8's "page refresh" broadcast model. Payloads stay tiny, nothing gets rendered per subscriber, authorization can't leak through a broadcast, and it works identically in all three frontend modes.
 
 > Verified on 2026-10-12 in the reference app (htmx, live reviews on a book page): axum 0.8.9 `Sse`, tokio-stream 0.1.19 `BroadcastStream`, htmx 2.0.11 with htmx-ext-sse 2.2.4, tests on SQLite and Postgres, a two-browser smoke (an edit in one context appeared in the other without a refresh), and a Playwright downtime test: a review changed while the page's server was down appeared once it came back, with no reload.

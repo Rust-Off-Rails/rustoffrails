@@ -1,5 +1,13 @@
 # Jobs (Active Job + Solid Queue, done the Oban way → `kernel/jobs/`)
 
+> **TL;DR**
+> - A persistent, database-backed queue in `src/kernel/jobs/`, modeled on Oban: states, retries with backoff, uniqueness, snooze/cancel/discard, cron, Stager/Lifeline/Pruner plugins, safe on every node.
+> - Args hold ids, never records or secrets (args are visible in `/admin/jobs`); enqueue inside the transaction that creates the data.
+> - Jobs are idempotent (at-least-once delivery); size `MAX_ATTEMPTS` to the work, and transactional mail expires instead of retrying for weeks.
+> - Test with `drain_jobs`, `assert_enqueued`, `perform_job`; no sleeps.
+>
+> Read the rest when adding a worker, a recurring job, a queue, or touching the kernel queue.
+
 Background work runs from a persistent, database-backed queue that you generate into `src/kernel/jobs/`. It's modeled on Elixir's **Oban**:
 
 - jobs are rows with an explicit state machine;

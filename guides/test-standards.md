@@ -1,5 +1,13 @@
 # Test Standards: what every app must prove
 
+> **TL;DR**
+> - Every `AC-<feature>-<n>` in `product/` is cited by a test; the required suites depend on the app's archetypes (web, inertia, spa, API, jobs, realtime, multi-tenant, money).
+> - Security tests walk `ROUTES` (access matrix, CSRF, escaping, sessions, rate limits, mass assignment, the header matrix); multi-tenant apps get a tenant isolation suite.
+> - Gates: ≥ 80% line coverage (≥ 90% models and policies), mutation testing on policies, N+1 guards, no flaky tests, never weaken a test to pass.
+> - UI changes get a real-browser smoke (§9) and the axe accessibility suite in light and dark (§10); Lighthouse alone isn't enough.
+>
+> Read the rest when deciding what to test for a feature, or checking a gate.
+
 [`testing.md`](testing.md) says **how** to write tests (TestApp, factories, layout). This guide says **what** must be tested, how much is enough, and how that's enforced. It's part of the Definition of Done, so none of it is optional.
 
 The rule: **a behavior that isn't tested doesn't exist.** The human writes no code and doesn't read it either. The suite is the only proof they get that the app does what `product/` says.
@@ -298,7 +306,7 @@ export default defineConfig({
 
 Run it with `pnpm --dir tests/e2e install` (once), then `pnpm --dir tests/e2e exec playwright test`. In CI it's optional: add `npx playwright install chrome` (or use a runner with Chrome) and run it after the Rust jobs.
 
-**Process hygiene:** start dev servers on your own port, and stop them by the PID you started or by that port (`lsof -ti tcp:3018 -sTCP:LISTEN | xargs kill`). **Never `pkill`/`killall` by name or pattern**: every app binary from this framework looks alike, and you'd kill the human's running app.
+**Process hygiene:** your own port, stop only your own PID, never `pkill` by name ([cli](../cli.md#running-the-app-from-an-agent), the canonical rules).
 
 
 ## 10. Accessibility (WCAG 2.2 AA), in every theme

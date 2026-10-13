@@ -1,5 +1,14 @@
 # APIs: `FRONTEND_MODE: api` and the `API` axis
 
+> **TL;DR**
+> - `FRONTEND_MODE: api` means no UI at all; the `API` header (`none | rest | graphql | both`) is a separate choice, so any mode can expose a public API.
+> - REST lives under `/api/v1`, returns `{"data": …}` (lists add `page`), takes bodies through `ApiJson<T>` (JSON 422s), and is documented by utoipa at `/api/openapi.json`, committed with a drift test.
+> - Auth is bearer API tokens: digest-only, scoped, expiring, rate-limited per token.
+> - CORS uses exact origins from `APP_CORS_ORIGINS`, never `*` and no credentials; those origins are also CSRF-trusted.
+> - Never return an entity `Model` or a `json!` blob, and never 403 another user's record (scope the query, 404).
+>
+> Read the rest when building an API-only app, adding tokens, CORS or OpenAPI, or writing API tests.
+
 Two separate choices, both made in the [interview](../interview.md) and recorded in the app's `AGENTS.md`:
 
 | Header | Values | Means |

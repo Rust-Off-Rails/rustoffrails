@@ -1,5 +1,12 @@
 # Generator: `job` (`rails generate job`) and `task`
 
+> **TL;DR**
+> - `job SendWeeklyDigest user_id:bigint [--queue] [--priority] [--every cron] [--unique key:ttl]` → a `Worker` struct with id-only args, registered in `dispatch` and `worker_config`.
+> - Choose outcomes deliberately (`Done`, `Err` → retry, `Snooze`, `Discard`, `Cancel`); make jobs idempotent; enqueue from the model fn in the same transaction.
+> - A new queue goes into `APP_QUEUES`, `.env.example` and every worker role; `--every` adds a `Recurring` entry.
+>
+> Read the rest when adding a job or a task (`app task <name>`).
+
 ## Job
 
 ```

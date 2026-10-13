@@ -1,5 +1,13 @@
 # Views (Action View → Askama)
 
+> **TL;DR**
+> - htmx mode: every page is an Askama template plus a Rust struct in `src/views/`; the compiler checks templates. Mailers use Askama in every mode.
+> - No DB calls from views; `|safe` only on helper output (ammonia); render with `.render()?` + `Html`, never `askama_axum`.
+> - Every app with pages ships meta, favicon and social cards, and dark mode via `prefers-color-scheme` (an optional cookie toggle).
+> - Askama 0.16 passes fields by reference (`*book.id` for `Copy` args) and escapes with numeric entities.
+>
+> Read the rest when writing templates, forms, layouts, helpers, meta tags, or dark mode.
+
 In `htmx` mode, every HTML page is an Askama template (`templates/`) paired with a Rust struct (`src/views/<plural>.rs`). The compiler checks that every variable a template uses exists with the right type. Mailers use Askama in **all** modes.
 
 > **Version check.** Askama's syntax and derive attributes have changed across versions: 0.12 → 0.13 was a big change, and `askama_axum` was removed. The snippets here were verified with askama 0.16.1. Before writing unfamiliar syntax (custom filters especially), read the docs for the version in `Cargo.lock`.

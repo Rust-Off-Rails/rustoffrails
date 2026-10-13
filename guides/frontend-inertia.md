@@ -1,5 +1,13 @@
 # Frontend: `inertia` mode (inertia-rails → `kernel/inertia.rs`)
 
+> **TL;DR**
+> - React (or Svelte) pages with Rails-style server routing; the adapter is your own `kernel/inertia.rs`, generated from the protocol spec here. No client router, no client fetching: data arrives as props.
+> - Props are `#[derive(Serialize, TS)]` structs exported by ts-rs with `TS_RS_LARGE_INT=number`; never hand-write TS types.
+> - `useForm` sends JSON (take `Json<…>`); validation errors redirect back with the `_errors` cookie; PATCH/DELETE redirect with 303.
+> - Send `Vary: X-Inertia`; asset-version mismatch on GET is 409; type-check with `tsc -b`, never `tsc --noEmit`.
+>
+> Read the rest when wiring Inertia, Vite, props, or Inertia tests.
+
 React (or Svelte: `UI_LIBRARY: svelte`, see [frontend-svelte](frontend-svelte.md#inertia-mode), which replaces only the `web/` files) + TypeScript pages, with **server-side routing, controllers, sessions and validation kept Rails-style**. No client router, no API layer, no client data fetching. A handler returns a *page*: a component name plus typed props.
 
 There is no Inertia crate. You generate `kernel/inertia.rs` (~200 lines) from the protocol spec below.

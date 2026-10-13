@@ -1,5 +1,13 @@
 # Dev Tools (`/dev`, a small Phoenix LiveDashboard)
 
+> **TL;DR**
+> - Every app gets `/dev` (index, routes, system, mailbox, mailer previews) and `/admin/jobs`, built by `new`, never stubbed; mounted only in development (`/admin/jobs` needs admin access in production).
+> - Kernel pages have their own layout: every link into them carries `hx-boost="false"`, every response is `Cache-Control: no-store`, and they use no `confirm()` dialogs.
+> - Pending migrations: in development every HTML request shows a page with a Run migrations button; `/up` is 503 in production while any are pending.
+> - Agents read email via `/dev/mailbox/latest.json?to=…`; the kernel-page browser smoke is `.offrails/tools/browser-smoke/run.sh`.
+>
+> Read the rest when changing a kernel page, debugging pending migrations, or running the browser smoke.
+
 In development the app serves a toolbox at `/dev`. It's for the human clicking around and for the agent curling around. Keep it modest: it shows what the app already knows, with no metrics pipeline and no profiler.
 
 **`generators/new.md` builds every page below in every app.** None is optional, stubbed or "added later".

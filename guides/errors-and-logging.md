@@ -1,5 +1,13 @@
 # Errors & Logging
 
+> **TL;DR**
+> - One `AppError` enum in `src/error.rs` maps to responses per flavor (HTML, htmx, Inertia, JSON); handlers use `?`, never `unwrap`.
+> - Records the user may not know exist are `NotFound`, not `Forbidden`; unique violations go through `sql_err()`, never message matching.
+> - Panics render the standalone 500 page (`CatchPanicLayer::custom`); error pages are standalone templates with no DB access that load `app.js` for Back/Forward.
+> - Log once, in `IntoResponse`, with `tracing` (JSON in production); `/up` uses `kernel::db::ping`.
+>
+> Read the rest when adding an error variant, changing error pages, or wiring logging.
+
 | Rails | Off Rails |
 |-------|-----------|
 | `rescue_from` / exceptions app | `AppError` + `impl IntoResponse` in `src/error.rs` |

@@ -1,5 +1,13 @@
 # Mailers (Action Mailer → lettre + Askama, with Swoosh's dev mailbox)
 
+> **TL;DR**
+> - `kernel/mailer.rs`: `Mailer::Local` in development (every email lands in `/dev/mailbox`), `Memory` in tests, SMTP in production (`Log` if none is set); selection lives in `state.rs`.
+> - Send HTML **and** text with absolute URLs; deliver through a job (`deliver_later`); mail that carries a token gets its own job that mints the token.
+> - lettre with `default-features = false` and the async Tokio transport.
+> - Agents read mail from `/dev/mailbox/latest.json`, never from raw `.eml` (quoted-printable breaks long links).
+>
+> Read the rest when writing a mailer, previews, or changing the dev mailbox.
+
 | Rails / Phoenix | Off Rails |
 |-----------------|-----------|
 | `UserMailer.welcome(user)` | `mailers::user_mailer::welcome(&state.config, &user)? -> Email` |

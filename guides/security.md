@@ -1,5 +1,13 @@
 # Security
 
+> **TL;DR**
+> - 12 **non-negotiables** (CSP, headers, CSRF/Origin, escaping, authorization, tenant scoping, rate limits, tokens, session revocation, cookies, secrets, dependencies) are never weakened without a decision entry **and** the human's explicit OK.
+> - CSRF is tower-http's `CsrfLayer` (Fetch Metadata + Origin, no tokens); the header matrix applies to every response class, tested by `headers_test.rs`.
+> - No raw HTML except ammonia output; no SQL via `format!`; no mass assignment (owner/role fields never in `Params`); uploads validated and served safely.
+> - CI enforces cargo-deny, gitleaks and a ZAP baseline; security-relevant changes run `/offrails:security` and add attack tests.
+>
+> Read the rest when touching auth, headers, uploads, admin or dev surfaces, WebSockets, or secrets.
+
 **Security is the gold standard of this framework.** Rails ships defenses on by default. Off Rails ships them as specs you generate on day one (`generators/new.md`), enforced by tests, CI scanners and plugin hooks. Agents go hard here: assume every input is hostile, every client is scripted, and every proxy lies. Never remove a defense to make something work. Fix the something.
 
 ## Non-negotiables

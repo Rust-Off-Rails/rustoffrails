@@ -1,5 +1,13 @@
 # Generator: `new` (`rails new`)
 
+> **TL;DR**
+> - Run only after the interview and a confirmed plan; it builds about 60 files and the full kernel (jobs + dashboard, mailer + dev mailbox, cache, `/dev`, security headers) for every app, never stubbed.
+> - Vendor a **release** into `.offrails/` with the anchored `rsync` excludes; write `.offrails/VERSION`; add every crate with `cargo add`, one per line.
+> - Generate in the listed order so the tree compiles at every step; the first full build takes about 10 minutes.
+> - Finish with the smoke tests, the Definition of Done on both databases, a running app (`/up`, `/`), and the one baseline commit.
+>
+> Read it all, in order, whenever you create an app; skipping steps is how stubs ship.
+
 Creates a complete, deployable, empty app: about 60 files. It's the longest recipe and sets every later convention, so run it top to bottom without skipping. Every command below was executed on 2026-10-12 to generate the `bookshelf` reference app (htmx, SQLite + Postgres), which compiled, passed clippy and passed its tests on both databases. When something here disagrees with a resolved crate's docs, the docs for the version in `Cargo.lock` win. Fix the code, then log it in `docs/decisions.md`.
 
 **One profile, every app.** `new` builds the same kernel for every app: the job queue and its dashboard, the mailer and dev mailbox, cache, `/dev` tools. That includes a content site that sends no email today. This is deliberate, as in Rails, where every app gets Active Job and Action Mailer:

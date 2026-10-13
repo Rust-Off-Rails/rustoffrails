@@ -1,5 +1,13 @@
 # Frontend: Svelte (`UI_LIBRARY: svelte`)
 
+> **TL;DR**
+> - `UI_LIBRARY: svelte`: Svelte 5 in inertia, spa (SvelteKit in SPA mode) and islands; the mode still decides the architecture.
+> - Type-check with `svelte-check --fail-on-warnings` (`tsc -b` skips `.svelte` files); Biome needs its full-Svelte support turned on.
+> - Inertia: use `useForm(data)` + `form.submit(method, url)`, not the precognition signature; read `page.flash` directly.
+> - `spa` mode is client-only: no `+page.server.ts`, `+server.ts`, form actions or server hooks; Rust is the only server.
+>
+> Read the rest when writing Svelte pages, islands, or SvelteKit routing.
+
 Svelte 5 is the second blessed UI library, next to React. The **mode** (`FRONTEND_MODE`) still decides the architecture, and the **library** (`UI_LIBRARY`) decides what the components are written in:
 
 | `FRONTEND_MODE` | `UI_LIBRARY: react` | `UI_LIBRARY: svelte` |

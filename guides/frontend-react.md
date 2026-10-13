@@ -1,5 +1,13 @@
 # Frontend: `spa` mode with React (SPA + JSON API)
 
+> **TL;DR**
+> - `spa` mode with React: a Vite SPA in `web/` (React Router 8 + TanStack Query) talking to the Rust API under `/api`. Choose it only for a public API or mobile clients; otherwise use `inertia`.
+> - Types come from ts-rs; `web/src/api/client.ts` is the only `fetch` caller; per-resource hooks wrap it.
+> - Relative `/api/...` paths only; the SPA fallback must not swallow `/api` 404s.
+> - Type-check with `tsc -b`; install `react-router` (not `react-router-dom`).
+>
+> Read the rest when building SPA routes, the API client, or SPA tests.
+
 This file was `react` mode before 0.3.0; the mode is now `spa`, with `UI_LIBRARY: react`. For `UI_LIBRARY: svelte` (SvelteKit in SPA mode), read [frontend-svelte](frontend-svelte.md#spa-mode-sveltekit), which keeps this file's `/api` contract.
 
 A Vite-built React SPA in `web/`, talking to a Rust JSON API under `/api`. Choose this mode only when the interview found a reason: a public API, or a mobile/third-party client sharing it. Otherwise React apps use [`inertia`](frontend-inertia.md).

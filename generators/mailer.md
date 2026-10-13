@@ -1,5 +1,12 @@
 # Generator: `mailer` (`rails generate mailer`)
 
+> **TL;DR**
+> - `mailer ReviewMailer new_review` → a pure fn returning an `Email` (HTML + text, absolute links, the shared mail layout), sent via `mailers::deliver_later(&txn, email)` from the model fn.
+> - Add a preview to `PREVIEWS`; test with `drain_jobs()` + `sent_emails()`; verify for real through `/dev/mailbox/latest.json`.
+> - Mail carrying a token gets its own job that mints the token; never render secrets into an enqueued email.
+>
+> Read the rest when adding an email.
+
 ```
 mailer ReviewMailer new_review
 ```

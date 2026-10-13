@@ -1,5 +1,13 @@
 # Models (Active Record → SeaORM)
 
+> **TL;DR**
+> - One file per table: the SeaORM entity, `Params` (untrusted) → `validate()` → `New`, and every query for that table; no callbacks, side effects are explicit in model fns.
+> - Queries take `db: &impl ConnectionTrait`; transactions start with `kernel::db::begin`, never `db.begin()`.
+> - Set timestamps in Rust; return `AppError`; no raw SQL; unique violations become validation errors via `sql_err()`.
+> - Inside a Postgres transaction use `on_conflict_do_nothing` / `try_insert`: a caught unique violation aborts the transaction.
+>
+> Read the rest when writing models, validations, associations, enums/money, or pagination.
+
 A model is one file in `src/models/` holding the SeaORM entity for a table, its params, its validation, and every query that touches the table. The same code runs on SQLite and Postgres. Read [`database.md`](database.md) for the portability rules.
 
 > **Entity format: "compact"** (`DeriveEntityModel` + `Relation` enum + `impl Related`). Verified with SeaORM 2.0.4, where it's still `sea-orm-cli generate entity`'s default. 2.x also offers "dense" and "expanded" formats; don't use them, so every model in every app reads the same. Check `Cargo.lock`: if `sea-orm`'s major differs from 2, read its migration guide before writing entities.

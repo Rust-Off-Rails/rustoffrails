@@ -1,5 +1,13 @@
 # Frontend: `htmx` mode (Hotwire → htmx)
 
+> **TL;DR**
+> - Askama HTML + htmx 2 (vendored) + Tailwind standalone; no Node except islands.
+> - The layout's `htmx-config` is required: swap 422/429/5xx (`responseHandling`), `allowEval:false` + `includeIndicatorStyles:false` (CSP), `historyCacheSize:0` + `refreshOnHistoryMiss:true`.
+> - Extensions (sse) load in the layout, never a page head; links into kernel pages carry `hx-boost="false"`; a 422 re-render sends `HX-Push-Url: false`.
+> - Fragments for `HX-Request`, full pages otherwise; small behaviors in `static/app.js` (no inline scripts); assets are digested and immutable.
+>
+> Read the rest when building pages or partials, adding JS behavior, or using islands.
+
 Server-rendered HTML, made dynamic by htmx attributes. No Node, no bundler, no build step for JS. CSS comes from the Tailwind standalone binary.
 
 ## Setup (done by `generators/new.md`)

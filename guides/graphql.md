@@ -1,5 +1,13 @@
 # GraphQL (`API: graphql | both`)
 
+> **TL;DR**
+> - One endpoint, `POST /graphql`, built with async-graphql 7.x + async-graphql-axum; GraphiQL at `/dev/graphiql` in development only.
+> - A `DataLoader` per request for every association; depth limit ≥ 13 (or introspection breaks) and a complexity limit.
+> - Validation errors go in the mutation payload (`errors: [UserError]`); auth, not-found and internal errors are top-level with `extensions.code`; never leak SQL.
+> - The SDL is committed as `docs/schema.graphql`, with a drift test; policies still apply to every field and mutation.
+>
+> Read the rest when adding types, queries or mutations, or writing GraphQL tests.
+
 One schema, one endpoint: `POST /graphql`. Built with **async-graphql** + **async-graphql-axum** (verified 2026-10-13 against 7.2.1; 8.0 is still a release candidate, so `cargo add` resolves 7.x, which is what you want). Reference implementation: `offrails-api-demo` ([api](api.md)).
 
 ```sh

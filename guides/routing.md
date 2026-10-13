@@ -1,5 +1,13 @@
 # Routing (`config/routes.rb` → `src/routes.rs`)
 
+> **TL;DR**
+> - Every route lives in `src/routes.rs`, plus `paths::` helpers and the `ROUTES` table with an `Access` level per route (tests walk it; `#[rustfmt::skip]` keeps it aligned).
+> - htmx mode uses POST-only resource routes (`/posts/{id}/delete`); inertia uses real verbs; spa exposes `/api` only.
+> - axum 0.8: `/{id}`, never `/:id`; a parameter is a whole segment (`/{id}.eml` panics at startup); the body extractor goes last.
+> - Middleware order matters: security headers outside panic and timeout layers, the migrations guard after the fallback.
+>
+> Read the rest when adding routes, middleware, or nested resources.
+
 Every route lives in `src/routes.rs`. One file, read top to bottom, is the whole URL surface of the app.
 
 ## The resource shape

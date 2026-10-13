@@ -1,5 +1,13 @@
 # Controllers (Action Controller → axum handlers)
 
+> **TL;DR**
+> - One file per resource with the seven Rails actions; handlers are thin: extract → authorize → model → render or redirect.
+> - Extractor order: `State`, auth/`Ctx`, `Path`/`Query`, then the body (`Form`/`Json`/`Multipart`) last; return `Result<Response, AppError>`.
+> - Successful POST → `Redirect::to` (303); validation failure → re-render with 422, keeping the params.
+> - Authorize before any write; scope private records by owner (another user's id is 404); no DB calls in views; side effects belong in model fns.
+>
+> Read the rest when writing handlers, flash, extractors, or JSON endpoints.
+
 A controller is one file in `src/controllers/<plural>.rs` holding plain async functions, one per action. Handlers are thin: extract → authorize → call the model → render or redirect. Business rules live in models, never here.
 
 ## The seven actions (`htmx` mode)

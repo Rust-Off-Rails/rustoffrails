@@ -1,5 +1,13 @@
 # Testing
 
+> **TL;DR**
+> - **How** to test (test-standards.md says **what**): one integration-test binary in `tests/app/`, `TestApp` over the real router, factories, both SQLite and Postgres.
+> - Postgres test databases are namespaced `test_<crate>_<hex>` and dropped on a joined thread; the DDL lives in `kernel::db`.
+> - Helpers set Fetch Metadata like a browser; assert on what the user sees (`assert_text` decodes entities), never exact HTML; no sleeps (`drain_jobs`, `wait_until`).
+> - CI runs SQLite, Postgres, security (cargo-deny, gitleaks) and the Docker image with a ZAP baseline.
+>
+> Read the rest when writing the harness, factories, frontend tests, or CI.
+
 This guide is **how** to write tests (TestApp, factories, layout). **What** must be tested, and the coverage and quality gates, are in [`test-standards.md`](test-standards.md). Read both.
 
 Tests are how the agent proves the spec. Every acceptance criterion in `product/features/*.md` becomes one integration test, named after the criterion. The same suite runs on SQLite (default, fast) and Postgres (CI, and locally when available). **No mocked database, ever.**

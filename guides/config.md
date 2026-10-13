@@ -1,5 +1,13 @@
 # Config, Environments & Secrets
 
+> **TL;DR**
+> - One `Config` struct parsed from env vars once (`Config::from_env`); never `std::env::var` deep in the code.
+> - `APP_ENV` = development | test | production; `.env` is loaded only in development; `.env.example` lists every variable with dev defaults (no real secrets).
+> - In development `APP_URL` follows `PORT`; normalize it (no trailing slash).
+> - Secrets live in the deploy platform's secret store, never in git or images.
+>
+> Read the rest when adding a setting, a secret, or environment-specific behavior.
+
 | Rails | Off Rails |
 |-------|-----------|
 | `RAILS_ENV` | `APP_ENV` = `development` \| `test` \| `production` |

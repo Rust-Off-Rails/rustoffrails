@@ -18,6 +18,8 @@ The app's root `AGENTS.md` declares `FRONTEND_MODE: htmx | inertia | spa | api` 
 
 ## Load order
 
+**Start with [`CHEATSHEET.md`](CHEATSHEET.md)** (two pages: stack, layout, naming, the Definition of Done, security non-negotiables, the costliest gotchas). Then read a full guide **only when your task touches its topic** (the table below), and inside a guide, read its **TL;DR** first and stop when it answers your question.
+
 Read these before your first change in a session:
 
 1. [`interview.md`](interview.md): **before building anything new**, ask the right questions

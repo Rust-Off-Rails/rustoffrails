@@ -1,5 +1,12 @@
 # Generator: `authentication` (`rails generate authentication` / `phx.gen.auth`)
 
+> **TL;DR**
+> - Implements `guides/auth.md` for the `ACCOUNTS` variant (`signup`, `invite`, `magic-link`, `magic-link-invite`); write `product/features/accounts.md` first.
+> - Steps in order, compiling at each one: crates → migrations → kernel (`session.rs`, rate limits) → models → extractors → error shaping → jobs that mint tokens → mailer → controllers → routes → views → dev seed → tests.
+> - Tests: one per `AC-accounts-<n>`, plus cookie flags, no token in job args, idle-session expiry, the dev mailbox hint (dev only), the magic-link list from auth.md, and the app's first real-browser smoke (`tests/e2e/`).
+>
+> Read it all when adding accounts to an app.
+
 Implements the design in [`guides/auth.md`](../guides/auth.md). Read that first. This recipe is the file checklist, in an order that compiles at every step. The `signup` variant was executed end to end in the reference app (htmx) on 2026-10-12, green on SQLite and Postgres.
 
 ## Inputs (from the interview, recorded in the app's `AGENTS.md`)

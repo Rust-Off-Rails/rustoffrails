@@ -1,5 +1,13 @@
 # Generator: `upgrade` (`rails app:update`)
 
+> **TL;DR**
+> - Brings an app to a newer **release**: `$FW` is `~/.offrails/current`, the plugin root, or a tag export, never a moving working tree.
+> - Detect drift by content fingerprint; start from a clean git tree; read the CHANGELOG's App migration steps between versions.
+> - Reconcile, don't re-create: classify each change (new / conforming / divergent / conflicting); never edit applied migrations; show the plan and wait for a yes.
+> - Re-vendor, apply in green vertical slices, verify nothing shows a stale version, and log the upgrade in `docs/decisions.md`.
+>
+> Read it all whenever you upgrade an app (`offrails upgrade` launches this recipe).
+
 Brings an existing app up to a newer Rust off Rails release: it re-vendors `.offrails/` and migrates the app to any changed conventions. Any agent can run this recipe (Claude Code, Codex, opencode, Cursor…). In Claude Code, `/offrails:upgrade` runs it for you.
 
 **`$FW`** is the new framework:

@@ -1,5 +1,12 @@
 # Generators (`rails generate` → recipes)
 
+> **TL;DR**
+> - A generator is a recipe you execute top to bottom, ending in a green Definition of Done; read the whole recipe first.
+> - Follow only the app's `FRONTEND_MODE` branch.
+> - Order: migration → model → factory → failing tests → controller → routes → views → wiring (`mod.rs`, `ROUTES`, `paths::`, dispatcher, nav).
+>
+> Read the rest to pick the recipe for a `rails generate` equivalent.
+
 A generator here is a recipe you execute: a list of files to create and edit, in order, ending in a green Definition of Done. Read the whole recipe before starting it.
 
 | Rails command | Recipe | Produces |
