@@ -231,7 +231,7 @@ jobs:
       - name: Committed migrations are append-only (guides/migrations.md rule 1)
         if: github.event_name == 'pull_request'
         run: test -z "$(git diff --name-only --diff-filter=M origin/${{ github.base_ref }}... -- 'migration/src/m*.rs')"
-      - name: Mechanical gates (header, every AC cited, Security-table tests, tenancy suites, scoped lookups)
+      - name: Mechanical gates (header, every AC cited, Security-table tests, tenancy suites, scoped lookups, .env.example)
         run: sh .offrails/tools/offrails-check
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets --locked

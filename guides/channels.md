@@ -29,7 +29,7 @@
 | The spec says… | Use |
 |----------------|-----|
 | "X updates without refreshing" (lists, counts, statuses) | **SSE signal** ([realtime.md](realtime.md)). No client→server messages, cheapest, works through every proxy |
-| "see who's online / reading / typing" | **Channel** with presence |
+| "see who's online / reading / typing" | **Channel** with presence; a page that already streams signals and only shows a count ("12 people · 15 tabs here"): [presence over SSE](#presence-over-sse-no-websocket) |
 | "chat", "comments appear as people type", "multiplayer", "live cursor" | **Channel** with a `Room` |
 | "notify me" (personal notices) | SSE signal on `user:{id}`, or a channel topic `user:{id}` if the page already has a socket |
 
@@ -178,7 +178,8 @@ impl<R: Room> Hub<R> {
     pub fn presence_list(&self, topic: &str) -> Payload;
     pub async fn join(&self, ctx: &R::Ctx, topic: &str, member: &Member, since: Option<i64>) -> Result<JoinReply, Rejection>;
     pub async fn handle_in(&self, ctx: &R::Ctx, topic: &str, member: &Member, event: &str, data: Payload) -> Result<Payload, Rejection>;
-    pub fn revoke(&self, key: &str);                                      // a session of `key` may have ended
+    pub fn revoke(&self, key: &str);                                      // a session of `key` may have ended: wakes only `key`'s connections
+    pub fn revoked(&self, key: &str) -> impl Future<Output = ()> + Send + use<R>;   // per-key sender, created on demand
     pub fn watch_revocations(&self, signals: broadcast::Receiver<pubsub::Signal>) -> JoinHandle<()>;
     pub fn conns_of(&self, key: &str) -> usize;                           // per-user caps
     pub fn log_frames(&self, on: bool);                                   // development: /dev/sockets frame log
@@ -194,6 +195,7 @@ Rules the implementation follows (and tests prove):
 - **Supervision ("let it crash", per room).** Every `init`/`joined`/`handle_in` runs under `AssertUnwindSafe(..).catch_unwind()`. A panic answers the caller with `unavailable` ("room crashed; try again"), drops the state, counts a restart (shown on `/dev/sockets`), and the next command rebuilds the state with `init`. The mailbox and the connections survive.
 - **Serialize once.** `Hub::broadcast` builds one `Frame` and every subscriber receives a clone of the same buffer. The test asserts 1000 receivers share one pointer.
 - **Slow consumers are warned, then dropped.** Each topic's channel buffers `TOPIC_BUFFER` (256) frames. At ¾ full the connection gets a `slow` frame; past the buffer it gets `bye` (`too_slow`) and close 1013. The client reconnects and resumes from `since`. One slow phone can't make the server hold memory for everyone.
+- **Wake only who it's for.** Topics have one sender each (`subscribe(topic, conn)`), and revocations are keyed the same way: `revocations: Mutex<HashMap<String, broadcast::Sender<()>>>` by member key, created by `revoked(key)`, swept when a connection unregisters and the sender has no receivers. Never one process-wide channel that every connection filters: a logout would wake every socket and stream on the node (the same rule as [pubsub](realtime.md#kernel-spec-srckernelpubsubrs)).
 - **Idle topics are forgotten.** No local connections and nobody present → the topic (and its actor) is dropped. An actor with no commands for 5 minutes stops by itself.
 - **Presence lists people, not tabs.** Refs are `(node, conn)`. A person joins when their first ref arrives and leaves when their last ref goes. Two tabs = one avatar.
 - **Every join and rejoin gets a full snapshot before any diff.** The server orders the frames (above); the client's `Presence` also defends itself: on each (re)join it marks itself unsynced, **buffers** `joins`/`leaves` until that join's `here` arrives, replaces its state with `here`, applies the buffered diffs, and only then calls `onSync`. Diffs are idempotent (a `joins` for someone already present or a `leaves` for someone absent changes nothing), so overlap between the snapshot and buffered diffs is harmless.
@@ -324,8 +326,8 @@ impl Channels for AppState {
 
 - **Routes** (with `ROUTES` rows, `Access::User`): `GET /socket`, `GET /socket/sse`, `POST /socket/sse/{conn}`, `POST /socket/poll`, `GET`+`POST /socket/poll/{conn}`. Keep the poll routes explicit: a POST to `/socket/poll/1` matching a GET-only static route answers 405 instead of falling through to a `{transport}` param route.
 - **Extractor:** `SessionAndUser` (session + user), so the connection knows which session to revalidate.
-- **State:** `hub: Hub::new(node)`, `hub.log_frames(config.is_development())`, `hub.watch_revocations(pubsub.subscribe())` in `AppState::new`.
-- **`serve`:** `kernel::cluster::start(..)` when `config.cluster`, and `hub.close()` next to `pubsub.close()` in the graceful-shutdown future.
+- **State:** `hub: Hub::new(node)`, `hub.log_frames(config.is_development())`, `hub.watch_revocations(pubsub.subscribe_prefix("member:"))` in `AppState::new`.
+- **`serve`:** `kernel::cluster::start(..)` when `config.cluster`, and `hub.close()` next to `pubsub.close()` in the graceful-shutdown future, which is bounded by `APP_SHUTDOWN_DRAIN_SECS` ([realtime](realtime.md#kernel-spec-srckernelpubsubrs)). Every socket task `select!`s on `hub.closed()` and sends `bye` `restart` + 1012 without awaiting anything else.
 - **A room** (`src/channels/book_room.rs`) keeps the newest 50 messages in a `VecDeque` and knows whether that covers a client's `since`; it goes to the database only when it doesn't. `handle_in(BookIn::Post)`:
   1. per-reader rate limit (10 per 10s, `rate_limited` "Slow down"), consistent across tabs and nodes because only the owner's actor sees posts;
   2. validate (`MessageParams::validate`, the same `Errors` as forms; `invalid`);
@@ -360,6 +362,59 @@ addEventListener("offrails:revoked", () => (location.href = "/session/new"));  /
   - start rooms on `DOMContentLoaded` and `htmx:load`;
   - on `htmx:beforeSwap` with `detail.boosted`, leave the page's channels, so presence updates for everyone else when you navigate away;
   - put **`hx-boost="false"` on any form the socket sends**: a boosted form submit also navigates (to `?body=…`), which the browser check caught.
+
+## Presence over SSE (no WebSocket)
+
+For a page that already holds a signal stream and only needs **how many are here** (a board viewed by 5,000 people), a socket per tab is overkill: count the streams. Measured by a peer on a Kanban (5,000 SSE watchers on one board, release build, one M2): it works, **if updates are coalesced**. Without coalescing, 5,000 arrivals wake 5,000 receivers 5,000 times (25 million wake-ups to load one board).
+
+**The rules:**
+
+1. **A join guard per stream.** The stream endpoint calls `s.presence.join(&stream, user.id)` and moves the returned `JoinGuard` into the response stream's state. Its `Drop` is the leave: a closed tab, a dropped connection, a shutdown, an error path. No explicit leave call to forget.
+2. **Count people and tabs:** people = distinct user ids, tabs = streams. The label is built from numbers only (`12 people · 15 tabs`): presence never carries names or emails ([security](#security)), and numbers need no escaping when htmx swaps them in.
+3. **Joins and leaves only mark the room dirty.** They update the counts under a `std::sync::Mutex` and insert the room in a dirty set; they never send.
+4. **One task publishes:** every 250 ms it takes the dirty set and, per dirty room, computes the label once and sends it on that room's `tokio::sync::watch` channel (`send_if_modified`, so an unchanged label wakes nobody). `watch` keeps only the latest value, so a burst of 5,000 joins inside one tick is one wake-up per receiver.
+5. **The current label on connect, then one event per change.** The stream merges `WatchStream::new(rx)` (tokio-stream, feature `sync`): it yields the current value first, then each new one, as `event: presence`. The page swaps it into a span: `<span sse-swap="presence" hx-swap="innerHTML">…</span>` inside the `sse-connect` element.
+6. **Per process.** Counts are in memory. With more than one node, each node sees only its own tabs: back it with the pub/sub table (each node publishes its per-room counts with its node id, and the label sums the latest count from every live node) or use the channels hub's cluster presence. Not specified further until an app needs it; say so in the spec instead of shipping a per-node count.
+
+```rust
+// src/kernel/presence.rs: counted presence over signal streams (one per process, in AppState)
+#[derive(Clone, Default)]
+pub struct SsePresence { inner: Arc<Mutex<Rooms>> }               // std::sync::Mutex: never held across .await
+
+#[derive(Default)]
+struct Rooms { rooms: HashMap<String, Room>, dirty: HashSet<String> }
+struct Room { people: HashMap<i64, usize>, tabs: usize, tx: tokio::sync::watch::Sender<String> }
+
+pub struct JoinGuard { presence: SsePresence, room: String, user_id: i64 }
+impl Drop for JoinGuard { fn drop(&mut self) { self.presence.leave(&self.room, self.user_id) } }   // leave = mark dirty
+
+impl SsePresence {
+    /// Count this stream in; returns the guard (hold it in the stream) and the label receiver.
+    pub fn join(&self, room: &str, user_id: i64) -> (JoinGuard, tokio::sync::watch::Receiver<String>);
+    fn leave(&self, room: &str, user_id: i64);                     // tabs -= 1; a user at 0 tabs leaves `people`
+    /// Publish one label per dirty room; drop rooms with no tabs. Returns how many rooms it published.
+    pub fn flush(&self) -> usize;
+    /// `serve` spawns this once (after realtime starts): flush every 250 ms until shutdown.
+    pub fn start(&self, every: Duration, shutdown: impl Future<Output = ()> + Send + 'static);
+    pub fn label(&self, room: &str) -> Option<String>;            // tests, /dev/introspect.json
+}
+```
+
+A new room's `watch` starts with the label as of its first join, so the joiner sees itself right away; `flush` corrects every other viewer within 250 ms. In the stream endpoint (realtime.md), next to the signals:
+
+```rust
+let (guard, label) = s.presence.join(&stream, user.id);
+let presence = WatchStream::new(label)
+    .map(move |text| { let _held = &guard; Ok::<_, Infallible>(Event::default().event("presence").data(text)) });
+// merge `presence` with the signal stream, then take_until(ended) and take_until(pubsub.closed()) as before
+```
+
+Tests (`kernel_presence_test.rs`; call `flush()` yourself, never start the ticker, like `poll_once`):
+
+- two users, three guards: after `flush()` the label is `2 people · 3 tabs`; drop one guard of the user with two: `2 people · 2 tabs`; drop the rest: the room is gone (`label` is `None`);
+- **coalescing:** subscribe one receiver, join 1,000 guards, `flush()` once: the receiver's `changed()` resolves once and `has_changed()` is then false; `flush()` returns 1;
+- an unchanged label after a flush (a join and a leave in the same tick) wakes nobody;
+- the stream endpoint's first `presence` event arrives before any signal, and closing the stream (dropping the body) decrements the count after the next `flush()`.
 
 ## More than one server (`kernel/cluster.rs`)
 
@@ -431,6 +486,8 @@ impl Hub<R> {
 | SSE signal latency, SQLite, before (250ms poll) → after (in-process wake) | **238 ms → 0.24 ms** |
 | SSE signal latency, Postgres, before → after (`NOTIFY`) | **238 ms → 2.1 ms** |
 
+A peer's load test on 0.6.0 (one box, signal streams): **5,000 SSE watchers held, 154 MB RSS, fan-out p50 ≈ 40 ms**; the database and page rendering, not open streams, were the bottleneck ([realtime](realtime.md#measured-capacity)).
+
 Run them with `cargo nextest run --run-ignored only -E 'test(bench_)' --no-capture` (and with `TEST_DATABASE_URL` for Postgres).
 
 ## Testing
@@ -461,6 +518,7 @@ Kernel cases (`kernel_channels_test.rs`):
 - one command at a time; typed `In` refuses undeclared events;
 - serialize-once (pointer equality);
 - presence counting and idle topic cleanup;
+- **keyed wake-ups:** `revoke("user:1")` resolves `revoked("user:1")` and leaves `revoked("user:2")` pending (`tokio::time::timeout(100ms)` errs); after the last connection of `user:1` unregisters, its revocation entry is gone;
 - **ownership:** owners are stable, and a leave moves only that node's topics;
 - **signals:** a committed signal is delivered with the backstop poll set to 60s, and a rolled-back one never is;
 - **the 3-node cluster test** (Postgres only): presence crosses nodes, a message on the owner reaches a socket on another node, `halt()` the owner, presence leave, posting on the new owner, the reconnecting client resumes from a third node, each message is stored once, and jobs drained by two nodes run exactly once.

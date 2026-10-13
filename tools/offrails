@@ -24,15 +24,84 @@ Usage:
   offrails version               show the installed framework version
   offrails update [options]      install the latest framework release (then run `offrails upgrade` in each app)
   offrails uninstall             remove the framework and this command
-  offrails help                  this help
+  offrails help [command]        this help, or a command's (same as offrails <command> --help)
 
 Examples:
   offrails new bookshelf "people track the books they've read"
   offrails update --version 0.3.0
   cd my-app && offrails upgrade --check
   cd my-app && offrails upgrade --check --fw /tmp/offrails-0.6.0   # a tag export: git archive v0.6.0 | tar -x -C …
+
+`offrails <command> --help` (or -h) prints that command's help and never runs anything.
+Commands that start an agent (new, upgrade) need --yes (or OFFRAILS_YES=1) when stdin is not a
+terminal; without it they print the agent command they would run and exit 3.
+
+Exit codes: 0 ok · 1 error · 2 usage (unknown command or flag) · 3 agent launch needs --yes
+            10 upgrade --check: an upgrade is due
 EOF
 }
+
+# help_for <command>: per-command help (stdout, exit 0 from the caller). Never does any work.
+help_for() {
+  case "$1" in
+    new) cat <<'EOF'
+Usage: offrails new [--yes] <name> [pitch…]
+
+Starts your coding agent (Claude Code, opencode or Codex; OFFRAILS_AGENT picks one) with
+/offrails:new, which interviews you and generates the app. Writes nothing itself.
+  <name>     lowercase letters, digits, '-' or '_', starting with a letter
+  --yes, -y  launch the agent even when stdin is not a terminal (or OFFRAILS_YES=1)
+EOF
+    ;;
+    upgrade) cat <<'EOF'
+Usage: offrails upgrade [--check] [--fw <dir>] [--yes]
+
+In an app: compare its .offrails/ with the installed framework (or <dir>) and, when they
+differ, start your coding agent with the upgrade recipe (generators/upgrade.md).
+  --check     compare only; exit 0 when current, 10 when an upgrade is due. Never runs an agent.
+  --fw <dir>  a framework release (tag export or plugin root) instead of ~/.offrails/current
+  --yes, -y   launch the agent even when stdin is not a terminal (or OFFRAILS_YES=1)
+EOF
+    ;;
+    check) cat <<'EOF'
+Usage: offrails check [dir]
+
+Runs the app's mechanical gates (header, specs <-> tests, tenancy suites, scoped lookups) with the
+app's vendored .offrails/tools/offrails-check, or the installed one for older apps. Exit 0 = clean.
+EOF
+    ;;
+    doctor) cat <<'EOF'
+Usage: offrails doctor
+
+Checks prerequisites (Rust, cargo tools, Docker, Node, agents) and the installed framework.
+EOF
+    ;;
+    version) cat <<'EOF'
+Usage: offrails version
+
+Prints the installed framework version and where it lives.
+EOF
+    ;;
+    update) cat <<'EOF'
+Usage: offrails update [installer options]
+
+Downloads and runs the latest installer (rustoffrails.org/install.sh), then run
+`offrails upgrade` in each app. Installer options (e.g. --version 0.6.0, --yes) pass through.
+EOF
+      if [ -f "$FW/install.sh" ]; then printf '\n'; sh "$FW/install.sh" --help 2>/dev/null | sed -n '/^Options/,$p' || true; fi
+    ;;
+    uninstall) cat <<'EOF'
+Usage: offrails uninstall [--yes]
+
+Removes ~/.offrails and the offrails command. Apps, Rust and cargo tools are not touched.
+  --yes, -y  don't ask
+EOF
+    ;;
+    *) usage ;;
+  esac
+}
+
+usage_error() { printf 'offrails: %s\n\n' "$2" >&2; help_for "$1" >&2; exit 2; }
 
 framework_version() { head -n1 "$FW/VERSION" 2>/dev/null || echo "not installed"; }
 
@@ -42,21 +111,43 @@ cmd_version() {
 }
 
 # launch_agent <claude-prompt> <generic-prompt>: Claude Code (plugin skill) > opencode > Codex > print.
+# Without a terminal on stdin (CI, a script, another agent) it needs --yes / OFFRAILS_YES=1: an
+# accidental call must never start an agent that edits the app. Otherwise it prints the command, exits 3.
 launch_agent() {
-  if [ -z "${OFFRAILS_AGENT:-}" ] || [ "$OFFRAILS_AGENT" = claude ]; then
-    if have claude; then exec claude "$1"; fi
+  agent=""
+  for a in claude opencode codex; do
+    if { [ -z "${OFFRAILS_AGENT:-}" ] || [ "$OFFRAILS_AGENT" = "$a" ]; } && have "$a"; then agent=$a; break; fi
+  done
+  if [ -z "$agent" ]; then
+    printf 'No supported agent found (Claude Code, opencode, Codex). Paste this into your coding agent:\n\n  %s\n\n' "$2"
+    return 0
   fi
-  if [ -z "${OFFRAILS_AGENT:-}" ] || [ "$OFFRAILS_AGENT" = opencode ]; then
-    if have opencode; then exec opencode run "$2"; fi
+  if [ ! -t 0 ] && [ -z "$YES" ] && [ "${OFFRAILS_YES:-}" != 1 ]; then
+    case "$agent" in
+      claude) printf 'Would run: claude %s\n' "$1" ;;
+      opencode) printf 'Would run: opencode run "%s"\n' "$2" ;;
+      codex) printf 'Would run: codex "%s"\n' "$2" ;;
+    esac
+    printf 'offrails: stdin is not a terminal; not starting an agent. Re-run with --yes (or OFFRAILS_YES=1) to launch it.\n' >&2
+    exit 3
   fi
-  if [ -z "${OFFRAILS_AGENT:-}" ] || [ "$OFFRAILS_AGENT" = codex ]; then
-    if have codex; then exec codex "$2"; fi
-  fi
-  printf 'No supported agent found (Claude Code, opencode, Codex). Paste this into your coding agent:\n\n  %s\n\n' "$2"
+  case "$agent" in
+    claude) exec claude "$1" ;;
+    opencode) exec opencode run "$2" ;;
+    codex) exec codex "$2" ;;
+  esac
 }
 
 cmd_new() {
-  [ $# -ge 1 ] || die "usage: offrails new <name> [pitch…]"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -y|--yes) YES=1; shift ;;
+      --) shift; break ;;
+      -*) usage_error new "unknown option: $1" ;;
+      *) break ;;
+    esac
+  done
+  [ $# -ge 1 ] || usage_error new "missing <name>"
   name=$1; shift
   case "$name" in
     *[!abcdefghijklmnopqrstuvwxyz0123456789_-]*|[!abcdefghijklmnopqrstuvwxyz]*) die "app name must start with a letter and use lowercase letters, digits, '-' or '_' (got '$name')" ;;
@@ -72,9 +163,10 @@ cmd_upgrade() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --check) check=1 ;;
-      --fw) [ $# -ge 2 ] || die "usage: offrails upgrade [--check] [--fw <framework dir>]"; FW=$2; shift ;;
+      --fw) [ $# -ge 2 ] || usage_error upgrade "--fw needs a directory"; FW=$2; shift ;;
       --fw=*) FW=${1#--fw=} ;;
-      *) die "usage: offrails upgrade [--check] [--fw <framework dir>]" ;;
+      -y|--yes) YES=1 ;;
+      *) usage_error upgrade "unknown option: $1" ;;
     esac
     shift
   done
@@ -140,6 +232,8 @@ cmd_doctor() {
 
 # The app's vendored copy matches its conventions; apps from before 0.6.0 use the installed one.
 cmd_check() {
+  case "${1:-}" in -*) usage_error check "unknown option: $1" ;; esac
+  [ $# -le 1 ] || usage_error check "too many arguments"
   dir=${1:-.}
   if [ -f "$dir/.offrails/tools/offrails-check" ]; then
     exec sh "$dir/.offrails/tools/offrails-check" "$dir"
@@ -149,6 +243,16 @@ cmd_check() {
 }
 
 cmd_update() {
+  # Validate before downloading anything: an unknown flag must never reach a running installer.
+  prev=""
+  for a in "$@"; do
+    if [ "$prev" = --version ]; then prev=""; continue; fi
+    case "$a" in
+      -y|--yes|--dry-run|--version=*|--no-toolchain|--no-agents) ;;
+      --version) prev=--version ;;
+      *) usage_error update "unknown option: $a" ;;
+    esac
+  done
   if [ -n "${OFFRAILS_SOURCE:-}" ] || ! have curl; then
     [ -f "$FW/install.sh" ] || die "no installer found; download $INSTALLER_URL"
     exec sh "$FW/install.sh" "$@"
@@ -163,6 +267,7 @@ cmd_update() {
 }
 
 cmd_uninstall() {
+  case "${1:-}" in ""|-y|--yes) ;; *) usage_error uninstall "unknown option: $1" ;; esac
   printf 'This removes %s and %s/offrails.\nYour apps, Rust and the cargo tools are not touched.\n' "$OFFRAILS_HOME" "$BIN_DIR"
   if [ "${1:-}" != "-y" ] && [ "${1:-}" != "--yes" ]; then
     printf 'Continue? [y/N] '
@@ -178,14 +283,25 @@ cmd_uninstall() {
   fi
 }
 
-case "${1:-help}" in
-  new) shift; cmd_new "$@" ;;
-  check) shift; cmd_check "$@" ;;
-  doctor) cmd_doctor ;;
-  version|--version|-V) cmd_version ;;
-  update) shift; cmd_update "$@" ;;
-  upgrade) shift; cmd_upgrade "$@" ;;
-  uninstall) shift; cmd_uninstall "$@" ;;
-  help|-h|--help) usage ;;
-  *) usage >&2; exit 2 ;;
+YES=""
+cmd=${1:-help}
+[ $# -gt 0 ] && shift
+case "$cmd" in
+  help|-h|--help) if [ $# -gt 0 ]; then help_for "$1"; else usage; fi; exit 0 ;;
+  version|--version|-V) cmd=version ;;
+  new|check|doctor|update|upgrade|uninstall) ;;
+  *) printf 'offrails: unknown command: %s\n\n' "$cmd" >&2; usage >&2; exit 2 ;;
+esac
+# --help/-h anywhere after a command prints that command's help and does nothing else.
+for arg in "$@"; do
+  case "$arg" in -h|--help) help_for "$cmd"; exit 0 ;; esac
+done
+case "$cmd" in
+  new) cmd_new "$@" ;;
+  check) cmd_check "$@" ;;
+  doctor) [ $# -eq 0 ] || usage_error doctor "unexpected argument: $1"; cmd_doctor ;;
+  version) [ $# -eq 0 ] || usage_error version "unexpected argument: $1"; cmd_version ;;
+  update) cmd_update "$@" ;;
+  upgrade) cmd_upgrade "$@" ;;
+  uninstall) cmd_uninstall "$@" ;;
 esac

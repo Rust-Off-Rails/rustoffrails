@@ -5,6 +5,8 @@
 > - SSE at `/streams/{stream}`; every signal has an id, pages render a `?since=` cursor, and reconnects replay what was missed (or get `refresh`). Data is never empty.
 > - htmx: the sse extension in the layout; one `sse-connect` per page; never reconnect by editing the attribute; `hx-sync` on live regions; a named `ping` heartbeat with a watchdog; the history cache off; a `pageshow` guard.
 > - Delivery is instant in-process on SQLite and via `NOTIFY` on Postgres, with polling as the backstop. For chat or presence, see [channels](channels.md).
+> - One sender **per stream** (a signal wakes only that stream's watchers); shutdown ends every stream at once, then drains for at most `APP_SHUTDOWN_DRAIN_SECS` (5).
+> - **Render once per version:** a live region many people watch is rendered once per stream version (moka `try_get_with` keyed `(stream, version)`, the version bumped where the commit is observed) and shared; re-fetches carry `X-Live-Refresh` and pass a small gate so they can't starve user requests. Without it, 5,000 watchers meant 5,000 renders per change.
 >
 > Read the rest when adding a live region or stream, or debugging stale pages.
 
@@ -54,9 +56,23 @@ pub const SESSION_ENDED: &str = "session-ended";   // on stream `member:<id>` (c
 #[derive(Clone)]
 pub struct PubSub {
     db: DatabaseConnection,
-    tx: tokio::sync::broadcast::Sender<Signal>,      // capacity 1024
+    // One sender per stream, created by the first subscribe, dropped once its last receiver is gone:
+    // a signal wakes only that stream's subscribers. Never one process-wide channel (see below).
+    topics: Arc<Mutex<HashMap<String, Topic>>>,                         // std::sync::Mutex; capacity 64 each
+    // Kernel watchers that need a whole family (the hub's `member:` revocations): one sender per prefix.
+    prefixes: Arc<Mutex<Vec<(String, broadcast::Sender<Signal>)>>>,     // capacity 1024 each
     last_seen: Arc<AtomicI64>,
+    // Counts every signal this process has observed (all streams). Monotonic, never reset while the
+    // process lives: the source of render versions (see "Render once per version").
+    observed: Arc<AtomicU64>,
     closed: tokio::sync::watch::Sender<bool>,
+}
+
+struct Topic {
+    tx: broadcast::Sender<Signal>,
+    /// `observed` at this stream's last signal (or at the first subscribe). Bumped in `poll_once`
+    /// BEFORE the signal is sent, at the point the committed row is seen.
+    version: u64,
 }
 
 /// INSERT a row. Call it inside the transaction that changed the data.
@@ -73,8 +89,13 @@ impl PubSub {
     pub async fn start(&self) -> Result<(), DbErr>;             // start_with(250ms)
     pub async fn start_with(&self, poll_every: Duration) -> Result<(), DbErr>;  // seek_to_end, LISTEN (Postgres), spawn the loop
     pub async fn seek_to_end(&self) -> Result<(), DbErr>;       // last_seen = MAX(id): no replay after restart
-    pub async fn poll_once(&self) -> Result<usize, DbErr>;      // rows with id > last_seen, by id, limit 500
-    pub fn subscribe(&self) -> broadcast::Receiver<Signal>;
+    pub async fn poll_once(&self) -> Result<usize, DbErr>;      // rows with id > last_seen, by id, limit 500; sends each to its
+                                                                //   stream's sender (if any) and matching prefixes, then sweeps
+    pub fn subscribe(&self, stream: &str) -> broadcast::Receiver<Signal>;         // this stream only
+    pub fn subscribe_prefix(&self, prefix: &str) -> broadcast::Receiver<Signal>;  // kernel watchers only ("member:")
+    pub fn topic_count(&self) -> usize;                         // live per-stream senders: tests, /dev introspection
+    pub fn version(&self, stream: &str) -> u64;                 // the stream's entry version, else `observed`: the
+                                                                //   cache key for shared renders (never 0-reset)
     pub fn closed(&self) -> impl Future<Output = ()> + Send + use<>;   // resolves on shutdown
     pub fn close(&self);                                        // stop the poller, end every stream
 }
@@ -100,8 +121,31 @@ impl PubSub {
   ```
 
   `wait_for_migrations(state, who, shutdown) -> bool` is the worker's loop, shared: it logs `pending migrations: run \`app db migrate\`; <who> waiting` once, then `migrations applied; <who> starting`, and returns `false` on shutdown.
+- **Per-stream senders, not one channel per process.** With a single `broadcast::Sender` every open stream wakes for every signal, filters it, and goes back to sleep: with 5,000 watchers one signal is 5,000 task wake-ups, and a lagging receiver anywhere is caused by traffic it never wanted. `subscribe(stream)` takes the map lock, gets or creates that stream's sender, and returns `tx.subscribe()`. `poll_once` looks up `row.stream` (no sender → nobody is listening, skip), sends to it, sends to every prefix sender whose prefix `row.stream` starts with, and at the end **sweeps** under the same lock: `topics.retain(|_, tx| tx.receiver_count() > 0)` (the same for `prefixes`). `poll_once` runs at least every tick, so a stream nobody watches is forgotten within 250 ms; it costs one atomic load per live stream. Hold the `std::sync::Mutex` only to look up or clone a sender, never across an `.await`.
+- **Versions are bumped where the commit is observed, never where the write happens.** In `poll_once`, for each row: `let v = observed.fetch_add(1, SeqCst) + 1;` then, under the map lock, set that stream's `topic.version = v` (if it has an entry), and only then send the signal. A stream with no entry reads `observed`, so a swept and re-created stream never goes back to an old version. **Never bump at write time** (in `broadcast`, before commit): a render that runs between the bump and the commit reads the old rows and caches them under the new version, and nothing ever replaces it. Never use the row id as the version: on Postgres a lower id can commit after a higher one.
+- **Prefix subscriptions are for kernel watchers, not pages.** The hub's revocation watcher is the only caller: `hub.watch_revocations(pubsub.subscribe_prefix("member:"))`. A page stream always subscribes to its exact stream name.
 - `closed()` needs Rust 2024's precise capture `+ use<>`. Without it the returned future borrows `&self`, and the SSE stream can't outlive the handler (E0515).
-- **Graceful shutdown:** `axum::serve(...).with_graceful_shutdown(async move { shutdown_signal().await; pubsub.close(); })`. axum waits for open connections, and an SSE stream never ends on its own, so without `close()` every deploy would hang until the platform's kill timeout. Verified: with two SSE streams open, the server exits immediately on SIGTERM.
+- **Graceful shutdown ends streams at once, then drains for a bounded time.** An SSE stream never ends on its own and the server waits for open connections, so shutdown has two parts:
+  1. **Stop every stream first.** The graceful-shutdown future is `async move { shutdown_signal().await; pubsub.close(); hub.close(); }`. Every SSE stream ends on `pubsub.closed()` (`take_until`) with **no** `bye`: `bye` means "stop reconnecting" (revoked), and after a restart the browser must reconnect and resume with `Last-Event-ID`. Sockets get `bye` `restart` and close 1012 ([channels](channels.md#the-connection-kernelchannelsrs)). Nothing on the way out awaits the database or a session check.
+  2. **Bound the drain.** `APP_SHUTDOWN_DRAIN_SECS` (default **5**, below the platform's kill timeout and `APP_JOBS_SHUTDOWN_GRACE`): after the signal, connections that haven't closed by then are dropped. axum 0.8's `with_graceful_shutdown` has no timeout, so race it; axum-server's `Handle` takes one:
+
+  ```rust
+  // kernel::server::run: `stop` resolves on the signal (main: shutdown_signal()), then ends every stream.
+  let drain = state.config.shutdown_drain;                        // APP_SHUTDOWN_DRAIN_SECS, default 5
+  let (stopping_tx, mut stopping) = tokio::sync::watch::channel(false);
+  let (pubsub, hub) = (state.pubsub.clone(), state.hub.clone());
+  let stop = async move { stop.await; pubsub.close(); hub.close(); let _ = stopping_tx.send(true); };
+  // plain HTTP (axum 0.8): race the graceful future against the drain clock; dropping it closes what's left.
+  let drained = async move { let _ = stopping.wait_for(|s| *s).await; tokio::time::sleep(drain).await };
+  tokio::select! {
+      r = axum::serve(listener, service).with_graceful_shutdown(stop).into_future() => r?,
+      () = drained => tracing::warn!(?drain, "shutdown drain timed out; dropping open connections"),
+  }
+  // TLS (axum-server 0.8): the handle force-closes after the duration.
+  tokio::spawn(async move { stop.await; graceful.graceful_shutdown(Some(drain)); });
+  ```
+
+  Measured by a peer on 0.6.0 (5,000 SSE watchers, TLS): shutdown took **10–35 s** (the TLS branch's drain bound was 30 s; the plain-HTTP branch had none). With every stream ending on `closed()` and a 5 s bound it is under the bound by construction. Put the serve loop in one function both `main` and the tests call (`kernel::server::run(state, listener, stop: impl Future<Output = ()> + Send + 'static) -> anyhow::Result<()>`, both branches), so the shutdown test runs the real code. Apps without realtime keep the bound and drop the two `close()` calls.
 - Lagging receivers get `RecvError::Lagged`. The stream turns that into a `refresh` event.
 - **Wake-ups, not polling.** A committed signal is read within milliseconds. Measured: 238 ms → 0.24 ms on SQLite and → 2.1 ms on Postgres ([channels.md](channels.md#measured-reference-app-m-series-laptop-under-heavy-parallel-load-2026-10-12)).
   - **Postgres:** `broadcast` also runs `SELECT pg_notify('offrails_pubsub', '')` on the caller's connection. NOTIFY is transactional: it's delivered at commit, and dropped on rollback. A dedicated task owns a `sqlx::postgres::PgListener` (via `sea_orm::sqlx` and `db.get_postgres_connection_pool()`, so no new crate) and forwards each notification over an `mpsc` channel. Don't call `recv()` directly inside the poller's `select!`, where other branches can cancel it mid-read.
@@ -142,10 +186,11 @@ pub async fn stream(
     authorize_stream(&s, &user, &stream).await?;
     let guard = kchannels::ConnGuard::register(&s, &member, "sse");     // shows in /dev/sockets, counts in caps
     let cursor = last_event_id(&headers).max(q.since);
-    let rx = s.pubsub.subscribe();                                       // before reading the database
+    let rx = s.pubsub.subscribe(&stream);                                // this stream only, before reading the database
     // first: missed signals (with ids) or `refresh`, then `ready` with the cursor
     // live: signals for this stream with `.id(sig.id)`, skipping exact replayed ids; Lagged → `refresh`
     // `bye` (data "revoked") when kchannels::session_ended(..) resolves, then the stream ends
+    // shutdown: pubsub.closed() ends it with no `bye`, so the browser reconnects and resumes
     // heartbeat: merge a named `ping` event (data: unix seconds) every 25s, so pages can tell idle from dead
     //   (KeepAlive comments are invisible to page JS); see "Robust live regions"
     Ok(Sse::new(first.chain(live.take_until(ended)).chain(bye).take_until(s.pubsub.closed()))
@@ -182,6 +227,115 @@ pub async fn create(db: &DatabaseConnection, book_id: i64, author_id: i64, new: 
 }
 ```
 
+## Render once per version (the thundering herd)
+
+**The failure (measured by a peer on a Kanban, release build, 5,000 SSE watchers on one board, one M2):** a signal makes every watcher re-fetch its live region at once. N watchers means **N full renders of the same fragment per change**. One card move cost about 5,000 renders against a 10-connection database pool: everyone's page loads took 12–25 s, and the request timeout fired. That's the **thundering herd**: the signal-then-re-fetch model is cheap per change only if the re-fetch is cheap.
+
+**The recipe, for every live region that more than a handful of people watch:** render the fragment **once per stream version** and serve that render to every authorized viewer.
+
+1. **The version comes from the pub/sub kernel:** `s.pubsub.version(&stream)`, bumped in `poll_once` before the signal goes out ([kernel spec](#kernel-spec-srckernelpubsubrs)). Read it **before** rendering.
+2. **The rendered HTML is cached in moka, keyed `(stream, version)`, with `try_get_with`:** moka runs one init future per key and makes every concurrent caller for that key wait for it (single-flight), so 5,000 simultaneous re-fetches cost one render.
+3. **Authorization runs on every request, before the cache.** The cache only skips rendering, never the policy check.
+4. **A shared render contains nothing per viewer:** no current-user names, no "edit" only on your own items, no per-session tokens. A fragment that needs per-viewer bits either keys on a coarse viewer class as well (`(stream, version, role)`), moves the bit to the client (a `data-author-id` plus the layout's current user id), or isn't cached.
+5. **Filtered or personalised views (`?q=`, `?mine=1`, sort orders) bypass the cache.** They're rare, per viewer, and the request gate below still bounds them.
+6. A fragment built from several streams keys on every version it reads: `(stream_a, va, stream_b, vb)`.
+
+```rust
+// AppState: shared renders for live regions. Old versions are unreachable and age out.
+pub fragments: moka::future::Cache<(String, u64), Arc<String>>,
+// AppState::new:
+fragments: moka::future::Cache::builder().max_capacity(1_000).time_to_idle(Duration::from_secs(600)).build(),
+```
+
+```rust
+// controllers/cards.rs: the live region's GET (hx-get with X-Live-Refresh, below)
+pub async fn index(
+    State(s): State<AppState>,
+    RequireUser(user): RequireUser,
+    HxRequest(htmx): HxRequest,
+    Path(board_id): Path<i64>,
+    Query(f): Query<CardFilter>,
+) -> Result<Response, AppError> {
+    let board = board::find_for(&s.db, &user, board_id).await?;           // every request: scope + policy
+    policies::authorize(policies::boards::can_view(&user, &board))?;
+    if !htmx {
+        return Ok(Redirect::to(&paths::board(board_id)).into_response());
+    }
+    if f.q.is_some() {
+        return Ok(Html(render_cards(&s, &board, &f).await?.to_string()).into_response()); // filtered: never shared
+    }
+    let stream = board::stream(board_id);
+    let version = s.pubsub.version(&stream);                                // before rendering
+    let html = s
+        .fragments
+        .try_get_with((stream, version), render_cards(&s, &board, &f))      // one render per version
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("rendering cards: {e}")))?;
+    Ok(Html(html.to_string()).into_response())
+}
+
+async fn render_cards(s: &AppState, board: &board::Model, f: &CardFilter) -> Result<Arc<String>, AppError> {
+    let columns = card::columns_for_board(&s.db, board.id, f).await?;
+    Ok(Arc::new(views::render(CardsFragment { board_id: board.id, columns })?))
+}
+```
+
+moka 0.12's `try_get_with(key, init) -> Result<V, Arc<E>>` needs `E: Send + Sync + 'static` (true for `AppError`); an error is returned to every waiter and **not** cached, so the next request retries. Checked against moka 0.12.16.
+
+**Why the version must be bumped at observation, not at write:** a render that starts after a write-time bump but before the commit reads the old rows and caches them under the new version; every later viewer gets the stale render until the next change. Bumping in `poll_once`, after the committed row is read and before the signal is sent, means any render keyed with the new version started after the commit was visible.
+
+**Measured after the fix** (same peer, same 5,000 watchers): page GET **10–107 ms**, card move **10–264 ms**, **0** pool-acquire warnings. Before: page loads 12–25 s and timeouts.
+
+### Keep re-fetches from starving user requests
+
+Even cached, a miss (or filtered views, or per-viewer fragments) can arrive 5,000 at a time. Re-fetches must never take every database connection a user's own click needs:
+
+- **Live regions say what they are:** `hx-headers='{"X-Live-Refresh": "1"}'` on every element whose `hx-trigger` is an `sse:` event (inertia/spa: the same header on the re-fetch). It's a fairness hint, not security: a client that omits it is just a normal request, still rate-limited.
+- **A small gate in front of them:** `kernel::live::gate` (a `from_fn_with_state` middleware, innermost, after flash) takes a permit from `state.refresh_permits: Arc<tokio::sync::Semaphore>` sized `(DATABASE_POOL / 3).max(1)` for any request carrying `X-Live-Refresh`, waits at most `config.refresh_wait` (5 s), and otherwise answers **503 + `Retry-After: 1`** (`AppError::Unavailable`). The permit is held until the response is produced. User requests never touch the semaphore, so at least two thirds of the pool stays free for them.
+- **Timeouts are 503, not 408** ([errors-and-logging](errors-and-logging.md#response-mapping)): the pool's `acquire_timeout` is 5 s (sqlx's default is 30 s) and maps to `AppError::Unavailable`; the request `TimeoutLayer` answers `503` too, and a `Retry-After` is added to any 503 that lacks one ([routing](routing.md#middleware)). 408 means "the client was too slow to send its request", which is never what happened.
+
+### Testing (template)
+
+```rust
+// tests/app/cards_test.rs: render once per version (realtime.md#render-once-per-version-the-thundering-herd)
+#[tokio::test]
+async fn live_region_renders_once_per_version() {
+    let app = TestApp::new().await;
+    let (owner, board) = factories::board(app.db()).await;
+    app.login_as(&owner).await;
+    let path = paths::board_cards(board.id);
+
+    let before = app.get_live(&path).await;                    // HX-Request + X-Live-Refresh
+    before.assert_ok();
+    let card = factories::card(app.db(), &board, "Unannounced").await;   // commits + broadcasts
+    // The poller hasn't observed the commit: the version is unchanged, so the shared render is served.
+    let unannounced = app.get_live(&path).await;
+    assert_eq!(unannounced.body, before.body, "same version, same shared render");
+    // Observed: the version moved, the next fetch renders fresh.
+    assert_eq!(app.state.pubsub.poll_once().await.unwrap(), 1);
+    app.get_live(&path).await.assert_contains(&card.title);
+    // Filtered views never share: fresh even before a signal.
+    let other = factories::card(app.db(), &board, "Filtered").await;
+    app.get_live(&format!("{path}?q=Filtered")).await.assert_contains(&other.title);
+}
+
+#[tokio::test]
+async fn live_refreshes_wait_at_the_gate_and_answer_503_with_retry_after() {
+    let app = TestApp::new().await;
+    let _held: Vec<_> = (0..app.state.refresh_permits.available_permits())
+        .map(|_| app.state.refresh_permits.clone().try_acquire_owned().unwrap())
+        .collect();                                            // a herd holds every permit
+    let (owner, board) = factories::board(app.db()).await;
+    app.login_as(&owner).await;
+    let res = app.get_live(&paths::board_cards(board.id)).await; // waits 5 s, then gives up
+    res.assert_status(StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(res.headers.get("retry-after").and_then(|v| v.to_str().ok()), Some("1"));
+    app.get_htmx(&paths::board_cards(board.id)).await.assert_ok(); // a user's own request isn't gated
+}
+```
+
+`support::TestApp::get_live(path)` is `get_htmx` plus `X-Live-Refresh: 1`. The gate's wait is `Config.refresh_wait` (5 s; `Config::test()` sets 100 ms, not an env var) so the second test is fast; never assert on elapsed time.
+
 ## Client side
 
 **htmx.** Load the vendored sse extension **in the layout**, on every page (`<script src="{{ ctx.assets.htmx_sse }}" defer></script>` next to htmx). Never in a page's own `{% block head %}`: a boosted navigation swaps only `<body>`, so the new page's head scripts never run and its live regions silently stay dead. The Playwright downtime test caught this; the old smoke test had passed only because it pressed Back/Forward first, which forces a full load.
@@ -198,12 +352,15 @@ pub async fn create(db: &DatabaseConnection, book_id: i64, author_id: i64, new: 
 <section id="reviews"
          hx-get="{{ crate::routes::paths::book_reviews(*book_id) }}"
          hx-trigger="sse:reviews-changed, sse:refresh"
+         hx-headers='{"X-Live-Refresh": "1"}'
+         hx-sync="this:replace"
          hx-swap="outerHTML">
   …
 </section>
 ```
 
-- The region's GET (`GET /books/{id}/reviews`) returns **only the fragment** (with its `<section>` wrapper) when `HxRequest` is true, and redirects to the parent page otherwise. It authorizes like the parent page.
+- The region's GET (`GET /books/{id}/reviews`) returns **only the fragment** (with its `<section>` wrapper) when `HxRequest` is true, and redirects to the parent page otherwise. It authorizes like the parent page. On any page more than a few people watch, it serves the shared render ([render once per version](#render-once-per-version-the-thundering-herd)).
+- **After the user's own mutation, never `location.reload()`**: move the DOM optimistically, then make the same in-place GET a signal makes ([frontend-htmx](frontend-htmx.md#no-full-reload-after-a-mutation)).
 - The trigger element must sit **inside** the `sse-connect` element.
 - **Carry the cursor across htmx-ext-sse reconnects** (`static/app.js`): remember the newest id per stream path from `htmx:sseMessage` events and the `ready` event, and override the factory so every new `EventSource` gets `?since=` = max(rendered cursor, newest seen). Also close the source on `bye`:
 
@@ -262,22 +419,50 @@ useEffect(() => {
 
 The same numbers came from a Kanban app built by another agent (6/12 vs 12/12 and 40/40).
 
-**Where you get h2 automatically:** behind Cloudflare, Caddy, kamal-proxy with TLS, Fly, Render or Railway, the browser already speaks h2 to the proxy. **Development is where you must do it yourself:** `bin/dev` serves HTTPS by default (`APP_TLS=off` for plain HTTP), using `bin/dev-cert` and the `serve` TLS branch from [`new.md`](../generators/new.md) step 4.12:
+**Where you get h2 automatically:** behind Cloudflare, Caddy, kamal-proxy with TLS, Fly, Render or Railway, the browser already speaks h2 to the proxy. **Development is where you must do it yourself, and only with a certificate the browser trusts.** On a self-signed certificate Chrome drops `Set-Cookie` even after "Proceed to localhost (unsafe)", so login silently bounces ([dev-tools](dev-tools.md#https-in-development)). `bin/dev` serves HTTPS only when `bin/dev-cert` produced a locally trusted certificate (mkcert with its CA installed); otherwise it serves plain HTTP/1.1 and says so (login works; live pages stall past ~6 tabs until mkcert is installed). `APP_TLS=off` forces http. The `serve` TLS branch is in [`new.md`](../generators/new.md) step 4.12. `bin/dev-cert` (copy exactly; verified in the reference app):
 
 ```sh
 #!/bin/sh
-# bin/dev-cert: a local certificate so the browser gets HTTP/2. mkcert = trusted, no warning.
+# Local TLS certificate for `bin/dev`: LOCALLY TRUSTED or nothing.
+# Why HTTPS: browsers only speak HTTP/2 over TLS, and over HTTP/1.1 they hold ~6 connections per
+# origin, so live pages stall past ~6 tabs (guides/realtime.md, "Many tabs stall").
+# Why trusted only: on a self-signed certificate Chrome drops Set-Cookie even after "Proceed to
+# localhost (unsafe)", so login "succeeds" and bounces back to the login page.
+# Exit 0: a trusted certificate (mkcert, CA installed) is in $dir. Exit 3: none possible here;
+# bin/dev then serves plain HTTP. DEV_CERT_SELF_SIGNED=1 writes a self-signed one anyway (curl, CI).
 set -eu
-dir="${1:-storage/dev-certs}"; mkdir -p "$dir"
+dir="${1:-storage/dev-certs}"
+mkdir -p "$dir"
+rm -f "$dir/cert.pem" "$dir/key.pem"
 if command -v mkcert >/dev/null 2>&1; then
-  mkcert -cert-file "$dir/cert.pem" -key-file "$dir/key.pem" localhost 127.0.0.1 ::1
-else
+  out="$(mkcert -cert-file "$dir/cert.pem" -key-file "$dir/key.pem" localhost 127.0.0.1 ::1 2>&1)" || {
+    echo "$out" >&2; exit 1; }
+  # mkcert writes the files either way and only warns when its CA isn't trusted.
+  untrusted='not installed in the system trust store'
+  [ "$(uname -s)" = Linux ] && untrusted='not installed in the'  # Chrome on Linux reads the NSS store
+  case "$out" in
+    *"$untrusted"*)
+      rm -f "$dir/cert.pem" "$dir/key.pem"
+      echo "bin/dev-cert: mkcert's CA is not trusted by this machine yet. Run once: mkcert -install" >&2
+      exit 3 ;;
+  esac
+  echo "bin/dev-cert: trusted certificate (mkcert) in $dir"
+  exit 0
+fi
+if [ "${DEV_CERT_SELF_SIGNED:-}" = 1 ]; then
   openssl req -x509 -newkey rsa:2048 -nodes -days 825 -keyout "$dir/key.pem" -out "$dir/cert.pem" \
     -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:::1" >/dev/null 2>&1
+  echo "bin/dev-cert: SELF-SIGNED certificate in $dir (DEV_CERT_SELF_SIGNED=1). Browsers drop cookies on it: login won't stick. For curl -k and scripted checks only." >&2
+  exit 0
 fi
+echo "bin/dev-cert: mkcert not found; refusing to make a self-signed certificate (Chrome drops login cookies on it)." >&2
+echo "  Install mkcert (macOS: brew install mkcert · Debian/Ubuntu: apt install mkcert libnss3-tools · https://github.com/FiloSottile/mkcert), then: mkcert -install" >&2
+exit 3
 ```
 
-Prove it: `curl -sk -o /dev/null -w '%{http_version}' https://localhost:$PORT/up` prints `2`.
+`bin/dev` runs it on every start and picks the scheme from its exit code; the full script is in [dev-tools](dev-tools.md#the-bindev-script).
+
+Prove it: with mkcert installed, `curl -s -o /dev/null -w '%{http_version}' https://localhost:$PORT/up` prints `2` **without `-k`** where curl uses the system trust store (macOS `/usr/bin/curl`; elsewhere add `--cacert "$(mkcert -CAROOT)/rootCA.pem"`), and the login smoke passes ([dev-tools](dev-tools.md#browser-smoke)).
 
 **Size the per-user connection cap for tabs.** Each tab can hold two realtime connections (a signal stream and a channel socket). The reference app's cap of **8** per user returned **429 on `/streams/…` from about the fifth tab**, the same symptom as the HTTP/1.1 pool. The cap is **128** now: it still bounds abuse, and a real person's tabs fit. Any cap must be tested with the multi-tab smoke at ≥ 40 tabs.
 
@@ -295,19 +480,65 @@ document.addEventListener("htmx:sseOpen", (e) => {
 
 **`spa` mode in development** browses Vite on :5173, and Vite serves HTTP/1.1 whenever `server.proxy` is set (its docs: `server.https` "downgrades to TLS only when the server.proxy option is also used"). So `spa` dev keeps the ~6-connection budget: `bin/dev` there serves the Rust app over plain http behind the proxy, and the multi-tab check runs against the built app (`pnpm --dir web build`, then `bin/dev`'s Rust server alone over HTTPS on :3000). Not yet measured in a reference `spa` app.
 
+## Measured capacity
+
+What peers **reached** on one box. These are observations, not guarantees: your rows, renders and hardware decide.
+
+| What | Reached | Setup |
+|---|---|---|
+| Open SSE watchers held | **5,000** | 0.6.0, one process, signal streams over SSE |
+| Memory, whole process | **154 MB** | the same |
+| Fan-out, commit → watchers notified | p50 **≈ 40 ms** | the same |
+| Page GET while 5,000 watch one board | 12–25 s and timeouts → **10–107 ms** | Kanban, release build, one M2, before → after [render once per version](#render-once-per-version-the-thundering-herd) |
+| Card move (POST → done) under the same load | **10–264 ms**, 0 pool-acquire warnings | after the fix |
+| Graceful shutdown with 5,000 streams | **10–35 s** on 0.6.0 | now bounded by `APP_SHUTDOWN_DRAIN_SECS` (5) |
+
+**Open streams are cheap; the work they trigger isn't.** The bottleneck was the database and rendering, not holding streams: without the shared render, every signal cost one full render per watcher. The fixes from these runs: per-stream senders (a signal wakes only its stream's watchers), render once per version, the re-fetch gate, coalesced presence ([channels](channels.md#presence-over-sse-no-websocket)), and the bounded shutdown. In-process fan-out numbers are in [channels](channels.md#measured-reference-app-m-series-laptop-under-heavy-parallel-load-2026-10-12).
+
+**Honest unknowns:**
+
+- On some server restarts, **10–49 of 5,000** connections failed on the client side and didn't come back by themselves. Cause unknown (client-side limits in the load generator, the listen backlog, or reconnect timing are all candidates). Not reproduced in the reference app.
+- The 10–35 s shutdown is explained by the old 30 s TLS bound and no bound on plain HTTP; the new bound was not re-measured at 5,000 streams.
+
+## Load testing (`tools/loadgen`, spec)
+
+A load generator for live pages, to measure before raising a limit or adding caching (evidence first). Spec for a Node script run like the browser smokes (`bash .offrails/tools/loadgen/run.sh`, dependencies in `~/.cache/offrails/`, nothing added to the app). Not shipped yet; a peer's working version exists.
+
+**Inputs:** `BASE`, `STREAM` (the exact stream to watch, e.g. `board:17`), `PAGE` (the live region's GET), `WATCHERS` (N), `MUTATIONS` (M) and `MUTATE` (a scenario function that changes data once and returns a token the region will show), `SESSIONS` (a file of cached session cookies).
+
+**What it does:**
+
+1. Logs in once per distinct user it needs and **caches the session cookies to a file**, reused across runs. The login rate limiter counts failures and attempts, so logging in thousands of times per run locks you out of your own test.
+2. Opens N SSE connections to `STREAM` (with `?since=` from the page), each re-fetching `PAGE` on a signal the way the browser does (`HX-Request`, `X-Live-Refresh`).
+3. Performs M mutations, one at a time, and records **per-event delivery latency**: mutation committed → signal received, and → the re-fetched fragment containing the token, per watcher. Reports p50/p95/p99/max and how many watchers never saw it.
+4. **Asserts presence** when the page shows it: the label reaches N tabs (and the expected people) within backoff + 1 s.
+5. Samples the **server** process's RSS and open file descriptors (`ps -o rss= -p $PID`, `lsof -p $PID | wc -l`) every second, and reports the client's own CPU **separately**: a saturated load generator looks exactly like a slow server.
+
+**Lessons baked in:**
+
+- **Pick the target explicitly** (`STREAM`, `PAGE`, the user). Never "the first board in the list": that silently measured a different, smaller board.
+- **One Node process tops out at about 5,000 TLS + h2 streams.** Beyond that, shard across processes (`--shard i/n`) and merge the reports.
+- **Never `--ignore-certificate-errors` or `rejectUnauthorized: false` on a login check.** Trust the dev certificate (mkcert) or use the plain-HTTP port; the browser smokes run with no certificate overrides for the same reason ([dev-tools](dev-tools.md#https-in-development)).
+- Report what was **reached**, with the setup (build profile, machine, N, M, database), never a capacity promise.
+
 ## Gotchas agents get wrong
 
 - `Event::default().data("")`: the event never fires in a browser. Always send non-empty data.
 - Broadcasting rendered HTML. Never. Send signals only.
 - Broadcasting outside the transaction (or before a unique-violation check), which announces writes that rolled back.
 - Forgetting `KeepAlive`, so proxies kill idle connections after ~60s.
-- No `take_until(pubsub.closed())` and no `close()` on shutdown, so deploys hang on open streams.
+- No `take_until(pubsub.closed())` and no `close()` on shutdown, so deploys hang on open streams. Or an unbounded drain: 5,000 streams took 10–35 s to shut down. End streams first, then drain for `APP_SHUTDOWN_DRAIN_SECS` (5).
+- **One `broadcast` channel per process** that every stream subscribes to and filters: every signal wakes every stream. Subscribe per stream (`pubsub.subscribe(&stream)`).
+- Sending `bye` on shutdown: the client stops reconnecting and the page goes stale after a deploy. `bye` is for revocation only.
+- **The thundering herd:** every watcher re-fetching and re-rendering the same fragment after a signal. 5,000 watchers = 5,000 renders per change (page loads of 12–25 s). Render once per version ([recipe](#render-once-per-version-the-thundering-herd)).
+- **Bumping a render version at write time** (in `broadcast`, before commit): a concurrent render caches pre-commit data under the new version for good. Bump in `poll_once`, then send.
+- **Live re-fetches sharing the whole pool with user clicks:** gate `X-Live-Refresh` requests with the semaphore; timeouts answer 503 + `Retry-After`, never 408.
 - Starting the poll loop in tests. Call `poll_once()`.
 - Leaving `EventSource` open on unmount (React). Always `close()` in cleanup.
 - htmx history snapshots (see above).
 - **No cursor**: a page rendered without `?since=`, or htmx reconnects without the `createEventSource` override, loses every signal sent while it was disconnected (the reference app shipped this; the human noticed a stale review list after a deploy).
 - **The sse extension in a page's head block**: dead after any boosted navigation (see Client side).
-- **Plain-HTTP dev with live pages:** realtime breaks at ~6 tabs. `bin/dev` serves HTTPS (h2) by default; keep it ([Many tabs stall](#many-tabs-stall-http11-vs-http2)).
+- **Plain-HTTP dev with live pages:** realtime breaks at ~6 tabs. Install mkcert (`mkcert -install`) so `bin/dev` serves HTTPS (h2); never "fix" it with a self-signed certificate, which breaks login ([Many tabs stall](#many-tabs-stall-http11-vs-http2), [dev-tools](dev-tools.md#https-in-development)).
 - **A per-user connection cap sized for one tab:** 429 on streams from the fifth tab. Size it for tabs (128) and prove it with the multi-tab smoke.
 - **Reconnecting by editing `sse-connect`, unserialized refetches, no visible heartbeat, more than one stream per page:** see "Robust live regions" above. Together they turn into "the board silently goes stale after a while".
 - Fly/Kamal proxies: SSE works over HTTP/1.1 and HTTP/2 with no special config. WebSocket channels have their own notes in [deployment](deployment.md).
@@ -329,11 +560,16 @@ Required cases:
 - a committed change is delivered to a subscriber;
 - another stream's signal isn't;
 - a rolled-back write delivers nothing (assert `next_event` is `None`);
-- logged out → redirect, and an unknown prefix, malformed id or missing record → 404; cross-site → 403;
+- logged out → 401 (no `Location`), and an unknown prefix, malformed id or missing record → 404; cross-site → 403;
 - `seek_to_end` doesn't replay history;
 - **resume:** a reconnect with `Last-Event-ID` gets the missed signals (one per event name, with ids), then `ready`; the same with `?since=`; a cursor older than retention gets `refresh`; a first connection gets `ready` with the current cursor and no history (`support::next_sse` returns `(event, id)` including `ready`; `next_event` skips `ready`);
 - **session:** logout / password change ends the stream with `bye`; an expired session ends it at revalidation;
-- `close()` ends an open stream (the body returns `None`);
-- `delete_older_than` cleans up.
+- `close()` ends an open stream (the body returns `None`) without a `bye`;
+- **per-stream delivery:** a subscriber of `book:1` and one of `book:2`; a signal on `book:1` reaches the first, and the second's `try_recv()` is `Err(Empty)` (it was never woken, not just filtered);
+- **sweep:** `subscribe("book:1")`, drop the receiver, `poll_once()`: `topic_count()` is back to 0; a `subscribe_prefix("member:")` receiver gets `member:7` signals and not `book:1`;
+- **bounded shutdown** (`server_test.rs`, real port via `kernel::server::run`): with 200 streams open, firing `stop` ends every body (EOF, no `bye`) and `run` returns well inside `timeout(drain + 5 s)` with `drain` = 30 s (prompt, not the bound); and with `drain` = 1 s and one connection whose response never ends (a test-only route), `run` still returns within `timeout(6 s)` (the bound holds). Generous timeouts, never an `elapsed() <` assertion;
+- `delete_older_than` cleans up;
+- **versions:** `version(s)` is unchanged by a committed but unpolled signal, and greater after `poll_once`; a stream swept and re-subscribed never returns an older version;
+- **render once per version** and **the re-fetch gate**: the two templates in [Render once per version](#testing-template).
 
 Plus the real-browser checks ([test-standards §9](test-standards.md#9-real-browser-smoke)): two contexts see each other's changes live, and the Playwright downtime test (stop the server, change data through another process, restart: the open page catches up without a reload).

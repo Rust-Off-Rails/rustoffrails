@@ -66,15 +66,17 @@ Verified with askama 0.16.1:
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>{% block title %}{{ ctx.title }}{% endblock %}</title>
   <meta name="htmx-config" content='{"allowEval":false,"includeIndicatorStyles":false,"historyCacheSize":0,"refreshOnHistoryMiss":true,"responseHandling":[…]}'>  {# full value: frontend-htmx.md #}
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="{{ ctx.assets.css }}">
   <script src="{{ ctx.assets.htmx }}" defer></script>
   <script src="{{ ctx.assets.app_js }}" defer></script>
+  {% if ctx.dev %}<script src="/static/dev-reload.js" defer></script>{% endif %}   {# dev-tools.md#hot-reload #}
   {% block head %}{% endblock %}   {# per-page scripts, e.g. the sse extension on pages that stream #}
 </head>
-<body hx-boost="true" class="…">
+<body hx-boost="true" class="min-h-screen bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100 antialiased">
   {% include "shared/_nav.html" %}
   <main>
     {% include "shared/_flash.html" %}
@@ -221,7 +223,61 @@ Content and marketing sites also need:
 
 ## Dark mode
 
-The default layout follows the OS: `<meta name="color-scheme" content="light dark">` plus Tailwind `dark:` variants on the base surfaces (body background and text, nav, cards, form fields, flash, errors). Tailwind 4's default `dark:` variant is the `prefers-color-scheme` media query, so this needs no JavaScript. The kernel pages (`/dev`, `/admin/jobs`, the mailbox) already do this in their own CSS.
+The default layout follows the OS: `<meta name="color-scheme" content="light dark">` (layout **and** the standalone error pages) plus Tailwind `dark:` variants. Tailwind 4's default `dark:` variant is the `prefers-color-scheme` media query, so this needs no JavaScript. The kernel pages (`/dev`, `/admin/jobs`, the mailbox) already do this in their own CSS.
+
+**Every class in every template is correct in both schemes, or the page is unreadable.** A generated Kanban shipped `bg-white` cards and panels with no `dark:` partner while the body turned dark with light text: 1.09:1. The rule is mechanical: every light surface, dark text and faint tone carries its `dark:` partner **in the same class list** ([test-standards §11](test-standards.md#11-theme-and-css-guards) enforces it; axe runs in both schemes, [§10](test-standards.md#10-accessibility-wcag-22-aa-in-every-theme)). Use this palette (gray family; swap `gray` for the design's neutral, keep the shade pairs). Verified with axe (WCAG 2.2 AA) in light and dark in the reference app:
+
+| Role | Light | Dark partner |
+|---|---|---|
+| Page (body) | `bg-white text-gray-900` | `dark:bg-gray-950 dark:text-gray-100` |
+| Card, panel, table row, `<pre>`, placeholder | `bg-gray-50` / `bg-gray-100` | `dark:bg-gray-900` / `dark:bg-gray-800` |
+| Hover surface | `hover:bg-gray-50` | `dark:hover:bg-gray-800` |
+| Secondary text | `text-gray-800` / `text-gray-700` | `dark:text-gray-200` / `dark:text-gray-300` |
+| Muted text (hints, meta, timestamps) | `text-gray-600` / `text-gray-500` | `dark:text-gray-400` |
+| Nav link | `text-gray-700 hover:text-gray-900` | `dark:text-gray-300 dark:hover:text-white` |
+| Borders, dividers | `border-gray-200` / `border-gray-300` / `divide-gray-200` | `dark:border-gray-800` / `dark:border-gray-700` / `dark:divide-gray-800` |
+| Link | `text-indigo-700 underline` | `dark:text-indigo-300` (underlined in both: links inside text need more than color, axe `link-in-text-block`) |
+| Accent text | `text-indigo-600` | `dark:text-indigo-400` |
+| Flash notice | `bg-green-50 text-green-800` | `dark:bg-green-950 dark:text-green-200` |
+| Flash alert, error summary | `bg-red-50 text-red-800 border-red-200` | `dark:bg-red-950 dark:text-red-200 dark:border-red-900` |
+| Field error, destructive link | `text-red-700` | `dark:text-red-300` |
+| Dev mailbox hint, warnings | `bg-amber-50 text-amber-900 border-amber-300` | `dark:bg-amber-950 dark:text-amber-100 dark:border-amber-800` |
+| Primary button | `bg-indigo-600 text-white hover:bg-indigo-500` | none needed (mid surface in both schemes); `dark:focus-visible:ring-offset-gray-950` |
+
+The skeletons `new` generates, in this palette:
+
+```html
+<body hx-boost="true" class="min-h-screen bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100 antialiased">
+<nav class="border-b border-gray-200 dark:border-gray-800">…
+  <a href="/dev" hx-boost="false" class="text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white">Dev tools</a>
+{# shared/_flash.html: partners inside each branch #}
+<div role="status" class="mb-6 rounded-md px-4 py-3 text-sm {% if flash.is_alert() %}bg-red-50 dark:bg-red-950 text-red-800 dark:text-red-200{% else %}bg-green-50 dark:bg-green-950 text-green-800 dark:text-green-200{% endif %}">
+{# shared/_errors.html and errors/_invalid.html #}
+<div class="errors rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950 p-4 text-sm text-red-800 dark:text-red-200">
+{# shared/_dev_mailbox_hint.html #}
+<aside class="mb-6 rounded-md border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950 px-4 py-3 text-sm text-amber-900 dark:text-amber-100" data-dev-mailbox-hint>
+{# lists (scaffold index, reviews) #}
+<ul class="mt-6 divide-y divide-gray-200 dark:divide-gray-800">  <p class="text-sm text-gray-600 dark:text-gray-400">…meta…</p>
+{# auth pages: forms use the component classes below; footers #}
+<p class="mt-6 text-sm text-gray-600 dark:text-gray-400">Already have an account? <a href="…" class="link">Log in</a></p>
+```
+
+The component layer in `assets/app.css` (forms and buttons; the templates use these names, and §11 checks the `@apply` lists too):
+
+```css
+@layer components {
+  .label { @apply block text-sm font-medium text-gray-700 dark:text-gray-300; }
+  .input { @apply mt-1 block w-full rounded-md bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500; }
+  .input[aria-invalid="true"] { @apply border-red-500; }
+  .field-error { @apply mt-1 text-sm text-red-700 dark:text-red-300; }
+  .btn { @apply inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-950; }
+  .btn-secondary { @apply inline-flex items-center rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500; }
+  .btn-danger { @apply inline-flex items-center rounded-md border border-red-300 dark:border-red-800 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500; }
+  .link { @apply text-indigo-700 dark:text-indigo-300 underline underline-offset-2 hover:decoration-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500; }
+}
+```
+
+**Never** add a light surface without its partner "for now", and never fix a dark-mode bug by removing `color-scheme` or the body's `dark:` classes: that hides the bug for OS-dark users only until the next page. In development the layout's CSS banner (`Ctx.css_warning`) also says when `static/app.css` is missing a class a template uses ([dev-tools](dev-tools.md#introspection)).
 
 When the spec asks for a **manual toggle**, avoid the flash of the wrong theme without an inline script (the CSP forbids those):
 

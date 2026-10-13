@@ -17,8 +17,10 @@ Checks a Rust off Rails app (default: the current directory):
   header       AGENTS.md header is complete and consistent (.offrails/VERSION, UI_LIBRARY, web/)
   ac           every AC-<feature>-<n> in product/ (not struck through) is cited by a test
   security     every feature has the STRIDE Security table, and every test it names exists
+               (a category that can't apply: | <Category> | n/a: <why> | — | — |)
   tenancy      TENANCY != none: tests/app/tenancy_test.rs and guard_test.rs exist and are registered
   guard        TENANCY != none: no unscoped lookups in src/{controllers,channels,graphql,api}
+  env          every env var name in src/config.rs (a "SCREAMING_SNAKE" literal) is in .env.example
   routes       docs/routes.md lists every ROUTES path (warning only)
 
 Exit status: 0 when there are no errors (warnings allowed), 1 otherwise, 2 on bad usage.
@@ -133,7 +135,7 @@ fi
 
 # ---- Security tables ----------------------------------------------------------------------------
 if [ -d product/features ]; then
-  sec_total=0; sec_bad=0
+  sec_total=0; sec_bad=0; sec_na=0
   for spec in product/features/*.md; do
     [ -f "$spec" ] || continue
     section=$(awk '/^## /{ s = ($0 ~ /^## Security/) } s' "$spec")
@@ -158,6 +160,17 @@ if [ -d product/features ]; then
       names=$(printf '%s\n' "$cell" | grep -oE '`[A-Za-z0-9_:]+`' | tr -d '`' | sed 's/.*:://' \
         | grep -E '^[a-z_][a-z0-9_]*$' || true)
       threat=$(printf '%s\n' "$row" | awk -F'|' '{ gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); print $3 }')
+      # A STRIDE category that doesn't apply: "n/a: <why>" in the Threat column, Test may be "—".
+      if [ -z "$names" ] && printf '%s\n' "$threat" | grep -qiE '^n/a:[[:space:]]*[^[:space:]]'; then
+        sec_na=$((sec_na + 1))
+        continue
+      fi
+      if [ -z "$names" ] && printf '%s\n' "$threat" | grep -qiE '^(n/a|none|—|-)[[:space:].:]*$'; then
+        sec_bad=$((sec_bad + 1))
+        fail security "$spec: a threat row says \"$threat\" with no reason" \
+          "write it as | <Category> | n/a: <why it can't happen here> | — | — |, or name the threat and its test"
+        continue
+      fi
       if [ -z "$names" ]; then
         sec_bad=$((sec_bad + 1))
         fail security "$spec: threat \"$threat\" names no test (\`test_name\` in the Test column)" \
@@ -177,7 +190,7 @@ if [ -d product/features ]; then
 $rows
 ROWS
   done
-  [ "$sec_bad" = 0 ] && pass security "$sec_total Security-table tests, all present"
+  [ "$sec_bad" = 0 ] && pass security "$sec_total Security-table tests, all present ($sec_na n/a rows, each with its reason)"
 fi
 
 # ---- tenancy suites -----------------------------------------------------------------------------
@@ -223,6 +236,30 @@ if [ -n "$TENANCY" ] && [ "$TENANCY" != none ]; then
       printf '     fix: look records up with <model>::find_for(db, &user, id) / all_for / destroy_for\n'
       printf '          (.offrails/guides/models.md#scoped-lookups-tenancy). Public by spec: end the line\n'
       printf "          with '// unscoped: <AC id or reason>'.\n"
+    fi
+  fi
+fi
+
+# ---- env vars ----------------------------------------------------------------------------------
+# Every env var name config.rs reads is a SCREAMING_SNAKE string literal, whatever helper reads it
+# (std::env::var("X"), a var("X") closure, parse("X", default)…). Each must be in .env.example.
+if [ -f src/config.rs ]; then
+  vars=$(grep -v 'not an env var' src/config.rs | grep -oE '"[A-Z][A-Z0-9_]{2,}"' | tr -d '"' | sort -u)
+  if [ ! -f .env.example ]; then
+    fail env "src/config.rs reads env vars but there is no .env.example" \
+      "add .env.example with every variable, one line each (.offrails/guides/config.md#envexample)"
+  else
+    env_missing=""
+    env_total=0
+    for v in $vars; do
+      env_total=$((env_total + 1))
+      grep -qE "^(# ?)?$v=" .env.example || env_missing="$env_missing $v"
+    done
+    if [ -n "$env_missing" ]; then
+      fail env ".env.example is missing variable(s) src/config.rs reads:$env_missing" \
+        "add each as NAME=value or # NAME=value with a comment (.offrails/guides/config.md#envexample); a literal that isn't an env var gets a trailing // not an env var"
+    else
+      pass env "$env_total env vars in src/config.rs, all in .env.example"
     fi
   fi
 fi

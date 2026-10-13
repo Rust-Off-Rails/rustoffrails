@@ -104,7 +104,7 @@ Build responses that set cookies with `AppendHeaders([(SET_COOKIE, …), (SET_CO
 
 - Normalize the email with `email.trim().to_lowercase()` (the same function used at sign-up).
 - **No enumeration:** `user::authenticate(db, email, password)` always runs exactly one argon2 verify. If there's no such user, it verifies against a dummy digest computed once in a `LazyLock`. A failure re-renders the form with **422** and the alert "Try another email address or password.", keeping the email.
-- **Rate limit:** 10 attempts per 3 minutes per IP + action (`ip.key("sessions#create")`). Over the limit, re-render the form with **429** and the alert "Try again later.", so humans see why and tests can assert the status. `/api` gets plain 429 JSON. Even the right password is refused while limited.
+- **Rate limit:** 10 attempts per 3 minutes per IP + action (`ip.key("sessions#create")`), the window fixed from the first attempt; **refused attempts don't count and never extend the lockout**, so a locked-out person gets in 3 minutes after their first attempt however often they retry ([security](security.md#rate-limiting-kernelrate_limitrs)). Development allows 1000 per window. Over the limit, re-render the form with **429** and the alert "Try again later.", so humans see why and tests can assert the status. `/api` gets plain 429 JSON. Even the right password is refused while limited.
 - A logged-in reader who opens `/session/new` or `/registration/new` is redirected to `/`.
 
 ### Sign-up (`signup` only; `registrations.rs`: `new`, `create`)
@@ -158,6 +158,7 @@ On top of [test-standards](test-standards.md):
 - A known email and an unknown one get byte-identical responses (status, location, flash). Mail: under `magic-link` **both** get a login email (sign-up happens on first login); under `magic-link-invite`, only the known one (`drain_jobs`, then `sent_emails`).
 - `GET` on the link twice, then `POST`: still logs in (scanner-safe). A second `POST` → invalid.
 - Expired (issue with `now − 16 min`) → invalid. 14 minutes → valid.
+- Refused attempts don't extend the window: exhaust the limit with a 1 s window (`state.rate_limit.check(&key, 10, Duration::from_secs(1))` directly, kernel test), keep retrying, and the first check after the window passes succeeds (`wait_until`, no fixed sleep).
 - Rate limit by IP, and by email **across different IPs**: build the test app with `APP_TRUSTED_PROXY=true` and vary `X-Forwarded-For` per request, so each request has its own IP key while the email key is shared ([security](security.md#rate-limiting-kernelrate_limitrs)).
 - First login under `magic-link` creates exactly one user. Under `magic-link-invite`, an unknown email creates nothing and gets no mail.
 - Return-to is honored after the POST.

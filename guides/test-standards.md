@@ -124,7 +124,7 @@ These live in `tests/app/security_test.rs`. Most iterate over `ROUTES`, so new r
 | Session revocation | Logout invalidates the server session (the old cookie no longer works). Password change or reset ends **every** session of the user, including **open sockets and streams** ([channels](channels.md)). Reset and magic-link tokens are single-use and expire |
 | Session cookie | Production: the cookie is `__Host-session_token` with `Secure; HttpOnly; SameSite=Lax; Path=/` and no `Domain`, and a planted plain `session_token` cookie doesn't log anyone in |
 | **Header matrix** | `tests/app/headers_test.rs`: one request per response class (HTML, authenticated page, JSON, SSE via `request_head`, the WebSocket 101 and the cross-origin 403 over a real socket, a kernel page, 404/403/422/500, a static asset, a redirect), each asserting the full set from [security](security.md#the-header-matrix), in development **and** production (https `APP_URL`). Plus: authenticated responses are `no-store`, every production cookie is `Secure` and `HttpOnly`, and production over plain http sends no TLS-only directives |
-| Rate limit | 11th login attempt in the window → 429 |
+| Rate limit | 11th login attempt in the window → 429 (test env uses the production limits; development's 1000 is pinned in `kernel_test.rs`); refused attempts don't extend the window |
 | Mass assignment | Posting `owner_id`/`role`/`account_id` in a form doesn't change them |
 | Uploads (if any) | Over the spec's limit → 422 with the field message. Over the route's `DefaultBodyLimit` → 413. Wrong type, including a claimed type that doesn't match the magic bytes and SVG → 422. Served with `Content-Disposition`, `nosniff` and an owner check, per [storage](storage.md) |
 | Admin as a plain user | Every `Access::Admin` route requested by a logged-in non-admin → never 2xx |
@@ -520,6 +520,8 @@ Run both after any UI-affecting change.
 | Back after deleting a record showed it again | htmx's history snapshot (fix: `historyCacheSize: 0`, [frontend-htmx](frontend-htmx.md)) |
 | Kernel pages (`/dev/mailbox`) rendered unstyled when reached by an `hx-boost` link | A boosted swap keeps the app's `<head>`; links to kernel pages need `hx-boost="false"` |
 | A console 404 for `/favicon.ico` on every first visit | No icon link in the layout |
+| Magic-link login "succeeded" (303, account created) and bounced back to the login page | `bin/dev` served a **self-signed** certificate; after "Proceed (unsafe)" Chrome drops `Set-Cookie`. The old smoke ran Chrome with `--ignore-certificate-errors`, which hides it ([dev-tools](dev-tools.md#https-in-development)) |
+| Dark mode unreadable: `bg-white` cards with light text, 1.09:1 | The body flipped with the OS; the cards had no `dark:` partner. Lighthouse checks one scheme ([§10](#10-accessibility-wcag-22-aa-in-every-theme), [§11](#11-theme-and-css-guards)) |
 
 **Rule:** any change that affects what the browser shows or does (templates, layout, JS, CSS, routes that pages link to, realtime) requires a real-browser smoke of the changed flow before it's done. Assert, at minimum:
 
@@ -528,6 +530,7 @@ Run both after any UI-affecting change.
 3. **History:** state after Back and Forward, including Back after a delete (expect the 404 page, not the old record) **and Forward from that 404** (expect the page you came from, not a stale 404).
 4. **Realtime**, if present: two browser contexts, one acting and one watching.
 5. **Console:** no errors, uncaught exceptions or CSP violations (collect `console` errors and `pageerror`). Assert this before any step that deliberately loads a 404.
+6. **Login sticks** (apps with accounts): log in through the real form, then load a fresh page and assert you're still logged in. **Never** launch the browser with `--ignore-certificate-errors`, `ignoreHTTPSErrors: true` or `acceptInsecureCerts` for this: run against the URL `bin/dev` printed (a trusted HTTPS certificate, or plain http). `.offrails/tools/browser-smoke/run.sh login` does exactly this and fails on an untrusted certificate before it starts ([dev-tools](dev-tools.md#browser-smoke)).
 
 **How:**
 
@@ -595,5 +598,323 @@ for (const scheme of ["light", "dark"] as const)
 - **Contrast** includes code blocks, terminal cards, placeholders, disabled states, focus rings and text over images, in both themes. Decorative-but-readable text (like a terminal transcript) still has to meet 4.5:1.
 - **CI:** an `a11y` job boots the release build and runs the suite. It's a required check.
 - **Kernel pages** (`/dev`, `/dev/mailbox`, `/admin/jobs`) are held to the same standard: they're the framework's own UI.
+- **The framework's own smoke runs it too:** `SCENARIO=tests/e2e/smoke.scenario.mjs BASE=… bash .offrails/tools/browser-smoke/run.sh a11y` runs axe (axe-core 4.13.0, WCAG 2.2 AA tags) on the scenario's `a11yPaths` (and `a11yAuthPaths` after its `login`) in light, then dark. No Node in the app; no certificate overrides. In the reference app it found a light-mode `link-in-text-block` failure (a `.link` with no underline) on the first run, and, with one `dark:bg-*` partner removed, a 1.07:1 dark-mode `color-contrast` failure while light passed.
+- **Use a palette that is correct in both schemes from the start** ([views](views.md#dark-mode)); [§11](#11-theme-and-css-guards) catches a missing partner in every template, including the pages no smoke visits.
 
 `/offrails:check` runs it with the e2e suite, and `/offrails:doctor` reports any public route missing from `ROUTES` above.
+
+## 11. Theme and CSS guards
+
+Two template-level guards, in `tests/app/theme_test.rs` (every app with HTML templates). They run in milliseconds and cover every template, including pages no browser check visits:
+
+1. **Both color schemes.** The layout's body turns dark with the OS ([views](views.md#dark-mode)), so in every `class="…"` (and every `@apply` list in `assets/app.css`):
+   - **(a)** a light surface (`bg-white`, `bg-<color>-50/100/200`, with any variant like `hover:`) needs a `dark:<same variants>bg-*` partner;
+   - **(b)** dark text (`text-black`, `text-<color>-700…950`) needs a `dark:text-*` partner, because the surface under it turns dark;
+   - **(c)** a faint tone (`text-<gray family>-400…600`, `text-<color>-500/600`, e.g. `text-slate-500`, `text-red-600`) needs a `dark:text-*` partner;
+   - exempt: text on a background that is mid or dark in both schemes (`bg-<color>-300…950` with no `dark:bg-*`, e.g. a badge). Askama tags inside an attribute are dropped, so both branches of an `{% if %}` form one list: put each branch's partners in that branch.
+2. **Stale CSS.** Every class a template uses has its selector in the built `static/app.css` (escaped like `CSS.escape`: `dark:bg-gray-950` → `.dark\:bg-gray-950`, `md:w-1/2` → `.md\:w-1\/2`). Tailwind emits only the classes it saw when it last ran, so a template edited while no watcher ran renders with a silently missing class (a `dark:` partner that does nothing). Skipped when the CSS isn't built. JS/test hook classes go in `kernel::css::HOOK_CLASSES`, each with its reason.
+
+**TS modes** (`inertia`, `spa`, islands): the same rules apply to `className="…"`/`class="…"` in `web/src/**/*.{tsx,svelte}` (add those files to `class_lists` and match both attribute names; the HTML shell and error pages stay in `templates/`). The stale-CSS check is htmx-only: Vite builds the CSS with the bundle. Every mode keeps the palette in [views](views.md#dark-mode).
+
+Proven in the reference app: the guard listed 75 unpaired tones in a light-only app (layout, nav, flash, errors, forms, lists, the mailbox hint, auth pages and the component layer); after fixing them, the stale-CSS guard listed the 67 new `dark:` classes until Tailwind ran; removing one partner fails rule (a) at that line.
+
+The shared reading code lives in the kernel, because `/dev/introspect.json` and the development CSS banner use it too:
+
+```rust
+//! What the templates ask of the CSS. Tailwind only emits the classes it saw when it last ran, so
+//! a template edited while no watcher ran renders with silently missing styles (a `dark:` partner
+//! that does nothing). Used by the theme guard tests, `/dev/introspect.json` and the development
+//! CSS banner. Spec: .offrails/guides/views.md#dark-mode, test-standards.md#11-theme-and-css-guards
+
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
+/// Rendered with static/app.css. Kernel pages and mailers carry their own styles.
+pub const TEMPLATES: &str = "templates";
+pub const SKIP_DIRS: &[&str] = &["templates/kernel", "templates/mailers"];
+/// The component layer: `@apply` lists follow the same color rules as class attributes.
+pub const CSS_SOURCE: &str = "assets/app.css";
+pub const CSS_BUILT: &str = "static/app.css";
+/// Classes that are hooks for JS, htmx or tests, never styles. Each needs its reason.
+pub const HOOK_CLASSES: &[(&str, &str)] = &[
+    // ("errors", "the error summary's hook in tests"),
+];
+
+/// Template classes with no selector in the built CSS, as "file:line: class".
+/// `None` when the CSS isn't built (nothing to compare).
+pub fn missing_classes() -> Option<Vec<String>> {
+    let css = fs::read_to_string(CSS_BUILT).ok()?;
+    let mut missing = Vec::new();
+    for (at, tokens) in class_lists(false) {
+        for token in tokens {
+            if !HOOK_CLASSES.iter().any(|(c, _)| *c == token) && !has_selector(&css, &token) {
+                missing.push(format!("{at}: {token}"));
+            }
+        }
+    }
+    Some(missing)
+}
+
+/// Tailwind's selector for a class: `CSS.escape` rules (`md:w-1/2` → `md\:w-1\/2`, `2xl:` → `\32 xl\:`).
+pub fn css_escape(class: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in class.chars().enumerate() {
+        if i == 0 && c.is_ascii_digit() {
+            out.push_str(&format!("\\3{c} "));
+        } else if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+            out.push(c);
+        } else {
+            out.push('\\');
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// `.class` followed by something that ends the identifier (`.p-4` doesn't count for `.p-40`).
+pub fn has_selector(css: &str, class: &str) -> bool {
+    let selector = format!(".{}", css_escape(class));
+    css.match_indices(&selector).any(|(i, m)| {
+        css[i + m.len()..]
+            .chars()
+            .next()
+            .is_none_or(|c| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '\\')))
+    })
+}
+
+/// Every `class="…"` in the templates (and, with `with_apply`, every `@apply …;` in the CSS
+/// source) as ("file:line", tokens). Askama tags inside an attribute are dropped, so both
+/// branches of an `{% if %}` form one list.
+pub fn class_lists(with_apply: bool) -> Vec<(String, Vec<String>)> {
+    let mut files = Vec::new();
+    html_files(Path::new(TEMPLATES), &mut files);
+    files.sort();
+    let mut out = Vec::new();
+    for file in files {
+        let Ok(src) = fs::read_to_string(&file) else {
+            continue;
+        };
+        let mut offset = 0;
+        while let Some(i) = src[offset..].find("class=\"") {
+            let start = offset + i + 7;
+            let value = attribute_value(&src[start..]);
+            let line = src[..start].lines().count().max(1);
+            out.push((
+                format!("{}:{line}", file.display()),
+                tokens(&strip_askama(value)),
+            ));
+            offset = start + value.len();
+        }
+    }
+    if with_apply && let Ok(css) = fs::read_to_string(CSS_SOURCE) {
+        for (n, line) in css.lines().enumerate() {
+            if let Some(i) = line.find("@apply ") {
+                let list = line[i + 7..].split(';').next().unwrap_or("");
+                out.push((format!("{CSS_SOURCE}:{}", n + 1), tokens(list)));
+            }
+        }
+    }
+    out
+}
+
+fn html_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if SKIP_DIRS.iter().any(|s| path.starts_with(s)) {
+            continue;
+        }
+        if path.is_dir() {
+            html_files(&path, out);
+        } else if path.extension().is_some_and(|e| e == "html") {
+            out.push(path);
+        }
+    }
+}
+
+/// The attribute value up to its closing quote, skipping quotes inside `{{ }}` / `{% %}`.
+fn attribute_value(s: &str) -> &str {
+    let bytes = s.as_bytes();
+    let mut depth = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        match (bytes[i], bytes.get(i + 1)) {
+            (b'{', Some(b'{' | b'%')) => (depth, i) = (depth + 1, i + 1),
+            (b'}' | b'%', Some(b'}')) if depth > 0 => (depth, i) = (depth - 1, i + 1),
+            (b'"', _) if depth == 0 => return &s[..i],
+            _ => {}
+        }
+        i += 1;
+    }
+    s
+}
+
+/// Drops `{{ … }}`, `{% … %}` and `{# … #}`, keeping the text between them.
+pub fn strip_askama(s: &str) -> String {
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some(i) = rest.find('{') {
+        let open = &rest[i..];
+        let close = match open.as_bytes().get(1) {
+            Some(b'{') => "}}",
+            Some(b'%') => "%}",
+            Some(b'#') => "#}",
+            _ => {
+                out.push_str(&rest[..=i]);
+                rest = &rest[i + 1..];
+                continue;
+            }
+        };
+        out.push_str(&rest[..i]);
+        out.push(' ');
+        rest = open.find(close).map_or("", |j| &open[j + 2..]);
+    }
+    out.push_str(rest);
+    out
+}
+
+fn tokens(list: &str) -> Vec<String> {
+    list.split_whitespace().map(str::to_owned).collect()
+}
+```
+
+The test (replace `<crate>` with the app's crate name):
+
+```rust
+//! Theme and CSS guards (.offrails/guides/test-standards.md#11-theme-and-css-guards). Generated by `new`; keep it.
+//!
+//! 1. Both color schemes: the layout's body turns dark with the OS, so every light surface, dark
+//!    text and faint tone in a template needs its `dark:` partner, or it renders unreadable
+//!    (a `bg-white` card with light text: 1.09:1). axe in both schemes finds it per page; this finds
+//!    it in every template, including the ones no smoke visits.
+//! 2. Stale CSS: every class a template uses has its selector in the built `static/app.css`
+//!    (Tailwind only emits classes it saw when it last ran). Skipped when the CSS isn't built.
+
+use <crate>::kernel::css::{
+    CSS_BUILT, CSS_SOURCE, class_lists, css_escape, has_selector, missing_classes, strip_askama,
+};
+
+const GRAYS: &[&str] = &["slate", "gray", "zinc", "neutral", "stone"];
+
+#[test]
+fn templates_pair_every_light_tone_with_a_dark_partner() {
+    let mut problems = Vec::new();
+    for (at, tokens) in class_lists(true) {
+        let fixed_surface = tokens.iter().any(|t| is_fixed_surface(t))
+            && !tokens.iter().any(|t| t.starts_with("dark:bg-"));
+        for token in &tokens {
+            let (variants, utility) = split_variants(token);
+            if variants.contains("dark:") {
+                continue;
+            }
+            let has = |what: &str| {
+                let partner = format!("dark:{variants}{what}");
+                tokens.iter().any(|t| t.starts_with(&partner))
+            };
+            if is_light_surface(utility) && !has("bg-") {
+                problems.push(format!(
+                    "{at}: `{token}` needs a `dark:{variants}bg-*` partner (rule a: a light surface stays light while the body turns dark)"
+                ));
+            }
+            if fixed_surface {
+                continue; // its own mid/dark background in both schemes: text on it doesn't flip
+            }
+            if is_dark_text(utility) && !has("text-") {
+                problems.push(format!(
+                    "{at}: `{token}` needs a `dark:{variants}text-*` partner (rule b: dark text on a surface that turns dark)"
+                ));
+            } else if is_faint_text(utility) && !has("text-") {
+                problems.push(format!(
+                    "{at}: `{token}` needs a `dark:{variants}text-*` partner (rule c: a faint tone fails contrast on a dark surface)"
+                ));
+            }
+        }
+    }
+    assert!(
+        problems.is_empty(),
+        "colors that break one scheme (palette: .offrails/guides/views.md#dark-mode):\n{}",
+        problems.join("\n")
+    );
+}
+
+#[test]
+fn built_css_has_every_class_the_templates_use() {
+    let Some(missing) = missing_classes() else {
+        eprintln!(
+            "skipped: {CSS_BUILT} isn't built (bin/tailwindcss -i {CSS_SOURCE} -o {CSS_BUILT})"
+        );
+        return;
+    };
+    assert!(
+        missing.is_empty(),
+        "classes with no rule in {CSS_BUILT}: rebuild it (bin/dev runs `bin/tailwindcss --watch`), \
+         or list a JS/test hook in kernel::css::HOOK_CLASSES with its reason:\n{}",
+        missing.join("\n")
+    );
+}
+
+// --- the rules ---------------------------------------------------------------------------------
+
+/// `hover:dark:bg-x` → ("hover:dark:", "bg-x"); a leading `!` (important) is dropped.
+fn split_variants(token: &str) -> (&str, &str) {
+    let cut = token.rfind(':').map_or(0, |i| i + 1);
+    (&token[..cut], token[cut..].trim_start_matches('!'))
+}
+
+/// `bg-red-50/80` → ("red", 50) for prefix "bg-".
+fn color_shade<'a>(utility: &'a str, prefix: &str) -> Option<(&'a str, u32)> {
+    let rest = utility.strip_prefix(prefix)?;
+    let rest = rest.split('/').next()?;
+    let (color, shade) = rest.rsplit_once('-')?;
+    Some((color, shade.parse().ok()?))
+}
+
+fn is_light_surface(u: &str) -> bool {
+    u == "bg-white" || color_shade(u, "bg-").is_some_and(|(_, s)| s <= 200)
+}
+
+/// A background that is mid or dark in both schemes (a badge, a primary button).
+fn is_fixed_surface(token: &str) -> bool {
+    let (variants, u) = split_variants(token);
+    variants.is_empty() && (u == "bg-black" || color_shade(u, "bg-").is_some_and(|(_, s)| s >= 300))
+}
+
+fn is_dark_text(u: &str) -> bool {
+    u == "text-black" || color_shade(u, "text-").is_some_and(|(_, s)| s >= 700)
+}
+
+fn is_faint_text(u: &str) -> bool {
+    color_shade(u, "text-").is_some_and(|(c, s)| {
+        if GRAYS.contains(&c) {
+            (400..=600).contains(&s)
+        } else {
+            (500..=600).contains(&s)
+        }
+    })
+}
+
+#[test]
+fn the_guards_themselves() {
+    assert!(is_light_surface("bg-white") && is_light_surface("bg-amber-50"));
+    assert!(!is_light_surface("bg-indigo-600") && !is_light_surface("bg-white/0x"));
+    assert!(is_dark_text("text-gray-900") && is_dark_text("text-red-800"));
+    assert!(is_faint_text("text-slate-500") && is_faint_text("text-red-600"));
+    assert!(!is_faint_text("text-gray-300") && !is_faint_text("text-white"));
+    assert_eq!(split_variants("dark:hover:bg-x"), ("dark:hover:", "bg-x"));
+    assert_eq!(css_escape("md:w-1/2"), "md\\:w-1\\/2");
+    assert_eq!(css_escape("2xl:p-4"), "\\32 xl\\:p-4");
+    assert!(has_selector(".p-4{x}.p-40{y}", "p-4") && !has_selector(".p-40{y}", "p-4"));
+    assert_eq!(
+        strip_askama("a {% if x %}b{% else %}c{% endif %} {{ d }}")
+            .split_whitespace()
+            .collect::<Vec<_>>(),
+        ["a", "b", "c"]
+    );
+}
+```
+
+The development layout banner and `/dev/introspect.json` (`css.stale`, `css.missing_classes`) report the same missing classes while you work ([dev-tools](dev-tools.md#introspection)).

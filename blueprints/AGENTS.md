@@ -23,7 +23,9 @@ Each line is a mistake an agent shipped. The check that catches it is in parenth
 - **NEVER look a record up without the actor.** `<model>::find_for(db, &user, id)`, never `find(db, id)`; raw `find`/`destroy` stay `pub(in crate::models)` (`guard_test.rs`, `tenancy_test.rs`, `offrails check`).
 - **NEVER call work done while `sh .offrails/tools/offrails-check` prints a `FAIL`,** or any Definition of Done command fails or was skipped without saying so.
 - **NEVER add a retry, watchdog, reload cap, `sleep` or raised limit without evidence** (the failing request, its status and protocol) and a `docs/decisions.md` line citing it (`.offrails/workflow.md#when-something-fails`).
-- **NEVER serve live pages over HTTP/1.1 in development.** `bin/dev` serves HTTPS + HTTP/2; past ~6 tabs, HTTP/1.1 starves (`curl -sk -o /dev/null -w '%{http_version}' https://localhost:3000/up` prints `2`).
+- **NEVER serve a browser an untrusted certificate, or test login with certificate errors ignored.** Chrome drops `Set-Cookie` after "Proceed (unsafe)", so login bounces. HTTPS in development only with mkcert (`bin/dev-cert`), else the http URL `bin/dev` prints; smokes run with no certificate overrides (`run.sh login`).
+- **NEVER ship a light surface, dark text or faint tone without its `dark:` partner** (a `bg-white` card under a dark body: 1.09:1). The palette is in `.offrails/guides/views.md#dark-mode` (`tests/app/theme_test.rs`, `run.sh a11y` in light and dark).
+- **NEVER guess the running app's state.** Ask it: `curl -s $URL/dev/introspect.json` (migrations, CSS staleness, protocol, streams) or `cargo run -q -- introspect`.
 - **NEVER pick files by loose prefix, depend on `HashMap` order, or hash files per request** (`kernel/assets.rs` uniqueness test).
 - **NEVER change a header line (`FRONTEND_MODE`, `ISLANDS`, `UI_LIBRARY`, `TENANCY`, `FRAMEWORK`) without the code to match**, and never leave `FRAMEWORK` behind `.offrails/VERSION` (`offrails check`).
 - **NEVER tick an acceptance criterion without a test that cites its id,** or write a Security row without a test name (`offrails check`).
@@ -42,12 +44,13 @@ Each line is a mistake an agent shipped. The check that catches it is in parenth
 
 ```sh
 bin/setup                      # first run
-bin/dev                        # develop (https://localhost:3000, HTTP/2; APP_TLS=off for http{{TS modes only: ", or :5173 via Vite"; htmx: nothing}})
+bin/dev                        # develop: open the URL it prints (https + HTTP/2 with mkcert, else http){{TS modes only: ", or :5173 via Vite"; htmx: nothing}}; tabs reload on save
 sh .offrails/tools/offrails-check   # mechanical gates: header, specs ↔ tests, tenancy, scoped lookups
 cargo nextest run              # tests (SQLite)
 docker compose up --build      # the whole app, production-shaped, on Postgres (http://localhost:3000)
 docker compose up -d db && TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres cargo nextest run   # tests on Postgres
 cargo run -- db migrate        # migrate (any DATABASE_URL)
+cargo run -q -- introspect     # the app's state as JSON (development; live parts: $URL/dev/introspect.json)
 cargo run -- routes            # list routes (with access levels); rewrites docs/routes.md
 cargo run -- jobs stats        # job counts per state (dashboard: /admin/jobs; dev tools: /dev)
 cargo llvm-cov nextest --summary-only --ignore-filename-regex 'src/main\.rs$'   # coverage (gate: 80%)

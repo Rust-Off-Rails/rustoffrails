@@ -53,7 +53,7 @@ let csrf = CsrfLayer::new()
 
 ## The header matrix
 
-One middleware, `kernel/security.rs` (`security::middleware`), sets the headers. It sits **outside** `CatchPanicLayer` and the timeout in `routes.rs`, so panic 500s and 408s get them too ([routing](routing.md#middleware)). It only fills in headers a handler didn't set, so a route can make a header *stricter* (the mailbox viewer's own CSP), never remove it.
+One middleware, `kernel/security.rs` (`security::middleware`), sets the headers. It sits **outside** `CatchPanicLayer` and the timeout in `routes.rs`, so panic 500s and timeout 503s get them too ([routing](routing.md#middleware)). It only fills in headers a handler didn't set, so a route can make a header *stricter* (the mailbox viewer's own CSP), never remove it.
 
 | Header | Value | Notes |
 |--------|-------|-------|
@@ -104,7 +104,9 @@ The kernel pages (`/admin/jobs`, `/dev/*`) are covered by the same CSP. They use
 
 Rails 8 `rate_limit to: 10, within: 3.minutes` equivalent:
 
-- `RateLimiter` (in `AppState.rate_limit`) wraps a `moka::future::Cache<String, Window>`. `Window` is `{ hits: Arc<AtomicU32>, ttl }`, and a `moka::Expiry` impl expires each entry `ttl` after creation, so every call site can use its own window. The key is `"{route}:{client_ip}"`. Two methods: `check(key, limit, window)` counts a hit and errors with `TooManyRequests` past the limit; `exhausted(key, limit)` only peeks. Use the pair for failure-only limits (peek first, `check` after a failure), as `AdminAccess` does.
+- `RateLimiter` (in `AppState.rate_limit`, built with `RateLimiter::new(config.env)`) wraps a `moka::future::Cache<String, Window>`. `Window` is `{ hits: Arc<AtomicU32>, ttl }`, and a `moka::Expiry` impl expires each entry `ttl` after creation, so every call site can use its own window. The key is `"{route}:{client_ip}"`. Two methods: `check(key, limit, window)` counts a hit and errors with `TooManyRequests` past the limit; `exhausted(key, limit)` only peeks. Use the pair for failure-only limits (peek first, `check` after a failure), as `AdminAccess` does.
+- **A lockout never grows on retries.** The window is fixed from the **first counted attempt**: implement only `Expiry::expire_after_create`, never `expire_after_read`/`expire_after_update`, never `time_to_idle`, and never re-insert the entry on a hit. **Refused attempts are not counted**: `check` refuses when `hits.load(Relaxed) >= limit` **before** incrementing, and only then `fetch_add(1)` (refuse if the returned value was already `>= limit`, for concurrent hits). Not `fetch_update`: it's deprecated on current Rust and fails `clippy -D warnings`. A person hammering "Log in" while locked out is let back in exactly `window` after their first attempt, not `window` after their last. (A sliding window over attempt timestamps is also fine; a window that restarts or extends on each refused attempt is not.)
+- **Development: 1000 per window.** `RateLimiter::new(AppEnv::Development)` replaces every call site's limit with `DEV_LIMIT` (1000), so local retries and agent loops don't lock anyone out; `Test` and `Production` use the call site's limit unchanged. `limit(configured) -> u32` is the one place that decides, `check` and `exhausted` both go through it, and `kernel_test.rs` pins it: development gives 1000 for a configured 10, test and production give 10.
 - `state.rate_limit.check(&key, limit, window).await -> Result<(), AppError>`. Over the limit → `AppError::TooManyRequests`. Forms a human submits (login, link request) catch it and **re-render the form with status 429** and the alert "Try again later.", so the person sees why. Other endpoints let the error map to a plain 429 (JSON on `/api`). Limited requests never reach argon2.
 - Client IP comes from the `ClientIp(Option<IpAddr>)` extractor:
   - normally the socket address. This needs `serve` to use `into_make_service_with_connect_info::<SocketAddr>()`, and it's `None` in tests;
@@ -282,7 +284,7 @@ The "brakeman" pass. Run through this before finishing any work touching auth, p
 - [ ] `headers_test.rs` covers every response class the change adds (a new kind of endpoint means a new row).
 - [ ] `cargo deny check` is green. Any new advisory ignore has a reason and a recheck date.
 - [ ] The ZAP baseline is green. Any new `rules.tsv` line explains its triage.
-- [ ] The feature spec's `## Security` section lists the threats this change touches, each with its control and the test that proves it.
+- [ ] The feature spec's `## Security` section lists the threats this change touches, each with its control and the test that proves it. A category that can't apply is a row `| <Category> | n/a: <why> | — | — |`: the reason is required, and `offrails-check` fails a bare `n/a` or a named threat without a test.
 - [ ] No Non-negotiable was weakened, or there's a decision entry **and** the human's explicit approval.
 
 ## Gotchas agents get wrong

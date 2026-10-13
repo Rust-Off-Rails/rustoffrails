@@ -45,7 +45,7 @@ Field names that imply ownership (`owner`, `user`, `author` + `references`) are 
 7. **Controller:** `src/controllers/<plural>.rs` with all 7 actions (`spa`: `controllers/api/<plural>.rs` with index/show/create/update/destroy) per [controllers](../guides/controllers.md). `inertia`: handlers take `Inertia` and `Json(params)`, and validation is just `params.validate().map_err(AppError::Invalid)?`, because `shape_errors` redirects back ([frontend-inertia](../guides/frontend-inertia.md#the-adapters-rust-surface)).
 8. **Routes:** resource routes for the mode ([routing](../guides/routing.md)), `paths::` helpers, `ROUTES` rows.
 9. **Views by mode:**
-   - `htmx`: `views/<plural>.rs` structs + `templates/<plural>/{index,show,new,edit,_form,_<singular>}.html`. Askama passes field args by reference: write `paths::book(*book.id)` ([views gotchas](../guides/views.md#gotchas-agents-get-wrong)).
+   - `htmx`: `views/<plural>.rs` structs + `templates/<plural>/{index,show,new,edit,_form,_<singular>}.html`, every class from the two-scheme palette ([views](../guides/views.md#dark-mode); `theme_test.rs` must stay green). Askama passes field args by reference: write `paths::book(*book.id)` ([views gotchas](../guides/views.md#gotchas-agents-get-wrong)).
    - `inertia`:
      - `views/<plural>.rs`: `<Model>Json` and `<Plural>{Index,Show,New,Edit}Props` (`Serialize, TS`, `#[ts(export)]`). New/Edit carry `<Model>Params`, and Edit also carries `id`.
      - `<Model>Params` derives `TS` too.

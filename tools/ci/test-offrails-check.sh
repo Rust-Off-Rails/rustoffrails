@@ -120,6 +120,44 @@ expect "a prose Security section fails" "$d" 1 "isn't the STRIDE table"
 d=$(make_app sec-name); sed 's/another_readers_note_is_404`/note_ids_are_unguessable`/' "$d/product/features/notes.md" > "$d/n" && mv "$d/n" "$d/product/features/notes.md"
 expect "a Security test that doesn't exist fails" "$d" 1 'names test `note_ids_are_unguessable`'
 
+d=$(make_app sec-na)
+sed 's/^| Information disclosure.*/&\
+| Repudiation | n\/a: notes have no admin actions to trace | — | — |/' "$d/product/features/notes.md" > "$d/n" && mv "$d/n" "$d/product/features/notes.md"
+expect "an n/a threat row with a reason and — as its test passes" "$d" 0 "1 n/a rows" "0 error(s)"
+
+d=$(make_app sec-na-bare)
+sed 's/^| Information disclosure.*/&\
+| Repudiation | n\/a | — | — |/' "$d/product/features/notes.md" > "$d/n" && mv "$d/n" "$d/product/features/notes.md"
+expect "a bare n/a threat row (no reason) fails" "$d" 1 'says "n/a" with no reason'
+
+d=$(make_app sec-dash)
+sed 's/^| Information disclosure.*/&\
+| Denial of service | flooding the form | rate limit | — |/' "$d/product/features/notes.md" > "$d/n" && mv "$d/n" "$d/product/features/notes.md"
+expect "a real threat with — as its test still fails" "$d" 1 'threat "flooding the form" names no test'
+
+# Env vars: read through any helper (std::env::var, a var() closure, parse("X", default)).
+make_config() {
+  cat > "$1/src/config.rs" <<'EOF'
+let var = |k: &str| std::env::var(k).ok();
+let env = match std::env::var("APP_ENV").ok().as_deref() { _ => () };
+let database_url = var("DATABASE_URL");
+let port = parse("PORT", "3000");
+let pool = parse("DATABASE_POOL", "10");
+let mode = "GET_NOT_ENV"; // not an env var
+EOF
+  printf 'APP_ENV=development\nPORT=3000\n# DATABASE_URL=sqlite://x\nDATABASE_POOL=10\n' > "$1/.env.example"
+}
+d=$(make_app env-ok); make_config "$d"
+expect "every config.rs variable in .env.example passes" "$d" 0 "4 env vars in src/config.rs"
+
+d=$(make_app env-missing); make_config "$d"
+grep -v -e '^DATABASE_POOL=' -e 'DATABASE_URL=' "$d/.env.example" > "$d/e" && mv "$d/e" "$d/.env.example"
+expect "a variable read via parse() or a closure but missing from .env.example fails" "$d" 1 \
+  "missing variable(s) src/config.rs reads: DATABASE_POOL DATABASE_URL"
+
+d=$(make_app env-none); make_config "$d"; rm "$d/.env.example"
+expect "config.rs without .env.example fails" "$d" 1 "there is no .env.example"
+
 d=$(make_app tenancy); rm "$d/tests/app/tenancy_test.rs"
 expect "TENANCY without tenancy_test.rs fails" "$d" 1 "TENANCY: per-user but tests/app/tenancy_test.rs is missing"
 

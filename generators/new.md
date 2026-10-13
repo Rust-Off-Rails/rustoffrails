@@ -88,6 +88,10 @@ members = [".", "migration"]
 
 [profile.dev.package."*"]
 opt-level = 1          # faster tests, still-fast builds
+
+[profile.dev]
+debug = "line-tables-only"   # faster rebuilds (a peer: template edit 16–23 s → 3.6–5.9 s); lldb shows no locals:
+split-debuginfo = "unpacked" # CARGO_PROFILE_DEV_DEBUG=true for a debugging session
 ```
 
 ```sh
@@ -149,13 +153,15 @@ The tables other kernels need (`sessions`, `blobs`, `broadcasts`) come with the 
 Generate these in order. Each module compiles against the ones before it. The order is: config → kernel → error/models → state → jobs → views → controllers → routes → tasks → main.
 
 1. `src/config.rs`: `Config`, `AppEnv`, `LogFormat`, `parse_queues`, `Config::test()` ([config](../guides/config.md))
-2. `src/kernel/mod.rs`, `kernel/db.rs` ([database](../guides/database.md#kerneldbrs-spec))
-3. `src/error.rs`: `AppError`, `ResponseFlavor` and the `shape_errors` middleware ([errors-and-logging](../guides/errors-and-logging.md))
+2. `src/kernel/mod.rs`, `kernel/db.rs` ([database](../guides/database.md#kerneldbrs-spec)) with `acquire_timeout(5 s)`
+3. `src/error.rs`: `AppError` (including `Unavailable` → 503 + `Retry-After`), `ResponseFlavor`, the `shape_errors` middleware and `retry_after` (a `map_response` adding `Retry-After: 1` to any 503 without one) ([errors-and-logging](../guides/errors-and-logging.md#response-mapping))
 4. `src/models/mod.rs`: `Errors`, `Page` and the model aliases ([models](../guides/models.md))
 5. The kernel, now. Each item's spec is in the linked guide:
    - `security.rs`: **the header matrix middleware** (CSP, HSTS and `upgrade-insecure-requests` only with an https `APP_URL`, nosniff, Referrer-Policy, Permissions-Policy, COOP, CORP, X-Frame-Options, `no-store` for authenticated responses, production cookie hardening), mounted outside the panic and timeout layers ([security](../guides/security.md#the-header-matrix));
    - `flash.rs` and `rate_limit.rs`;
-   - `assets.rs`;
+   - `assets.rs`, and `css.rs` (UI modes): `class_lists`, `missing_classes` (template classes with no rule in `static/app.css`), `css_escape`, `has_selector`, used by the theme guard tests, the development CSS banner and introspection ([views](../guides/views.md#dark-mode), [test-standards §11](../guides/test-standards.md#11-theme-and-css-guards));
+   - `tls.rs`: the `HttpToHttps` inner acceptor (plain HTTP on the TLS port → 307 to `https://`) ([deployment](../guides/deployment.md#direct-tls-optional));
+   - `introspect.rs`: `BOOT_ID`, `reload_version()`, `snapshot(state, frontend_mode, live)` for `/dev/introspect.json`, `/dev/reload` and `app introspect` ([dev-tools](../guides/dev-tools.md#introspection));
    - `mailer.rs` (constructors only; selection lives in `state.rs`) and `mailbox.rs`: **the full dev mailbox** ([mailers](../guides/mailers.md#the-dev-mailbox-kernelmailboxrs-swooshs-local-mailbox)): storage, the two-pane inbox, Previews tab, message view (headers, HTML/Text/Raw, Desktop/Mobile, attachments, links), `/message.eml`, test-email button, JSON endpoints;
    - `cache.rs`;
    - `ui.rs`: the shared chrome for kernel pages (`Chrome`, `KernelFlash`, `no_store()`, `page()`, time and number helpers);
@@ -169,7 +175,7 @@ Generate these in order. Each module compiles against the ones before it. The or
    None of these is a stub or "later": the mailbox, the jobs dashboard and `/dev` are part of every app from day one, and their tests (step 7) prove it.
 
    The kernel owns `Outcome`, `JobInfo`, `JobDefaults`, `JobBuilder`, `Unique`, `WorkerConfig`, `DispatchFn` and `Recurring`, because it records results without knowing `AppState`. The app re-exports what it needs from `src/jobs/mod.rs`.
-6. `src/state.rs`: `AppState { config: Arc<Config>, db, mailer, cache, assets, rate_limit }` (plus `vite: Vite` in TS modes) with `AppState::new(config, db) -> anyhow::Result<Self>`, and `select_mailer(&Config, &db)`: development is **always** `Mailer::Local` unless `MAILER` says otherwise ([mailers](../guides/mailers.md#kernel-spec-srckernelmailerrs)). Tests build state the same way.
+6. `src/state.rs`: `AppState { config: Arc<Config>, db, mailer, cache, assets, rate_limit }` (plus `vite: Vite` in TS modes; with live regions also `fragments: moka::future::Cache<(String, u64), Arc<String>>` and `refresh_permits: Arc<tokio::sync::Semaphore>` sized `(DATABASE_POOL / 3).max(1)` ([realtime](../guides/realtime.md#render-once-per-version-the-thundering-herd)); `Config.refresh_wait` (5 s, 100 ms in `Config::test()`)) with `AppState::new(config, db) -> anyhow::Result<Self>`, and `select_mailer(&Config, &db)`: development is **always** `Mailer::Local` unless `MAILER` says otherwise ([mailers](../guides/mailers.md#kernel-spec-srckernelmailerrs)). Tests build state the same way.
 7. `src/jobs/mod.rs`: the `Worker` trait, `enqueue`, `dispatch`, `worker_config` and `dispatch_fn`. Then `jobs/deliver_email.rs` (`DeliverEmailJob`), `jobs/cleanup.rs` (`CleanupJob`) and `jobs/recurring.rs`. Also `src/mailers/mod.rs` with `deliver_later` and `deliver_later_until`, `src/mailers/previews.rs` (`PREVIEWS`, empty), and the mail layout `templates/mailers/layout.html` ([mailers](../guides/mailers.md)).
 8. `src/views/mod.rs` with `render` and `Ctx`, the layout context struct, **including the page meta** (`title`, `description`, `path`, `app_url`; `page_title()`, `canonical()`, `absolute()`, `titled()`, `described()`: [views](../guides/views.md#meta-favicon-and-social-cards-every-app-with-pages)). Then `views/helpers.rs` and `views/home.rs`. `Ctx` has no `current_user` until the authentication generator adds it.
    `FRONTEND_MODE: api`: `views/` holds JSON bodies instead (`#[derive(Serialize, ToSchema)]`, a `PageInfo` envelope); no `Ctx`, no `render` ([api](../guides/api.md)).
@@ -180,14 +186,14 @@ Generate these in order. Each module compiles against the ones before it. The or
    - `api` mode, or any `API`: `application.rs` also gets `ApiUser`/`OptionalApiUser` once the authentication generator adds tokens; `controllers/api/mod.rs` (`ApiJson`, `ApiDoc`, `ErrorBody`, `InvalidBody`, the `/dev/api-docs` page) for `API: rest | both`; `controllers/graphql.rs` and `src/graphql/` for `API: graphql | both` ([api](../guides/api.md), [graphql](../guides/graphql.md));
    - `health.rs`: `/up`;
    - `errors.rs`: the `not_found` fallback;
-   - `dev.rs`: the `/dev` index (with the Try-it buttons), routes, system, `POST /dev/jobs/test`, `POST /dev/migrations`, and the `/dev/mailers` → Previews redirect ([dev-tools](../guides/dev-tools.md));
+   - `dev.rs`: the `/dev` index (with the Try-it buttons), routes, system, `/dev/introspect.json`, `/dev/reload`, `POST /dev/jobs/test`, `POST /dev/migrations`, and the `/dev/mailers` → Previews redirect ([dev-tools](../guides/dev-tools.md));
    - `migrations.rs`: `pending()`, the development pending-migrations guard and its Run button ([dev-tools](../guides/dev-tools.md#pending-migrations)). `/up` uses `pending()` too (503 while any is pending).
 10. `src/routes.rs` ([routing](../guides/routing.md)). `pub fn router(state) -> anyhow::Result<Router>` contains:
     - `/`, `/up`, and `/robots.txt` + `/sitemap.xml` (UI modes: [views](../guides/views.md#meta-favicon-and-social-cards-every-app-with-pages); `api`: `/robots.txt` only);
     - with `API`: `/api/openapi.json`, `/api/v1/…`, `POST /graphql` (with `Extension(graphql::schema())`), and in development `/dev/api-docs` and `/dev/graphiql`; the CORS layer from `APP_CORS_ORIGINS` and the same origins as CSRF trusted origins ([api](../guides/api.md#cors));
     - `/static` with cache headers;
     - the fallback;
-    - the middleware stack;
+    - the middleware stack (per [routing](../guides/routing.md#middleware): `TimeoutLayer::with_status_code(StatusCode::SERVICE_UNAVAILABLE, 30s)`, never `REQUEST_TIMEOUT`; `kernel::live::gate` innermost when the app has live regions; the CSRF layer also trusts `http://localhost:<APP_DEV_HTTP_PORT>` when set);
     - `paths` (including `new_session`, used by `error.rs` before auth exists, and `dev_mailbox`);
     - `ROUTES` with an `Access` level for every route;
     - `/admin/jobs`: `jobs::web::router().route_layer(from_extractor_with_state::<AdminAccess, _>(state.clone()))`, mounted when the app is in development or has an admin access method;
@@ -198,28 +204,54 @@ Generate these in order. Each module compiles against the ones before it. The or
 12. `src/lib.rs` (`pub mod` lines only), `src/main.rs`: the full CLI from [`cli.md`](../cli.md). `serve` uses `into_make_service_with_connect_info::<SocketAddr>()`, which `ClientIp` needs for rate limiting, and shuts down gracefully on Ctrl-C or SIGTERM. With `APP_TLS_CERT`/`APP_TLS_KEY` unset it serves plain HTTP with `axum::serve` (behind a TLS proxy). **With them set, it serves HTTPS itself, h2 + http/1.1 via ALPN** ([deployment](../guides/deployment.md#direct-tls-optional)). This is part of `new` in every app, because any app with live updates needs HTTP/2 in the browser, in development too ([realtime](../guides/realtime.md#many-tabs-stall-http11-vs-http2)). Copy this branch exactly:
 
     ```rust
+    // One bind for both branches: a taken port fails here, once, with a clear error.
+    let listener = tokio::net::TcpListener::bind(addr).await.with_context(|| format!("binding {addr}"))?;
+    let drain = config.shutdown_drain; // APP_SHUTDOWN_DRAIN_SECS, default 5
+    let (stopping_tx, mut stopping) = tokio::sync::watch::channel(false);
+    let stop = async move { shutdown_signal().await; pubsub.close(); hub.close(); let _ = stopping_tx.send(true); };
     match config.tls.clone() {
-        None => axum::serve(listener, service).with_graceful_shutdown(stop).await?,
+        None => {
+            // axum 0.8's graceful shutdown has no timeout: race it against the drain clock.
+            let drained = async move { let _ = stopping.wait_for(|s| *s).await; tokio::time::sleep(drain).await };
+            tokio::select! {
+                r = axum::serve(listener, service).with_graceful_shutdown(stop).into_future() => r?,
+                () = drained => tracing::warn!(?drain, "shutdown drain timed out; dropping open connections"),
+            }
+        }
         Some(tls) => {
             // sqlx/lettre bring ring, axum-server brings aws-lc-rs: rustls can't pick a provider alone.
             let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
             let cfg = axum_server::tls_rustls::RustlsConfig::from_pem_file(&tls.cert, &tls.key).await
                 .with_context(|| format!("loading APP_TLS_CERT={} / APP_TLS_KEY={}", tls.cert, tls.key))?;
+            // Development only: the same router and state on plain HTTP beside the TLS port.
+            if let Some(port) = config.dev_http_port {
+                let plain = tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))).await
+                    .with_context(|| format!("binding APP_DEV_HTTP_PORT={port}"))?;
+                let (service, mut stopping) = (service.clone(), stopping.clone());
+                tokio::spawn(async move {
+                    let stopped = async move { let _ = stopping.wait_for(|s| *s).await; };
+                    let _ = axum::serve(plain, service).with_graceful_shutdown(stopped).await;
+                });
+            }
             let handle = axum_server::Handle::new();
             let graceful = handle.clone();
-            tokio::spawn(async move { stop.await; graceful.graceful_shutdown(Some(Duration::from_secs(30))); });
-            axum_server::bind_rustls(addr, cfg).handle(handle).serve(service).await?;
+            tokio::spawn(async move { stop.await; graceful.graceful_shutdown(Some(drain)); });
+            // Plain http:// on this port (a bare `localhost:PORT`) gets a 307 to https:// (kernel/tls.rs).
+            let acceptor = axum_server::tls_rustls::RustlsAcceptor::new(cfg).acceptor(kernel::tls::HttpToHttps);
+            axum_server::from_tcp(listener.into_std()?)?.acceptor(acceptor).handle(handle).serve(service).await?;
         }
     }
     ```
+
+    Verified with axum 0.8.9 and axum-server 0.8.0 in the reference app. Never `bind_rustls(addr, …)` after binding `listener`: that binds the port twice. [realtime](../guides/realtime.md) moves this into `kernel::server::run(state, listener, stop)` so the shutdown test runs the real code. `Config` gains `shutdown_drain` (`APP_SHUTDOWN_DRAIN_SECS`, 5) and `dev_http_port` (`APP_DEV_HTTP_PORT`, refused outside development) ([config](../guides/config.md))
 
     `service` is `router.into_make_service_with_connect_info::<SocketAddr>()` and `stop` is the shutdown future (signal, then close pubsub and sockets). Include `app health` (the container healthcheck: `GET /up` on 127.0.0.1:$PORT, no curl needed in the image). With TLS on, it only checks that the port accepts a connection, because a plain-text probe can't talk to a TLS listener.
 
 ## 5. Frontend by mode
 
 - **`htmx`:**
-  - Templates: `templates/layouts/application.html` (with the `htmx-config` meta from [frontend-htmx](../guides/frontend-htmx.md#required-config-swap-422-responses)), `templates/shared/_flash.html`, `_errors.html`, `_nav.html`, `templates/home/index.html`, and `templates/errors/404.html`, `403.html`, `500.html`, plus the `_invalid.html` fragment (the 422 fallback list; HTML is never built with `format!`). The error pages are standalone documents with no layout and no `ctx`.
-  - Assets: `assets/app.css` and `static/app.js`.
+  - Templates: every class in both color schemes, from the palette in [views](../guides/views.md#dark-mode) (`<meta name="color-scheme" content="light dark">` in the layout and the standalone error pages; `tests/app/theme_test.rs` enforces it). `templates/layouts/application.html` (with the `htmx-config` meta from [frontend-htmx](../guides/frontend-htmx.md#required-config-swap-422-responses), and `{% if ctx.dev %}<script src="/static/dev-reload.js" defer></script>{% endif %}`), `templates/shared/_flash.html`, `_errors.html`, `_nav.html`, `templates/home/index.html`, and `templates/errors/404.html`, `403.html`, `500.html`, plus the `_invalid.html` fragment (the 422 fallback list; HTML is never built with `format!`). The error pages are standalone documents with no layout and no `ctx`.
+  - Assets: `assets/app.css` (with the component layer from [views](../guides/views.md#dark-mode)), `static/app.js` and `static/dev-reload.js` ([dev-tools](../guides/dev-tools.md#hot-reload)).
   - Vendor htmx and the sse extension into `static/vendor/` ([frontend-htmx](../guides/frontend-htmx.md#setup-done-by-generatorsnewmd)).
 - **`inertia`:**
   - `pnpm create vite web --template react-ts`, then follow the "Vite wiring" section of [frontend-inertia](../guides/frontend-inertia.md#vite-wiring-verified-with-vite-8-vitejsplugin-react-6-tailwind-4) exactly, including `.cargo/config.toml`, `test-setup.ts` and `app.css` with the progress-bar CSS.
@@ -250,8 +282,8 @@ Generate these in order. Each module compiles against the ones before it. The or
 | `.env.example` | Every `Config` var, with dev defaults ([config](../guides/config.md#envexample)) |
 | `bin/setup-tailwind` | htmx mode or islands. Pinned `TAILWIND_VERSION`, downloads and verifies `bin/tailwindcss` ([frontend-htmx](../guides/frontend-htmx.md#setup-done-by-generatorsnewmd)) |
 | `bin/setup` | `set -euo pipefail`. In order: <ul><li>check tools (install nextest/watch if missing)</li><li>copy `.env.example` to `.env` if missing</li><li>`mkdir -p storage`</li><li>`bin/setup-tailwind && bin/tailwindcss -i assets/app.css -o static/app.css --minify` (htmx), or `pnpm --dir web install` (TS modes)</li><li>print `Compiling (the first build takes several minutes)…`: a cold build of this stack takes about 10 minutes</li><li>`cargo run -- db setup`</li></ul> |
-| `bin/dev` | **HTTPS + HTTP/2 by default** (`spa` mode: plain http, because the browser talks to Vite on :5173 and Vite proxies to `http://localhost:3000`): unless `APP_TLS=off`, run `bin/dev-cert` if `storage/dev-certs/cert.pem` is missing and export `APP_TLS_CERT`/`APP_TLS_KEY`, and print `https://…`. Then: first `cargo run -q -- db migrate` (prints "Compiling and migrating…"), then the server via `cargo watch -q -w src -w templates -w migration -x 'run -q -- db migrate' -x 'run -- serve'` (migrates on every rebuild), plus `bin/tailwindcss … --watch=always` (htmx; islands add `pnpm --dir web exec vite build --watch --mode development`, never the Vite dev server: [why](../guides/frontend-htmx.md#islands)) or Vite (`inertia`/`spa`), as background jobs with `trap 'kill 0' EXIT`. Prints `→ $scheme://localhost:${PORT:-3000}` and `…/dev (mailbox, jobs, routes)` |
-| `bin/dev-cert` | A local certificate for HTTPS in development: `mkcert` when installed (a locally trusted CA), else `openssl req -x509` self-signed with SAN `localhost`, `127.0.0.1`, `::1`, written to `storage/dev-certs/` (git-ignored with `storage/`). Copy it from the [realtime](../guides/realtime.md#many-tabs-stall-http11-vs-http2) guide |
+| `bin/dev` | **HTTPS + HTTP/2 only with a locally trusted certificate**: unless `APP_TLS=off`, run `bin/dev-cert` on every start; exit 0 → export `APP_TLS_CERT`/`APP_TLS_KEY`; otherwise serve plain HTTP/1.1 and print why (login works, ~6-tab limit, how to install mkcert). With `DEV_CERT_SELF_SIGNED=1` also set `APP_DEV_HTTP_PORT` (default `PORT+1`) and tell the user to open that http URL. Then `cargo run -q -- db migrate`, `cargo watch -q -w src -w templates -w migration -x 'run -q -- db migrate' -x 'run -- serve'`, and `bin/tailwindcss … --watch=always` (htmx; islands add `pnpm --dir web exec vite build --watch --mode development`, never the Vite dev server: [why](../guides/frontend-htmx.md#islands)) or Vite (`inertia`/`spa`; `spa` serves the Rust app over plain http behind Vite's proxy), as background jobs with `trap 'kill 0' EXIT`. Prints the exact URL with its scheme, and `✓ ready: <url>` once the port accepts connections. Copy it from [dev-tools](../guides/dev-tools.md#the-bindev-script) |
+| `bin/dev-cert` | Trusted or nothing: `mkcert` with its CA installed (refuses with "run `mkcert -install`" when mkcert warns the CA isn't in the trust store), exit 0; no mkcert: refuses, says how to install it, exit 3; `DEV_CERT_SELF_SIGNED=1`: an openssl self-signed certificate (SAN `localhost`, `127.0.0.1`, `::1`) for scripts. Writes `storage/dev-certs/`. Copy it from [realtime](../guides/realtime.md#many-tabs-stall-http11-vs-http2) ([why](../guides/dev-tools.md#https-in-development)) |
 | `bin/docker-entrypoint` | `#!/bin/sh`, `set -e`, `app db migrate` unless `SKIP_MIGRATIONS=true`, then `exec "$@"` ([deployment](../guides/deployment.md)) |
 | `compose.yaml` | **The whole app, production-shaped**: `docker compose up --build` runs the `app` service (built from the `Dockerfile`, `APP_ENV=production`, healthcheck `app health`) against a `db` service (Postgres, the production major, healthcheck `pg_isready`, a named volume, published on `127.0.0.1:${DB_PORT:-5432}` so `TEST_DATABASE_URL` works from the host). Profiles: `worker` (a separate `app worker` container; run with `APP_INLINE_WORKER=false`) and `mail` (Mailpit; `SMTP_URL=smtp://mailpit:1025`). Ports overridable (`APP_PORT`, `DB_PORT`, `MAILPIT_PORT`). The full file is in [deployment](../guides/deployment.md#docker-compose-the-whole-app-locally). `bin/dev` stays the fast native loop |
 | `Dockerfile` | Per [deployment](../guides/deployment.md#dockerfile-shape) (trixie images). Delete the `web` stage in plain htmx and `api` modes, and the Tailwind line in `api` mode |
@@ -270,13 +302,16 @@ The layout is one binary, `tests/app/` ([testing](../guides/testing.md)):
 
 | File | Content |
 |------|---------|
-| `main.rs` | `mod errors_test; mod factories; mod headers_test; mod kernel_jobs_test; mod kernel_test; mod kernel_web_test; mod security_test; mod smoke_test;` plus `#[allow(dead_code)] mod support;`. Not every test file uses every helper, and clippy `-D warnings` would fail on that |
+| `main.rs` | `mod errors_test; mod factories; mod headers_test; mod kernel_jobs_test; mod kernel_test; mod kernel_web_test; mod security_test; mod smoke_test; mod theme_test;` (no `theme_test` in `api` mode) plus `#[allow(dead_code)] mod support;`. Not every test file uses every helper, and clippy `-D warnings` would fail on that |
 | `support.rs` | `TestApp` and `TestResponse`, including the query counter, per-test Postgres databases, the job helpers (`drain_jobs`/`drain_queue`/`drain_all_jobs` → `Drained`, `enqueued`, `assert_enqueued`, `refute_enqueued`, `perform_job`) and `wait_until` ([jobs](../guides/jobs.md#testing-obantesting-equivalents)) |
 | `factories.rs` | Empty for now. Each model adds one |
 | `smoke_test.rs` | See the list below |
 | `security_test.rs` | The access matrix over `ROUTES` ([test-standards §3](../guides/test-standards.md#3-security-tests-every-app)) |
 | `headers_test.rs` | **The header matrix** ([security](../guides/security.md#the-header-matrix)): one request per response class in development and production (https `APP_URL`), each asserting the full header set; production over plain http sends no TLS-only directives. `TestApp::request_head` reads status and headers without the body, for SSE. Grows with the app: authenticated page, SSE and WebSocket rows arrive with auth and channels |
-| `kernel_test.rs` | Cache fetch/hit, delete, `delete_prefix` (a `_` in a key is literal), expiry with `Duration::ZERO`; the rate limiter's 11th hit → `TooManyRequests`; `Flash::notice` sets the cookie attributes |
+| `kernel_test.rs` | Cache fetch/hit, delete, `delete_prefix` (a `_` in a key is literal), expiry with `Duration::ZERO`; the rate limiter's 11th hit → `TooManyRequests`, development allows 1000 per window while test and production keep 10, and hammering a locked-out key doesn't extend the window ([security](../guides/security.md#rate-limiting-kernelrate_limitrs)); `Flash::notice` sets the cookie attributes; `From<DbErr>` maps `ConnectionAcquire(ConnAcquireErr::Timeout)` to `Unavailable`; a 503 from the timeout layer carries `Retry-After` |
+| `theme_test.rs` | The theme and stale-CSS guards ([test-standards §11](../guides/test-standards.md#11-theme-and-css-guards)) |
+| `kernel_web_test.rs` (additions) | `/dev/introspect.json` answers in development with every key and no secrets; `/dev/introspect.json` and `/dev/reload` are 404 with a production **and** a test `Config`, and pages there don't load `dev-reload.js` ([dev-tools](../guides/dev-tools.md#introspection)) |
+| `src/kernel/tls.rs` (unit tests) | `redirect_target` keeps host and path and refuses `//host` paths and odd hosts; the acceptor redirects a plain request with 307 and passes a `0x16` first byte through |
 | `errors_test.rs` | Every `AppError` variant × flavor, through `error::shape_errors` on a small test router: HTML pages never leak internals; dev 500 shows the chain; `Unauthorized` → 303 or `HX-Redirect`; `/api` JSON shapes (insta); `ClientIp` honors `X-Forwarded-For` only with `APP_TRUSTED_PROXY`; tasks run by name. Never run `test_db_cleanup` from a Postgres test |
 
 `smoke_test.rs` covers:

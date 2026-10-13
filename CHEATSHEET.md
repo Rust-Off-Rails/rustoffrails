@@ -24,7 +24,7 @@ migration/   templates/   static/   web/ (TS modes)   tests/app/ (ONE test binar
 ## Definition of Done ([workflow.md](workflow.md#definition-of-done))
 
 ```sh
-sh .offrails/tools/offrails-check                        # header, ACs cited, Security tests, tenancy suites, scoped lookups
+sh .offrails/tools/offrails-check                        # header, ACs cited, Security tests, tenancy suites, scoped lookups, .env.example
 cargo fmt --all && cargo clippy --all-targets -- -D warnings
 cargo nextest run                                         # SQLite
 TEST_DATABASE_URL=postgres://postgres:postgres@localhost:${DB_PORT:-5432}/postgres cargo nextest run   # Postgres (docker compose up -d db)
@@ -34,7 +34,7 @@ cargo deny check && gitleaks git . --redact --no-banner   # + pnpm audit --prod 
 # TS:   pnpm --dir web exec biome check --write . && pnpm --dir web typecheck && pnpm --dir web test --run && pnpm --dir web build
 ```
 
-Plus (each has its command in the DoD table): every `AC-<feature>-<n>` cited by a test · rollback then migrate works · no `unwrap`/`expect` outside tests and startup · no raw SQL outside `src/kernel/` · axe a11y suite in light **and** dark ([§10](guides/test-standards.md#10-accessibility-wcag-22-aa-in-every-theme)) · UI changes checked in a real browser ([§9](guides/test-standards.md#9-real-browser-smoke)) · decisions logged.
+Plus (each has its command in the DoD table): every `AC-<feature>-<n>` cited by a test · rollback then migrate works · no `unwrap`/`expect` outside tests and startup · no raw SQL outside `src/kernel/` · axe a11y suite in light **and** dark ([§10](guides/test-standards.md#10-accessibility-wcag-22-aa-in-every-theme)) · `theme_test` green ([§11](guides/test-standards.md#11-theme-and-css-guards)) · UI changes checked in a real browser, login with no certificate overrides ([§9](guides/test-standards.md#9-real-browser-smoke)) · decisions logged.
 
 ## Security non-negotiables ([security.md](guides/security.md#non-negotiables))
 
@@ -57,15 +57,21 @@ Never weaken without a decision entry **and** the human's OK: strict CSP (no `un
 13. **Read emails via `/dev/mailbox/latest.json`**, never by grepping raw `.eml` (quoted-printable breaks links).
 14. **Never `pkill`/`killall` by name.** Stop your own PID, or `lsof -ti tcp:$PORT -sTCP:LISTEN | xargs kill` ([cli](cli.md#running-the-app-from-an-agent)).
 15. **Lighthouse checks one color scheme.** Run axe in light and dark ([§10](guides/test-standards.md#10-accessibility-wcag-22-aa-in-every-theme)).
-16. **Live pages need HTTP/2:** over HTTP/1.1, realtime breaks at ~6 tabs. `bin/dev` serves HTTPS; size per-user connection caps for tabs (128) ([realtime](guides/realtime.md#many-tabs-stall-http11-vs-http2)).
+16. **Live pages need HTTP/2:** over HTTP/1.1, realtime breaks at ~6 tabs. `bin/dev` serves HTTPS with a trusted (mkcert) certificate; size per-user connection caps for tabs (128) ([realtime](guides/realtime.md#many-tabs-stall-http11-vs-http2)).
 17. **Never select files by loose prefix, never depend on `HashMap` order, never hash files per request.** `"vendor/htmx-"` also matched `htmx-ext-sse`: pages randomly had no htmx. Exact keys, a uniqueness test, one catalog at boot ([frontend-htmx](guides/frontend-htmx.md#assets--cache-busting-kernelassetsrs)).
 18. **Every lookup is scoped to the actor:** `board::find_for(db, &user, id)`; raw `find` is `pub(in crate::models)` so a controller can't compile an unscoped call ([models](guides/models.md#scoped-lookups-tenancy)).
+19. **Never an untrusted certificate in a browser:** after "Proceed (unsafe)" Chrome drops `Set-Cookie`, so login bounces. No mkcert → `bin/dev` serves http and says so; never `--ignore-certificate-errors` in a smoke ([dev-tools](guides/dev-tools.md#https-in-development)).
+20. **Every light surface, dark text and faint tone has its `dark:` partner** in the same class list (palette: [views](guides/views.md#dark-mode)); a template edited without Tailwind running ships missing classes. `theme_test.rs` catches both ([§11](guides/test-standards.md#11-theme-and-css-guards)).
+21. **The thundering herd:** N watchers re-fetching after a signal = N renders per change. Render once per version (`try_get_with((stream, version))`, the version bumped in `poll_once`, never at write time); pub/sub senders are per stream ([realtime](guides/realtime.md#render-once-per-version-the-thundering-herd)).
+22. **Overload is 503 + `Retry-After`, never 408:** pool `acquire_timeout` 5 s, the `TimeoutLayer` status 503, live re-fetches gated by `X-Live-Refresh`; shutdown drains at most `APP_SHUTDOWN_DRAIN_SECS` ([errors](guides/errors-and-logging.md#response-mapping)).
+23. **Never `location.reload()` after a mutation:** move the DOM optimistically, then `htmx.ajax` the live region ([frontend-htmx](guides/frontend-htmx.md#no-full-reload-after-a-mutation)).
+24. **Ask the running app before guessing:** `curl -s $URL/dev/introspect.json` (migrations, CSS staleness, protocol, streams), development only ([dev-tools](guides/dev-tools.md#introspection)).
 
 ## Commands ([cli.md](cli.md))
 
 ```
 app serve | worker | health | routes
 app db migrate | rollback [--steps N] | status | seed | setup | reset | console
-app jobs stats|list|show|retry|cancel|delete|run|pause|resume|prune      app task <name> [args…]
+app jobs stats|list|show|retry|cancel|delete|run|pause|resume|prune      app task <name> [args…]      app introspect
 bin/setup   bin/dev   docker compose up                      offrails new | check | upgrade [--check] | update | doctor
 ```

@@ -47,6 +47,33 @@ cp -R "$H/.offrails/current/" "$T/export"; echo "changed" >>"$T/export/workflow.
 set +e; (cd "$A" && HOME="$H" "$H/.local/bin/offrails" upgrade --check --fw "$T/export" >"$T/up2" 2>&1); rc=$?; set -e
 [ "$rc" = 10 ] && grep -q "installed framework" "$T/up2" && pass "local: upgrade --check --fw <dir> sees a different framework (exit 10)" || { bad "local: upgrade --check --fw (rc=$rc)"; cat "$T/up2"; }
 (cd "$A" && HOME="$H" "$H/.local/bin/offrails" upgrade --check --fw "$T/nope" >/dev/null 2>&1) && bad "local: --fw with a missing dir accepted" || pass "local: --fw with a missing dir refused"
+# --help / -h never runs anything: fake agents on PATH drop a marker if they are ever started.
+FAKE="$T/fake-bin"; MARK="$T/agent-ran"; mkdir -p "$FAKE"
+for a in claude opencode codex; do printf '#!/bin/sh\necho "%s $*" >>"%s"\n' "$a" "$MARK" >"$FAKE/$a"; chmod +x "$FAKE/$a"; done
+OR() { (cd "$A" && HOME="$H" PATH="$FAKE:$PATH" "$H/.local/bin/offrails" "$@" </dev/null); }
+for sub in new upgrade check doctor version update uninstall; do
+  for flag in --help -h; do
+    rm -f "$MARK"; set +e; OR "$sub" "$flag" >"$T/help" 2>&1; rc=$?; set -e
+    [ "$rc" = 0 ] && grep -q "Usage: offrails $sub" "$T/help" && [ ! -e "$MARK" ] && [ -e "$H/.offrails" ] \
+      && pass "local: offrails $sub $flag prints help, runs nothing" || { bad "local: offrails $sub $flag (rc=$rc, agent: $(cat "$MARK" 2>/dev/null))"; cat "$T/help"; }
+  done
+done
+rm -f "$MARK"; set +e; OR upgrade --fw "$T/export" --help >/dev/null 2>&1; rc=$?; set -e
+[ "$rc" = 0 ] && [ ! -e "$MARK" ] && pass "local: --help after other flags still runs nothing" || bad "local: upgrade --fw … --help (rc=$rc)"
+for args in "upgrade --frob" "new --frob x" "check --frob" "doctor --frob" "update --frob" "uninstall --frob" "frob"; do
+  rm -f "$MARK"; set +e; eval "OR $args" >/dev/null 2>&1; rc=$?; set -e
+  [ "$rc" = 2 ] && [ ! -e "$MARK" ] && [ -e "$H/.offrails" ] && pass "local: offrails $args → usage, exit 2, nothing run" || bad "local: offrails $args (rc=$rc)"
+done
+rm -f "$MARK"; set +e; OR upgrade --fw "$T/export" >"$T/up3" 2>&1; rc=$?; set -e
+[ "$rc" = 3 ] && [ ! -e "$MARK" ] && grep -q "Would run: claude /offrails:upgrade" "$T/up3" \
+  && pass "local: non-interactive upgrade without --yes prints the command, exit 3, no agent" || { bad "local: upgrade without --yes (rc=$rc)"; cat "$T/up3"; }
+rm -f "$MARK"; set +e; OR new notes >/dev/null 2>&1; rc=$?; set -e
+[ "$rc" = 3 ] && [ ! -e "$MARK" ] && pass "local: non-interactive new without --yes, no agent" || bad "local: new without --yes (rc=$rc)"
+rm -f "$MARK"; OR upgrade --fw "$T/export" --yes >/dev/null 2>&1 || true
+grep -q "^claude /offrails:upgrade" "$MARK" 2>/dev/null && pass "local: upgrade --yes launches the agent" || bad "local: upgrade --yes did not launch the agent"
+rm -f "$MARK"; (cd "$A" && HOME="$H" PATH="$FAKE:$PATH" OFFRAILS_YES=1 OFFRAILS_AGENT=codex "$H/.local/bin/offrails" upgrade --fw "$T/export" </dev/null >/dev/null 2>&1) || true
+grep -q "^codex Upgrade this" "$MARK" 2>/dev/null && pass "local: OFFRAILS_YES=1 launches the chosen agent" || bad "local: OFFRAILS_YES=1"
+
 HOME="$H" "$H/.local/bin/offrails" uninstall -y >/dev/null 2>&1; [ ! -e "$H/.offrails" ] && [ ! -e "$H/.local/bin/offrails" ] && pass "local: uninstall removes everything" || bad "local: uninstall"
 
 mkdir -p "$T/tampered"; cp "$T/dist/"* "$T/tampered/"

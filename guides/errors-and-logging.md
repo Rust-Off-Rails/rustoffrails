@@ -29,6 +29,7 @@ pub enum AppError {
     #[error("forbidden")]              Forbidden,             // logged in, not allowed
     #[error("invalid")]                Invalid(Errors),       // validation failed
     #[error("too many requests")]      TooManyRequests,      // kernel/rate_limit.rs
+    #[error("unavailable")]            Unavailable,          // overloaded: pool acquire timed out, live re-fetch gate full
     #[error(transparent)]              Db(DbErr),
     #[error(transparent)]              Template(#[from] askama::Error),
     #[error(transparent)]              Internal(#[from] anyhow::Error),
@@ -38,6 +39,8 @@ impl From<DbErr> for AppError {
     fn from(e: DbErr) -> Self {
         match e {
             DbErr::RecordNotFound(_) => AppError::NotFound,
+            // The pool had no free connection within acquire_timeout (5 s): overloaded, not broken.
+            DbErr::ConnectionAcquire(ConnAcquireErr::Timeout) => AppError::Unavailable,
             other => AppError::Db(other),
         }
     }
@@ -54,6 +57,9 @@ impl From<DbErr> for AppError {
 | `Forbidden` | 403 + `errors/403.html` | 403 `errors/Show` | 403 `{"error":"forbidden"}` |
 | `Invalid(e)` | 422 + the `errors/_invalid.html` fragment, a list of full messages (fallback; handlers normally re-render the form themselves) | errors map → `_errors` cookie + **303 redirect back** to `Referer` (fallback: the form's GET path); see frontend-inertia | 422 `{"errors": {"field": ["msg"]}}` |
 | `TooManyRequests` | 429 | 429 | 429 + `Retry-After` |
+| `Unavailable` | 503 + `Retry-After: 1` + `errors/500.html` with "busy, retry" wording (htmx fragment requests: empty body) | 503 `errors/Show` | 503 + `Retry-After: 1` `{"error":"unavailable"}` |
+
+**Overload is 503 + `Retry-After`, never 408 and never a 30 s hang.** Three things produce it: the pool's `acquire_timeout` (5 s, `kernel::db::connect`), the live re-fetch gate ([realtime](realtime.md#keep-re-fetches-from-starving-user-requests)), and the request `TimeoutLayer` (30 s, `StatusCode::SERVICE_UNAVAILABLE`). The timeout's response comes from tower-http with no headers, so `error::retry_after` (an `axum::middleware::map_response` just outside the timeout, [routing](routing.md#middleware)) adds `Retry-After: 1` to any 503 that lacks one. 408 means the client was too slow to send its request; under a thundering herd the server was the slow one, and a 408 made browsers and proxies treat it as the client's fault. Test: with the gate full, a live re-fetch gets 503 with `Retry-After`; `From<DbErr>` maps `ConnectionAcquire(Timeout)` to `Unavailable` (a unit test).
 | `Db`, `Template`, `Internal` | 500 + `errors/500.html` | 500 `errors/Show` | 500 `{"error":"internal"}` |
 
 **The router fallback is marked.** `controllers::errors::not_found` (the router's `.fallback`) returns `([("x-route-fallback", "1")], AppError::NotFound)`, and `shape_errors` copies that header onto the page it renders. A handler's own 404 (no such record) carries no marker. `security_test.rs`'s routability check uses this to tell "not routed" from "not found" for parameterized paths too.

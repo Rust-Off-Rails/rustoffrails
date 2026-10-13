@@ -51,7 +51,10 @@ offrails doctor                                                # table of prereq
 offrails version
 offrails update [--version X.Y.Z]                              # re-runs the installer
 offrails uninstall                                             # removes ~/.offrails and the command (not Rust, not your apps)
+offrails <command> --help                                      # that command's help; never runs anything
 ```
+
+`new` and `upgrade` start an agent (Claude Code, else opencode, else Codex; `OFFRAILS_AGENT` picks one). When stdin is not a terminal (CI, a script, another agent) they need `--yes` or `OFFRAILS_YES=1`; without it they print the agent command and exit 3. Exit codes: 0 ok, 1 error, 2 usage (unknown command or flag), 3 agent launch needs `--yes`, 10 `upgrade --check` found an upgrade due.
 
 ## Manual install (same result, by hand)
 

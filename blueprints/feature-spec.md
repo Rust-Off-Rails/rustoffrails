@@ -39,7 +39,9 @@
 ## Security (agent-written threat model)
 
 <!-- Required for every feature. Humans may add concerns in plain English; agents keep it complete.
-     Every threat needs a control AND a test. A threat without both is a finding (/offrails:security). -->
+     Every threat needs a control AND a test. A threat without both is a finding (/offrails:security).
+     A STRIDE category that can't apply here: | <Category> | n/a: <why it can't happen> | — | — |
+     (offrails-check accepts "n/a: <reason>" in the Threat column; a bare "n/a" or a real threat with "—" fails). -->
 
 - **Assets:** {{what an attacker wants here: other users' books, reviews, emails, sessions, money}}
 - **Actors:** {{anonymous · user · other user · other tenant · admin · compromised account}}

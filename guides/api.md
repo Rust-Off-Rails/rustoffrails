@@ -103,6 +103,7 @@ Scopes are `read` and `write` by default. Add more only when a spec names them (
 
 - Per token: 300 requests per minute across REST and GraphQL (`TOKEN_RATE_LIMIT`), in `load_api_user`.
 - Per IP: sign-up and token creation, 10 per 3 minutes (like the login form).
+- Same limiter, same rules ([security](security.md#rate-limiting-kernelrate_limitrs)): the window is fixed from the first request, refused requests don't extend it, and development allows 1000 per window.
 - Limits are per process (moka), like every rate limit here ([security](security.md)). Behind several web processes, divide or move the counter to the cache table.
 
 ## CORS

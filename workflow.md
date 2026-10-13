@@ -18,6 +18,8 @@ Before building anything new, run the relevant part of [`interview.md`](intervie
 5. TEST     failing integration tests from the acceptance criteria
 6. BUILD    controller, routes, views (templates / Inertia pages / SPA routes), jobs, mailers
 7. CHECK    cargo check → fix → repeat (the compiler is your pair)
+            running app: bin/dev rebuilds, restarts and reloads open tabs on save;
+            ask it before guessing: curl -s $URL/dev/introspect.json (migrations, css, realtime, url)
 8. VERIFY   Definition of Done, including running the app
 9. RECORD   docs/routes.md, docs/decisions.md, spec checkboxes
 ```
@@ -67,10 +69,11 @@ Plus, each with the command that proves it (paste its output, or say which item 
 | (inertia/spa) `web/src/types/` untouched by hand; no TS type duplicates a Rust type | `cargo test --lib export_bindings && git diff --exit-code web/src/types/` |
 | No `todo!()`, `unimplemented!()`, or `// TODO` without a linked spec "Open question" | `grep -rn -e 'todo!(' -e 'unimplemented!(' -e '// TODO' src/ web/src/ 2>/dev/null` |
 | New routes are in `docs/routes.md` | `cargo run -- routes && git diff --exit-code docs/routes.md` |
-| New env vars are in `.env.example` (commented out is fine), `Config` and the deploy config | `grep -rhoE 'var\("[A-Z_]+"' src/config.rs \| cut -d'"' -f2 \| sort -u \| while read -r v; do grep -qE "^(# ?)?$v=" .env.example \|\| echo "missing in .env.example: $v"; done` |
+| New env vars are in `.env.example` (commented out is fine), `Config` and the deploy config | `sh .offrails/tools/offrails-check` (`[env]`: every `"SCREAMING_SNAKE"` literal in `src/config.rs`, however it's read, must be in `.env.example`); the deploy config by hand |
 | Decisions not covered by `.offrails/` are logged | `git diff --stat docs/decisions.md` shows a line for each new choice ([conventions](#decisions)) |
 | **Security-relevant changes** (auth, sessions, permissions, tenancy, payments, uploads, realtime, APIs, webhooks, outbound fetches, anything new in `headers_test.rs`) | `/offrails:security` or its checklist; the spec's `## Security` STRIDE table names an **attack test** per threat (failing first, then fixed), and `offrails-check` finds each one. A Non-negotiable ([security](guides/security.md#non-negotiables)) is never weakened without a decision **and** the human's explicit OK. ZAP runs in CI; run it locally when you add routes or change headers |
-| User-visible changes: you ran the app and exercised it. **UI changes: a real-browser smoke** of the changed flow ([test-standards §9](guides/test-standards.md#9-real-browser-smoke)) | `BASE=https://localhost:<port> bash .offrails/tools/browser-smoke/run.sh` (styling, Back/Forward, no console errors or CSP violations); live pages: `… run.sh live-tabs`. Emails: `curl -sk $BASE/dev/mailbox/latest.json`. Jobs: `cargo run -- jobs list --state discarded` is empty |
+| User-visible changes: you ran the app and exercised it. **UI changes: a real-browser smoke** of the changed flow ([test-standards §9](guides/test-standards.md#9-real-browser-smoke)) | `BASE=<the URL bin/dev printed> bash .offrails/tools/browser-smoke/run.sh` (styling, Back/Forward, no console errors or CSP violations); accounts: `SCENARIO=tests/e2e/smoke.scenario.mjs … run.sh login` (no certificate overrides: the session must survive a fresh page load); `… run.sh a11y` (axe, light + dark); live pages: `… run.sh live-tabs`. `curl -s $BASE/dev/introspect.json \| jq .css.stale,.migrations.current` prints `false`, `true`. Emails: `curl -s $BASE/dev/mailbox/latest.json`. Jobs: `cargo run -- jobs list --state discarded` is empty |
+| Templates correct in both color schemes; the built CSS has every class (htmx) | `cargo nextest run theme_test` ([test-standards §11](guides/test-standards.md#11-theme-and-css-guards)) |
 
 ## When something fails
 

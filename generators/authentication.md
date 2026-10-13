@@ -62,13 +62,13 @@ Write `product/features/accounts.md` from [`blueprints/feature-spec.md`](../blue
    - **or** `login_links.rs`: `create`, `sent`, `show` (confirm page), `consume`;
    - `spa`: `controllers/api/…` returning JSON, plus `GET /api/session`.
 
-   Rate-limit login, reset and link requests (10 per 3 minutes per IP + action; magic links also per email). Re-render the form with **429** and "Try again later."
+   Rate-limit login, reset and link requests (10 per 3 minutes per IP + action; magic links also per email; 1000 in development; refused attempts never extend the window, [security](../guides/security.md#rate-limiting-kernelrate_limitrs)). Re-render the form with **429** and "Try again later."
 10. **Routes:** the table in [auth.md](../guides/auth.md#routes-password-variants) (magic-link: [its flow table](../guides/auth.md#flow)):
     - `paths::` helpers, including `dev_mailbox()` if the dev tools haven't added it;
     - `ROUTES` rows: `Access::Public`, except log-out (`Access::User`).
 11. **Views / pages:**
-    - htmx: `views/{sessions,registrations,passwords}.rs` (or `login_links.rs`) and their templates;
-    - `templates/shared/_dev_mailbox_hint.html`, included at the top of every auth screen (mandatory on `/login_links/sent`);
+    - htmx: `views/{sessions,registrations,passwords}.rs` (or `login_links.rs`) and their templates, in the two-scheme palette ([views](../guides/views.md#dark-mode));
+    - `templates/shared/_dev_mailbox_hint.html` (amber, with its `dark:` partners), included at the top of every auth screen (mandatory on `/login_links/sent`);
     - nav: "Log in" + "Sign up", or the reader's email + a "Log out" form;
     - inertia/spa: the matching pages plus a `DevMailboxHint` component fed by the `dev_mailbox` prop.
 12. **Seed** (development only; `tasks/seed.rs` refuses to run in production): create `reader@example.com` (`admin@example.com` if roles) with a random password printed once. Skip it if the account already exists. Magic-link: no password; log in through `/dev/mailbox`.
@@ -83,6 +83,7 @@ Write `product/features/accounts.md` from [`blueprints/feature-spec.md`](../blue
       - the dev mailbox hint appears in development and is absent in production and test configs;
     - magic-link: the required list in [auth.md](../guides/auth.md#required-tests).
     - **`tests/app/guard_test.rs`**, verbatim from [test-standards §4](../guides/test-standards.md#4-tenant-isolation-suite-every-app-with-accounts): no unscoped lookups in handlers. Mark the handlers that legitimately read nothing private (`new` forms, the dev tools) with `// unscoped: <reason>`.
+    - **`tests/e2e/smoke.scenario.mjs`**: `login(page, base)` fills and submits the real form (sign-up or login; magic links: request the link, read it from `/dev/mailbox/latest.json`, open it), `loggedIn(page)` reads the logged-in nav, plus `a11yPaths`/`a11yAuthPaths`. Check: `SCENARIO=tests/e2e/smoke.scenario.mjs BASE=<the URL bin/dev printed> bash .offrails/tools/browser-smoke/run.sh login` passes with no certificate overrides ([dev-tools](../guides/dev-tools.md#browser-smoke)), and `… run.sh a11y` passes in light and dark;
     - **`tests/app/tenancy_test.rs`** from the §4 template, with `Tenant` holding the user (and team, with `teams`) and `fill` knowing `{id}` of every id route that exists so far. Every later model (scaffold step 3) extends it. Check: `cargo nextest run tenancy_test guard_test` passes, and `tools/offrails-check` (`offrails check`) reports no tenancy errors.
     - **the app's first real-browser smoke** (it's the first critical flow): `tests/e2e/` for htmx (`web/e2e/` in TS modes) per [test-standards §9](../guides/test-standards.md#9-real-browser-smoke), with one spec: sign up or request a link → open it from `/dev/mailbox/latest.json` → logged in → log out. `page.on('dialog', d => d.accept())` in the setup, so a `data-confirm` never hangs it.
 14. Log decisions in `docs/decisions.md` (variant, any deviation). Run the [security checklist](../guides/security.md#checklist), then the Definition of Done. Smoke the flows in a real browser: sign up, log out, log in, and request a reset and open it from `/dev/mailbox` (see [test-standards §9](../guides/test-standards.md#9-real-browser-smoke)).

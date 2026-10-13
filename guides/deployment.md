@@ -181,13 +181,43 @@ The default is plain HTTP inside the container and TLS at the platform's proxy (
 
 ```rust
 let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-let tls = axum_server::tls_rustls::RustlsConfig::from_pem_file(&cert, &key).await?;
-let handle = axum_server::Handle::new();
-// on SIGTERM: handle.graceful_shutdown(Some(Duration::from_secs(30)))
-axum_server::bind_rustls(addr, tls).handle(handle).serve(app).await?;
+let cfg = axum_server::tls_rustls::RustlsConfig::from_pem_file(&cert, &key).await?;
+// `listener` is the one tokio TcpListener `serve` already bound; never bind_rustls(addr) on top of it.
+let acceptor = axum_server::tls_rustls::RustlsAcceptor::new(cfg).acceptor(kernel::tls::HttpToHttps);
+axum_server::from_tcp(listener.into_std()?)?.acceptor(acceptor).handle(handle).serve(service).await?;
+// on SIGTERM: handle.graceful_shutdown(Some(config.shutdown_drain)), the full branch: new.md step 4.12
 ```
 
-- **Why it matters beyond the box:** live pages need HTTP/2 in the browser, or realtime breaks at about 6 tabs ([realtime](realtime.md#many-tabs-stall-http11-vs-http2)). `bin/dev` serves HTTPS by default for that reason.
+**Plain HTTP on the TLS port** (a bare `localhost:3000` in the address bar, an `http://` bookmark) used to get TLS bytes back and show `ERR_INVALID_HTTP_RESPONSE`. `kernel/tls.rs` is an inner acceptor that peeks at the first byte: `0x16` (a TLS handshake) goes on to rustls; anything else gets `307 Temporary Redirect` to `https://<Host><path>` and is closed (an error from the acceptor drops the connection; axum-server ignores it). 307, never 308: browsers cache permanent redirects, which would break `APP_TLS=off` on the same port later. The peek has a 10 s timeout (rustls' handshake timeout doesn't cover it), the request head is capped at 8 KiB, the path must start with one `/`, and the Host may only hold host/port characters:
+
+```rust
+// src/kernel/tls.rs (axum-server 0.8: `Accept<I, S>`; the reference app's file has the tests)
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HttpToHttps;
+
+impl<S: Send + 'static> Accept<TcpStream, S> for HttpToHttps {
+    type Stream = TcpStream;
+    type Service = S;
+    type Future = Pin<Box<dyn Future<Output = io::Result<(TcpStream, S)>> + Send>>;
+
+    fn accept(&self, stream: TcpStream, service: S) -> Self::Future {
+        Box::pin(async move {
+            let mut first = [0u8; 1];
+            let n = timeout(SNIFF_TIMEOUT, stream.peek(&mut first)).await
+                .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "no bytes before timeout"))??;
+            if n == 1 && first[0] == 0x16 {
+                return Ok((stream, service));
+            }
+            let _ = timeout(SNIFF_TIMEOUT, redirect_to_https(stream)).await; // read the head, write the 307, shutdown
+            Err(io::Error::other("plain HTTP on the HTTPS port: redirected"))
+        })
+    }
+}
+```
+
+Tests: `redirect_target` (pure: request head → `Option<String>`) keeps host and path and refuses `//evil` paths, odd hosts and a missing Host; the acceptor, on a real `TcpListener`, answers a plain request with 307 and the `Location`, and passes a `0x16` first byte through. Verified with curl: `curl -si 'http://localhost:3311/books?x=1'` → `307`, `Location: https://localhost:3311/books?x=1`.
+
+- **Why it matters beyond the box:** live pages need HTTP/2 in the browser, or realtime breaks at about 6 tabs ([realtime](realtime.md#many-tabs-stall-http11-vs-http2)). `bin/dev` serves HTTPS whenever a locally trusted certificate exists, and never with an untrusted one: browsers drop cookies on it ([dev-tools](dev-tools.md#https-in-development)).
 - Install a crypto provider first: with sqlx/lettre in the tree, rustls can't pick one alone and panics at the first handshake.
 - Certificates come from your own ACME client (renew, then restart, or call `tls.reload_from_pem_file`). If you need automatic certificates, put Kamal-proxy or Caddy in front instead, and leave `APP_TLS_*` unset.
 - Verified 2026-10-13 with a self-signed certificate: `curl -k` negotiated h2, `--http1.1` worked, and `app health` passed.

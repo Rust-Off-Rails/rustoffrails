@@ -317,7 +317,7 @@ createInertiaApp({
   {% endfor %}{% for src in vite.scripts %}<script type="module" src="{{ src }}"></script>
   {% endfor %}
 </head>
-<body class="min-h-screen bg-white text-gray-900 antialiased">
+<body class="min-h-screen bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100 antialiased">
   <script data-page="app" type="application/json">{{ page_json|safe }}</script>
   <div id="app"></div>
 </body>

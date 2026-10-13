@@ -11,30 +11,26 @@
 //   export async function login(page, base) {}           // optional: sign in tab 1 (cookies are shared)
 //   export async function mutate(page, base) { return token }  // change data from tab 1
 //   export async function seen(page, token) { return bool }    // does this tab show the change?
-// Exits 0 when all tabs update within TIMEOUT_MS, 1 otherwise. Self-signed dev certs are accepted.
-import puppeteer from "puppeteer-core";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
+//   export async function loggedIn(page) { return bool } // optional: proves the session cookie stuck
+// Exits 0 when all tabs update within TIMEOUT_MS, 1 otherwise. No certificate overrides: an
+// untrusted certificate fails the run (Chrome drops cookies on it; see lib.mjs).
+import { BASE as base, checker, launch, loginAndProve, preflight, scenario } from "./lib.mjs";
 
-const base = (process.env.BASE ?? "http://localhost:3000").replace(/\/$/, "");
 const tabsN = Number(process.env.TABS ?? 12);
 const timeout = Number(process.env.TIMEOUT_MS ?? 10000);
-const chrome = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 if (!process.env.SCENARIO) { console.error("set SCENARIO=<path to the app's scenario module>"); process.exit(2); }
-const sc = await import(pathToFileURL(path.resolve(process.env.SCENARIO)).href);
+const sc = await scenario({ required: ["mutate", "seen"] });
 const t0 = Date.now();
 const log = (...a) => console.log(`[${((Date.now() - t0) / 1000).toFixed(1)}s]`, ...a);
 
-const browser = await puppeteer.launch({
-  executablePath: chrome,
-  headless: "new",
-  args: ["--ignore-certificate-errors", "--no-first-run", "--no-default-browser-check"],
-});
+const browser = await launch();
+const { failures, check } = checker();
 let failed = false;
 try {
   const first = await browser.newPage();
-  await first.goto(base + "/", { waitUntil: "load" });
-  if (sc.login) await sc.login(first, base);
+  if (!(await preflight(first, check))) throw new Error("preflight failed");
+  if (sc.login) await loginAndProve(first, sc, check);
+  if (failures.length) throw new Error("login did not stick");
   const tabs = [first];
   for (let i = 1; i < tabsN; i++) tabs.push(await browser.newPage());
   const opened = await Promise.all(
@@ -66,9 +62,12 @@ try {
     failed = true;
     const h1 = opened.some((o) => o.proto === "http/1.1");
     log(h1
-      ? "FAIL: on HTTP/1.1 the browser allows ~6 connections per origin; serve HTTPS so it negotiates h2 (bin/dev-cert + APP_TLS_*, guides/realtime.md \"Many tabs stall\")."
+      ? "FAIL: on HTTP/1.1 the browser allows ~6 connections per origin; serve HTTPS so it negotiates h2 (a trusted certificate: mkcert -install + bin/dev-cert, guides/realtime.md \"Many tabs stall\")."
       : "FAIL: some tabs never updated on a multiplexed connection: capture evidence (document.scripts, the EventSource state, requests) before changing code.");
   }
+} catch (e) {
+  failed = true;
+  log(`FAIL: ${e.message}`);
 } finally {
   await browser.close();
 }

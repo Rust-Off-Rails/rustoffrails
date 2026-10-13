@@ -18,6 +18,7 @@ app routes                      # rails routes       (prints ROUTES with access 
 app task <name> [args…]         # rails runner / rake tasks (src/tasks/<name>.rs)
 app jobs stats|list|show|retry|cancel|delete|run|pause|resume|prune   # Mission Control / Oban Web, in a terminal
 app health                      # container healthcheck: GET /up on 127.0.0.1:$PORT, exit 0 on 200 (no DB, no curl in the image)
+app introspect                  # development only: the app's state as JSON (routes, redacted config, migrations, jobs, assets, CSS staleness); live streams/subscribers: GET /dev/introspect.json (guides/dev-tools.md#introspection)
 app task tokens create <email> [name] | list <email> | revoke <id>   # API tokens (apps with an API; guides/api.md)
 ```
 
@@ -42,7 +43,7 @@ The binary embeds the `migration` crate. The Docker entrypoint (`bin/docker-entr
 |-------------------------------|-----------|
 | `rails new`                   | `interview.md`, then `generators/new.md` |
 | `bin/setup`                   | `bin/setup` (installs tools, creates `.env` from `.env.example`, `db setup`) |
-| `bin/dev`                     | `bin/dev`: `cargo watch -x 'run -- serve'` + Tailwind watch (`htmx`) or `pnpm --dir web dev` (`inertia`/`spa`) |
+| `bin/dev`                     | `bin/dev`: `cargo watch` rebuild + restart, Tailwind `--watch` (`htmx`) or Vite (`inertia`/`spa`), and open tabs reload themselves (`static/dev-reload.js` polls `/dev/reload`) ([hot reload](guides/dev-tools.md#hot-reload)). HTTPS only with a trusted certificate (mkcert), else plain http; it prints the URL to open ([HTTPS in development](guides/dev-tools.md#https-in-development)) |
 | `rails s`                     | `cargo run -- serve` |
 | `rails c`                     | No REPL. Write `src/tasks/<name>.rs` and run `cargo run -- task <name>` |
 | `rails dbconsole`             | `cargo run -- db console` |
@@ -53,7 +54,8 @@ The binary embeds the `migration` crate. The Docker entrypoint (`bin/docker-entr
 | `rails g …`                   | `generators/<name>.md` |
 | `rails routes`                | `cargo run -- routes` (or `/dev/routes` in the browser) |
 | Mission Control – Jobs        | `/admin/jobs`, or `cargo run -- jobs stats` / `jobs list --state discarded` ([jobs-dashboard](guides/jobs-dashboard.md)) |
-| letter_opener_web             | https://localhost:3000/dev/mailbox (`http://` with `APP_TLS=off`) ([mailers](guides/mailers.md)) |
+| letter_opener_web             | `<URL bin/dev printed>/dev/mailbox` ([mailers](guides/mailers.md)) |
+| (none: ask the running app)   | `curl -s $URL/dev/introspect.json` or `cargo run -q -- introspect` ([dev-tools](guides/dev-tools.md#introspection)) |
 | `rails test`                  | `cargo nextest run` (SQLite) / `TEST_DATABASE_URL=postgres://… cargo nextest run` |
 | `rubocop`                     | `cargo fmt --check && cargo clippy --all-targets -- -D warnings` |
 | (none: specs ↔ code gates)    | `sh .offrails/tools/offrails-check` or `offrails check`: header consistency, every AC cited, Security-table tests exist, tenancy suites, no unscoped lookups. Exit 1 on any `FAIL`; runs in CI ([workflow](workflow.md#definition-of-done)) |
@@ -65,9 +67,10 @@ The binary embeds the `migration` crate. The Docker entrypoint (`bin/docker-entr
 ## Running the app from an agent
 
 - **Start it as a tracked background task** using your harness's mechanism (Claude Code: Bash with `run_in_background`), running `bin/dev` or `cargo run -- serve`. Don't use `nohup … &` from a tool call: the harness can reap it within minutes, and the human then gets "connection refused".
-- **Pick a free port** and set `PORT`. Check it first with `lsof -nP -iTCP:$PORT -sTCP:LISTEN`: on macOS, binding `0.0.0.0:$PORT` succeeds even when another process holds `127.0.0.1:$PORT`, and then `localhost:$PORT` silently reaches the *other* app. After starting, confirm `/up` answers from **your** process (the PID from `lsof`). In development, `APP_URL` defaults to `https://localhost:{PORT}` with `bin/dev` (`http://` with `APP_TLS=off` or plain `cargo run -- serve`) ([config](guides/config.md)), so email links and the CSRF origin check follow the port and scheme.
-- **Prove it's up before telling the human:** `curl -fsSk https://localhost:$PORT/up` (`http://` without TLS). Re-check after any restart.
-- **Stop only what you started**, by PID or port (`lsof -ti tcp:$PORT -sTCP:LISTEN`). Never `pkill` by name, which can kill the human's own servers.
+- **Pick a free port** and set `PORT`. Check it first with `lsof -nP -iTCP:$PORT -sTCP:LISTEN`: on macOS, binding `0.0.0.0:$PORT` succeeds even when another process holds `127.0.0.1:$PORT`, and then `localhost:$PORT` silently reaches the *other* app. After starting, confirm `/up` answers from **your** process (the PID from `lsof`). In development, `APP_URL` defaults to `https://localhost:{PORT}` when `serve` has TLS (a trusted certificate from `bin/dev-cert`) and `http://localhost:{PORT}` otherwise ([config](guides/config.md)), so email links and the CSRF origin check follow the port and scheme. **Use the exact URL `bin/dev` printed** (`→ …` and `✓ ready: …`); a bare `localhost:PORT` is http to a browser (the TLS port answers it with a 307 to https).
+- **Prove it's up before telling the human:** `curl -fsS $URL/up` with the printed URL (`-k` only with `DEV_CERT_SELF_SIGNED=1`, and then tell the human to open the printed http URL, never the self-signed one). Re-check after any restart. Then `curl -s $URL/dev/introspect.json` answers what state it's in (pending migrations, stale CSS, protocol).
+- **Never tell a human to click through a certificate warning.** Chrome drops cookies on an untrusted certificate, so login bounces ([dev-tools](guides/dev-tools.md#https-in-development)).
+- **Stop only what you started**, by PID or port (`lsof -ti tcp:$PORT -sTCP:LISTEN`). Never `pkill` by name, which can kill the human's own servers. For `bin/dev`, stop the `bin/dev` process you started (its `trap 'kill 0' EXIT` stops cargo watch, Tailwind and the server); killing only the listening PID leaves the watchers running.
 - **Non-interactive runs (`claude -p`, `opencode run`, `codex exec`, CI): stop every server you started before your final message.** A background `bin/dev` (or `cargo watch`, Vite, Tailwind watch) keeps the session's process tree alive, so the run never exits. Last step: `lsof -ti tcp:$PORT -sTCP:LISTEN | xargs kill` for each port you used (Vite's too), then confirm with `lsof -nP -iTCP:$PORT -sTCP:LISTEN` printing nothing. In an interactive session, leave it running only if the human will use it, and say on which URL.
 - **Read emails through the mailbox JSON** (`/dev/mailbox/latest.json?to=…`), never by grepping raw `.eml` files ([mailers](guides/mailers.md)).
 

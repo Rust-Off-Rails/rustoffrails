@@ -3,23 +3,13 @@
 // can't see boosted navigation, <head> swaps, the back/forward cache or CSP violations; this can.
 // Run through run.sh. Seeds via the dev-only buttons (/dev/mailbox/test, /dev/jobs/test), so it
 // needs no app-specific routes. Spec: .offrails/guides/dev-tools.md#browser-smoke
-import puppeteer from "puppeteer-core";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import { BASE, checker, launch, preflight } from "./lib.mjs";
 
-const BASE = process.env.BASE ?? "http://localhost:3000";
-const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const failures = [];
-const check = (ok, what) => {
-  console.log(`${ok ? "ok  " : "FAIL"} ${what}`);
-  if (!ok) failures.push(what);
-};
-
-const profile = fs.mkdtempSync(path.join(os.tmpdir(), "offrails-smoke-"));
-const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, userDataDir: profile });
+const { failures, check } = checker();
+const browser = await launch();
 try {
   const page = await browser.newPage();
+  if (!(await preflight(page, check))) throw new Error("preflight failed: see above");
   const cspErrors = [];
   page.on("console", (m) => /Content Security Policy/i.test(m.text()) && cspErrors.push(m.text()));
   const go = (action) => Promise.all([page.waitForNavigation({ waitUntil: "load" }), action]);
@@ -78,7 +68,6 @@ try {
   cspErrors.forEach((e) => console.log(`     ${e}`));
 } finally {
   await browser.close();
-  fs.rmSync(profile, { recursive: true, force: true });
 }
 if (failures.length) {
   console.error(`\n${failures.length} check(s) failed`);

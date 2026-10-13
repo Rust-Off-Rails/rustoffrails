@@ -27,7 +27,9 @@ bash "$FW/hooks/fingerprint.sh" "$FW"
 head -n1 .offrails/VERSION "$FW/VERSION"
 ```
 
-If the fingerprints match, the app is current: say so and stop. (`offrails upgrade --check` does exactly this against `~/.offrails/current`; `offrails upgrade --check --fw "$FW"` against any other release, e.g. a tag export: `git -C <framework checkout> archive v0.6.0 | tar -x -C /tmp/offrails-0.6.0`. Exit 0 = current, 10 = an upgrade is due.)
+**An installed `offrails` older than 0.6.0 silently ignores `--fw`** (and every other flag): `offrails upgrade --check --fw "$FW"` then compares against `~/.offrails/current` instead and can report "current" for the wrong release. Run the target release's own script, `sh "$FW/tools/offrails" upgrade --check --fw "$FW"`, or `offrails update` first (`offrails version` prints the installed release). From 0.6.1 the CLI rejects unknown flags with exit 2 and answers `-h`/`--help` on every subcommand without doing anything else.
+
+If the fingerprints match, the app is current: say so and stop. (`offrails upgrade --check` does exactly this against `~/.offrails/current`; `offrails upgrade --check --fw "$FW"` against any other release, e.g. a tag export: `git -C <framework checkout> archive v0.6.0 | tar -x -C /tmp/offrails-0.6.0`. Exit 0 = current, 10 = an upgrade is due. `--check` never starts an agent; plain `offrails upgrade` from a script or another agent needs `--yes`, else it prints the agent command and exits 3.)
 
 ## 2. Start clean
 
@@ -62,7 +64,9 @@ Each slice must be green under the [Definition of Done](../workflow.md#definitio
 
 ## 8. Verify nothing is stale
 
-- `sh .offrails/tools/offrails-check` exits 0. Its `FAIL` lines are convergence work for this upgrade, not pre-existing debt to report and leave.
+- `sh .offrails/tools/offrails-check` exits 0. Its `FAIL` lines are convergence work for this upgrade, not pre-existing debt to report and leave. Two that older specs and configs hit:
+  - **`n/a` threat rows.** *Detect:* `grep -nE '^\|[^|]*\|[[:space:]]*(n/a|N/A|none|—)[[:space:]]*\|' product/features/*.md`, or `[security] … says "n/a" with no reason` / `names no test`. *Converge:* a STRIDE category that can't apply becomes `| <Category> | n/a: <why it can't happen here> | — | — |`; a row that names a real threat gets its test written and named, never `—`.
+  - **`.env.example` gaps.** *Detect:* `[env] .env.example is missing variable(s)` (the old DoD grep only matched `var("…")`, so variables read through `parse("X", …)` or another helper were never checked). *Converge:* add each as `NAME=value` or `# NAME=value` with a comment ([config](../guides/config.md#envexample)); a `"SCREAMING_SNAKE"` literal in `src/config.rs` that isn't an env var gets a trailing `// not an env var`.
 - **Reconcile `docs/decisions.md`.** Read every line. For each decision this release makes obsolete (a workaround for a bug the release fixes, a deviation the framework now adopts, a limit the release resizes), add a line that supersedes it by date (`YYYY-MM-DD: supersedes 2026-10-04 (stall watchdog): 0.6.0 serves HTTP/2, removed the watchdog`) and remove the code it justified in the same slice. Never edit or delete the old line ([workflow](../workflow.md#decisions)). Keep a workaround only if you can still reproduce its evidence on the new release, and say so in the superseding line.
 - Copy the app header's `NEVER` list from [`blueprints/AGENTS.md`](../blueprints/AGENTS.md) into the app's `AGENTS.md` when it's missing or older.
 

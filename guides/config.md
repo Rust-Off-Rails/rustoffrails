@@ -38,6 +38,8 @@ pub struct Config {
     pub queues: Vec<(String, usize)>, // APP_QUEUES, default "default:10,mailers:5" (queue:concurrency per node)
     pub jobs_prune_days: u32,         // APP_JOBS_PRUNE_DAYS, default 7: how long finished jobs stay visible
     pub jobs_shutdown_grace: u64,     // APP_JOBS_SHUTDOWN_GRACE seconds, default 25
+    pub shutdown_drain: Duration,     // APP_SHUTDOWN_DRAIN_SECS, default 5: after the signal, open connections get this long, then are dropped (realtime.md)
+    pub refresh_wait: Duration,       // not an env var: 5 s (Config::test(): 100 ms); how long a live re-fetch waits at the gate before 503 (realtime.md)
     pub admin_password: Option<String>, // APP_ADMIN_PASSWORD: HTTP Basic for /admin/jobs when the app has no admin role
     pub smtp_url: Option<String>,     // SMTP_URL: production delivery (ignored in development unless MAILER=smtp)
     pub mailer: Option<String>,       // MAILER = smtp | local | log: overrides the per-environment default (mailers.md)
@@ -46,6 +48,7 @@ pub struct Config {
     pub log_format: LogFormat,        // LOG_FORMAT = pretty | json (default: json in production)
     pub revision: Option<String>,     // APP_REVISION: git sha of the build, shown on /dev/system
     pub tls: Option<TlsFiles>, // APP_TLS_CERT + APP_TLS_KEY (PEM paths): `serve` speaks HTTPS + h2 itself (deployment.md#direct-tls-optional); both or neither, one alone fails the boot.
+    pub dev_http_port: Option<u16>, // APP_DEV_HTTP_PORT: development only (any other APP_ENV fails the boot); with TLS on, the same router on plain HTTP beside it (dev-tools.md#https-in-development)
                                // The development APP_URL default follows it: https://localhost:{PORT} when set (CSRF compares origins).
     // apps with an API (api.md):
     // pub cors_origins: Vec<String>, // APP_CORS_ORIGINS: exact origins, comma-separated; `*` fails at boot (config::parse_cors_origins)
@@ -69,6 +72,7 @@ pub fn parse_queues(s: &str) -> Result<Vec<(String, usize)>, String>;
 
 - `Config` holds credentials, so implement `Debug` by hand and print `[redacted]` for `database_url`, `smtp_url` and `admin_password`.
 
+- **Env var names are string literals in `config.rs`** (`var("APP_URL")`, `parse("PORT", "3000")`, never a name built with `format!`), and every `"SCREAMING_SNAKE"` literal there is an env var: `offrails-check`'s `[env]` rule reads them all and fails on any missing from `.env.example`. A literal that isn't one gets a trailing `// not an env var`.
 - **Read env vars only in `config.rs`.** Nowhere else calls `std::env::var` (the AWS keys read by `object_store`'s `from_env()` are the one sanctioned exception).
 - `Config` lives in `AppState` (`state.config`), wrapped in `Arc` if it gets large.
 - **Fail fast in production.** Missing `DATABASE_URL`, `APP_URL`, or `SMTP_URL` (when email is enabled) aborts boot with: `missing required env vars: APP_URL, SMTP_URL (see .env.example)`.
@@ -95,6 +99,8 @@ Ok(match (c.env, c.mailer.as_deref()) {
 })
 ```
 
+**Rate limits are per environment too** ([security](security.md#rate-limiting-kernelrate_limitrs)): in development every limit is **1000 per window** (`rate_limit::DEV_LIMIT`), so a person or agent retrying a form locally never locks themselves out; test and production use each call site's own limit (the 11th login is refused in tests exactly as in production). `RateLimiter::new(config.env)` decides it, once; call sites never branch on the environment.
+
 **Never use `cfg!(debug_assertions)` or `#[cfg(debug_assertions)]` for behavior.** A release build running locally must behave like development when `APP_ENV=development`.
 
 ## `.env.example`
@@ -120,6 +126,7 @@ APP_INLINE_WORKER=true
 APP_QUEUES=default:10,mailers:5
 APP_JOBS_PRUNE_DAYS=7
 APP_JOBS_SHUTDOWN_GRACE=25
+# APP_SHUTDOWN_DRAIN_SECS=5    # web: open connections get this long after SIGTERM (streams end first); keep it below the platform's kill timeout
 # APP_ADMIN_PASSWORD=          # production: protects /admin/jobs when there's no admin role
 # --- email: development always uses the dev mailbox (/dev/mailbox); SMTP_URL is for production ---
 # SMTP_URL=smtps://user:pass@smtp.provider.com:465
@@ -135,6 +142,7 @@ MAIL_FROM="Myapp <no-reply@localhost>"
 # --- direct TLS (optional; default: plain HTTP behind the platform's TLS proxy) ---
 # APP_TLS_CERT=/etc/app/tls/cert.pem
 # APP_TLS_KEY=/etc/app/tls/key.pem
+# APP_DEV_HTTP_PORT=3001        # development only, with TLS on: the same app on plain http (bin/dev sets it with DEV_CERT_SELF_SIGNED=1)
 # --- logging ---
 RUST_LOG=info,myapp=debug
 LOG_FORMAT=pretty

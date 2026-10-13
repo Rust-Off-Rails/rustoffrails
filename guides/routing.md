@@ -126,13 +126,15 @@ pub const ROUTES: &[(&str, &str, &str, Access)] = &[
 Outermost first. In code, `.layer` calls run bottom-up, so they appear in the **reverse** of this order:
 
 1. `SetRequestIdLayer::new(x-request-id, MakeRequestUuid)`, then `TraceLayer::new_for_http().make_span_with(...)` (span fields `method`, `path`, `request_id`), then `PropagateRequestIdLayer`
-2. `kernel::security::middleware` (`from_fn_with_state(security::Hardening::new(&config), …)`): the header matrix, `no-store` for authenticated responses, production cookie hardening ([security](security.md#the-header-matrix)). It sits **outside** the panic and timeout layers, so their 500 and 408 responses are hardened too
+2. `kernel::security::middleware` (`from_fn_with_state(security::Hardening::new(&config), …)`): the header matrix, `no-store` for authenticated responses, production cookie hardening ([security](security.md#the-header-matrix)). It sits **outside** the panic and timeout layers, so their 500 and 503 responses are hardened too
 3. `CatchPanicLayer::custom(error::panic_response)` ([errors](errors-and-logging.md))
-4. `TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, 30s)` (`TimeoutLayer::new` is deprecated in tower-http 0.7)
-5. `CompressionLayer::new()`
-6. `error::shape_errors` (`from_fn_with_state`)
-7. `CsrfLayer` (tower-http `csrf` feature; [security](security.md#csrf))
-8. `kernel::flash::middleware` (`htmx` and `inertia` modes)
-9. `DefaultBodyLimit::max(2 MB)`, raised per route for uploads
+4. `axum::middleware::map_response(error::retry_after)`: a 503 without `Retry-After` gets `Retry-After: 1` ([errors](errors-and-logging.md#response-mapping))
+5. `TimeoutLayer::with_status_code(StatusCode::SERVICE_UNAVAILABLE, 30s)`: overload is 503, never 408 (`TimeoutLayer::new` is deprecated in tower-http 0.7; `with_status_code(StatusCode, Duration)` checked against 0.7.1)
+6. `CompressionLayer::new()`
+7. `error::shape_errors` (`from_fn_with_state`)
+8. `CsrfLayer` (tower-http `csrf` feature; [security](security.md#csrf))
+9. `kernel::flash::middleware` (`htmx` and `inertia` modes)
+10. `kernel::live::gate` (`from_fn_with_state`, apps with live regions): requests with `X-Live-Refresh` wait for a permit ([realtime](realtime.md#keep-re-fetches-from-starving-user-requests))
+11. `DefaultBodyLimit::max(2 MB)`, raised per route for uploads
 
 Authentication is **not** middleware. It's an extractor on each handler (`RequireUser`), so a route's protection is visible in its signature.

@@ -82,8 +82,8 @@ createInertiaApp({
   // page.flash is {} when there is no flash.
   const tone = $derived(
     page.flash.kind === "alert"
-      ? "bg-red-50 text-red-800"
-      : "bg-green-50 text-green-800",
+      ? "bg-red-50 text-red-800 dark:bg-red-950 dark:text-red-200"
+      : "bg-green-50 text-green-800 dark:bg-green-950 dark:text-green-200",
   );
 </script>
 
@@ -120,7 +120,7 @@ createInertiaApp({
 <form onsubmit={submit} novalidate>
   <label for="title">Title</label>
   <input id="title" bind:value={form.title} />
-  {#each form.errors.title ?? [] as msg (msg)}<p class="text-red-700">{msg}</p>{/each}
+  {#each form.errors.title ?? [] as msg (msg)}<p class="text-red-700 dark:text-red-300">{msg}</p>{/each}
   <button type="submit" disabled={form.processing}>{submitLabel}</button>
 </form>
 ```

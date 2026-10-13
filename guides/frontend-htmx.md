@@ -143,6 +143,31 @@ document.addEventListener("htmx:afterSwap", () => { /* re-init anything that nee
 
 If a behavior outgrows ~50 lines or needs real client state, it's an island.
 
+### No full reload after a mutation
+
+**Never `location.reload()` (or `window.location = …` to the same page) after the user changes something.** A generated Kanban's board JS reloaded the page after every card drop: the whole page re-rendered and every stream on it reconnected for each move, under load that was the slowest request in the app, and the user lost scroll and focus. Instead:
+
+1. **Move the DOM optimistically** (the card is already where the user dropped it; keep it there).
+2. **Send the mutation** (`fetch` POST with the CSRF-safe same-origin headers, or an htmx request), then **re-fetch the live region in place**, the same GET a live signal makes: `htmx.ajax("GET", region.getAttribute("hx-get"), { target: region, swap: "outerHTML" })`. On success that confirms the optimistic move; on a 4xx it puts the card back where the server says it is (and the region shows the flash or error).
+3. Other viewers update through the signal as usual ([realtime](realtime.md#client-side)), served from the shared render ([render once per version](realtime.md#render-once-per-version-the-thundering-herd)).
+
+```js
+// static/app.js: a drop on a board column (drag source: [data-card-id], drop target: [data-column-id])
+document.addEventListener("drop", async (e) => {
+  const column = e.target.closest("[data-column-id]");
+  const card = document.querySelector(`[data-card-id="${e.dataTransfer.getData("text/plain")}"]`);
+  if (!column || !card) return;
+  e.preventDefault();
+  column.querySelector("[data-cards]").append(card);                       // 1. optimistic
+  const body = new URLSearchParams({ column_id: column.dataset.columnId });
+  await fetch(`/cards/${card.dataset.cardId}/move`, { method: "POST", body }).catch(() => {});  // 2. mutate
+  const region = column.closest("[hx-get]");                               //    then the live region's own GET
+  window.htmx.ajax("GET", region.getAttribute("hx-get"), { target: region, swap: "outerHTML" });
+});
+```
+
+The move handler answers `204` (or `303` for no-JS forms); the page never navigates. A `pageshow` reload for back/forward-cache restores ([realtime](realtime.md#client-side)) is not a mutation reload and stays.
+
 ## Assets & cache busting (`kernel/assets.rs`)
 
 ```rust
@@ -261,7 +286,7 @@ document.addEventListener("htmx:beforeSwap", (e) => unmountWithin(e.target as El
 - `kernel/assets.rs` reads `web/dist/.vite/manifest.json` for `src/islands/mount.tsx` (`file`, plus `css` if any) and emits one `<script type="module">`. Lazy island chunks load themselves. **The same in development:** `/assets/*` serves `web/dist/assets/` and the manifest is re-read per request in development only.
 - **Development loop: `vite build --watch`, not the Vite dev server.** `bin/dev` runs `pnpm --dir web exec vite build --watch --mode development` next to Tailwind's watch, and you reload the page after an island change. Decided because:
   - **the dev CSP stays the production CSP.** The dev server needs `http://localhost:5173` in `script-src`/`style-src`/`connect-src`, `ws://localhost:5173` and `'unsafe-inline'` styles ([security](security.md)); with islands the rest of the app is server-rendered htmx, so that loosening would cover every page to speed up one widget, and CSP bugs would only show in production;
-  - **one origin, one scheme.** `bin/dev` serves HTTPS + HTTP/2 ([realtime](realtime.md#many-tabs-stall-http11-vs-http2)); a second plain-http origin on :5173 brings mixed-content and certificate questions for no gain;
+  - **one origin, one scheme:** the URL `bin/dev` prints (HTTPS + HTTP/2 with a trusted certificate, [realtime](realtime.md#many-tabs-stall-http11-vs-http2)); a second plain-http origin on :5173 brings mixed-content and certificate questions for no gain;
   - **one code path.** Dev and production both read the manifest, so the path that ships is the path you test;
   - **the cost is small:** islands are a few widgets, a rebuild takes about a second, and HMR state preservation matters little for them.
 
@@ -284,4 +309,5 @@ document.addEventListener("htmx:beforeSwap", (e) => unmountWithin(e.target as El
 - Pulling htmx `@latest`/`next`. That could silently move to htmx 4. Resolve `@2`.
 - Fetching Tailwind from `releases/latest` in `bin/setup`. Pin `TAILWIND_VERSION` so dev, CI and Docker build identical CSS.
 - Inline `onclick=` handlers. The CSP blocks them. Use `static/app.js`.
+- **`location.reload()` after a mutation** (a drop, a toggle, a reorder): re-renders the whole page and reconnects its streams per action. Move the DOM optimistically, then re-fetch the live region in place ([above](#no-full-reload-after-a-mutation)).
 - Forgetting to add new template directories to Tailwind's `@source`, so classes go missing in production.
