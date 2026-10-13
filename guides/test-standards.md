@@ -165,7 +165,7 @@ fn every_mounted_route_is_in_the_routes_table() {
 
 Adjust `sources` to the files in your app that call `.route(`, and the threshold to roughly 80% of your route count.
 
-## 4. Tenant isolation suite (multi-tenant apps)
+## 4. Tenant isolation suite (every app with accounts)
 
 `tests/app/tenancy_test.rs` creates two tenants, A and B, each with one record of **every** tenant-scoped model. Acting as a user of A, it then requests every route (and every API endpoint) that takes an id, using B's ids. Every response must be 404. It also asserts that list pages and exports never contain B's data. When a model is added, add it to this test's setup; `/offrails:doctor` checks that it's there.
 

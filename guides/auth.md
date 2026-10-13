@@ -228,7 +228,7 @@ pub fn can_destroy(user: &User, book: &Book) -> bool { can_edit(user, book) }
 - Tables: `accounts (id, name, …)`, `memberships (account_id, user_id, role, unique(account_id, user_id))`. Every tenant-owned table gets `account_id NOT NULL` + an index.
 - URL: `/a/{account_id}/…` (or subdomain, only if the spec says so).
 - `CurrentAccount(Account, Membership)` extractor: resolves from the path, and `Forbidden` if the user has no membership.
-- **Every query on tenant data takes `account_id` and filters by it.** No exceptions, not even "admin" screens. The tenant isolation suite ([test-standards §4](test-standards.md#4-tenant-isolation-suite-multi-tenant-apps)) proves user A can't read account B's records.
+- **Every query on tenant data takes `account_id` and filters by it.** No exceptions, not even "admin" screens. The tenant isolation suite ([test-standards §4](test-standards.md#4-tenant-isolation-suite-every-app-with-accounts)) proves user A can't read account B's records.
 
 ## Gotchas agents get wrong
 

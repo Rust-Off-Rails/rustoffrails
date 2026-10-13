@@ -25,7 +25,7 @@ for pkg in htmx.org/dist/htmx.min.js htmx-ext-sse/dist/sse.min.js; do
 done
 ```
 
-The version lives in the filename. `kernel/assets.rs` finds the files by prefix (`htmx-2`, `htmx-ext-sse-`). Verified 2026-10: htmx 2.0.11, htmx-ext-sse 2.2.4.
+The version lives in the filename. `kernel/assets.rs` finds each file by an exact key (`vendor/htmx-2.`, `vendor/htmx-ext-sse-`) that a test proves matches exactly one file ([assets](#assets--cache-busting-kernelassetsrs)). Verified 2026-10: htmx 2.0.11, htmx-ext-sse 2.2.4.
 
 **Tailwind (v4 standalone CLI):** the agent looks up the current v4 tag once (`curl -sSLf -o /dev/null -w '%{url_effective}' https://github.com/tailwindlabs/tailwindcss/releases/latest` → `…/tag/v4.3.3`) and writes it into **`bin/setup-tailwind`** as `TAILWIND_VERSION=v4.3.3`, so every machine, CI and the Docker build get the same binary. `bin/setup` and the Dockerfile both call `bin/setup-tailwind`, which downloads and verifies `bin/tailwindcss` (git-ignored, and in `.dockerignore`). It's `#!/bin/sh`, `set -eu`, then:
 
@@ -158,7 +158,22 @@ impl AssetCatalog {
 pub async fn cache_headers(req: Request, next: Next) -> Response;   // middleware for /static
 ```
 
-- At boot, hash every file under `static/` (SHA-256, first 8 hex chars). `asset_path(prefix)` returns `/static/<file>?v=<hash>` for the first file whose relative path starts with `prefix`, so versioned vendor files match by prefix: `css` = `app.css`, `htmx` = `vendor/htmx-`, `htmx_sse` = `vendor/htmx-ext-sse-`, `app_js` = `app.js`, `admin_css` = `kernel/admin.css` (the kernel pages' stylesheet).
+- At boot, hash every file under `static/` (SHA-256, first 8 hex chars) **once**, into the `AssetCatalog` held by `AppState`. Never build the catalog in an extractor or per request (one app re-hashed every static file, images included, twice per request, in production). Development may rescan per call for `--watch` output; production never does.
+- `asset_path(key)` returns `/static/<file>?v=<hash>` for the file whose relative path starts with `key`. **Each key must match exactly one file:** `css` = `app.css`, `htmx` = **`vendor/htmx-2.`** (never `vendor/htmx-`, which also matches `htmx-ext-sse-…`), `htmx_sse` = `vendor/htmx-ext-sse-`, `app_js` = `app.js`, `admin_css` = `kernel/admin.css`. Keep the keys in one `const ASSET_KEYS` array and test it:
+
+  ```rust
+  #[test]
+  fn every_asset_key_matches_exactly_one_static_file() {
+      let files = scan(Path::new(env!("CARGO_MANIFEST_DIR")).join("static").as_path());
+      for key in ASSET_KEYS {
+          let hits: Vec<_> = files.keys().filter(|f| f.starts_with(key)).collect();
+          assert!(hits.len() <= 1, "asset key {key:?} matches {hits:?}: make it exact");
+          assert!(key == "app.css" || hits.len() == 1, "asset key {key:?} matches no file"); // app.css is built
+      }
+  }
+  ```
+
+  The bug this prevents: with the loose `vendor/htmx-` key and `HashMap` iteration order, some renders linked the SSE extension as htmx core. Those pages had no `window.htmx` (dead page, live badge stuck on "connecting…"), at random, after any restart. A retry or reload in `app.js` can't fix it, because the wrong URL is chosen server-side.
 - `Ctx.assets` carries `Assets` to the app layout; kernel pages read `state.assets.assets()` through `kernel::ui::Chrome`.
 - `/static` is a nested router, so the cache middleware wraps only static files:
 

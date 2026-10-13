@@ -56,6 +56,9 @@ Never weaken without a decision entry **and** the human's OK: strict CSP (no `un
 13. **Read emails via `/dev/mailbox/latest.json`**, never by grepping raw `.eml` (quoted-printable breaks links).
 14. **Never `pkill`/`killall` by name.** Stop your own PID, or `lsof -ti tcp:$PORT -sTCP:LISTEN | xargs kill` ([cli](cli.md#running-the-app-from-an-agent)).
 15. **Lighthouse checks one color scheme.** Run axe in light and dark ([§10](guides/test-standards.md#10-accessibility-wcag-22-aa-in-every-theme)).
+16. **Live pages need HTTP/2:** over HTTP/1.1, realtime breaks at ~6 tabs. `bin/dev` serves HTTPS; size per-user connection caps for tabs (128) ([realtime](guides/realtime.md#many-tabs-stall-http11-vs-http2)).
+17. **Never select files by loose prefix, never depend on `HashMap` order, never hash files per request.** `"vendor/htmx-"` also matched `htmx-ext-sse`: pages randomly had no htmx. Exact keys, a uniqueness test, one catalog at boot ([frontend-htmx](guides/frontend-htmx.md#assets--cache-busting-kernelassetsrs)).
+18. **Every lookup is scoped to the actor:** `board::find_for(db, &user, id)`; raw `find` is `pub(in crate::models)` so a controller can't compile an unscoped call ([models](guides/models.md#scoped-lookups-tenancy)).
 
 ## Commands ([cli.md](cli.md))
 
