@@ -26,6 +26,15 @@ Before building anything new, run the relevant part of [`interview.md`](intervie
 
 Work in **vertical slices**: one resource or behavior end-to-end, green, then the next. Never leave the tree not compiling between slices.
 
+### Parallel helpers (subagents)
+
+One Rust crate is one compile unit: an error in any file blocks `cargo check` for every file. So parallel helpers only pay off when the tree already compiles **and** each helper owns separate files.
+
+- **Never run parallel helpers before the skeleton compiles** (`generators/new.md` steps 1–7). Build the skeleton yourself, in order. Run one `cargo check`, then make the baseline commit.
+- **After that, at most one helper per vertical slice.** Each helper's prompt lists the exact files it owns and says "touch nothing else". Shared files (`src/routes.rs`, `src/kernel/mod.rs`, `src/models/mod.rs`, `migration/src/lib.rs`, `Cargo.toml`) are edited by you, the coordinator, after the helpers report.
+- **A helper whose `cargo check` fails because of another helper's file stops and reports.** It doesn't edit that file, stub it out, or build a scratch crate in `/tmp` to type-check its own part. Those workarounds hide integration errors and burn tokens.
+- Read-only helpers are always fine: exploring a reference app, mapping routes, drafting specs in `product/`.
+
 ## Definition of Done
 
 All must pass, in this order. Gates and thresholds are defined in [`guides/test-standards.md`](guides/test-standards.md).

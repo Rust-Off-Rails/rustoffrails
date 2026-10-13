@@ -150,7 +150,7 @@ The tables other kernels need (`sessions`, `blobs`, `broadcasts`) come with the 
 
 ## 4. Rust skeleton
 
-Generate these in order. Each module compiles against the ones before it. The order is: config → kernel → error/models → state → jobs → views → controllers → routes → tasks → main.
+Generate these in order, **yourself, with no parallel helpers** until step 7's first green `cargo check` ([workflow](../workflow.md#parallel-helpers-subagents)). Each module compiles against the ones before it. The order is: config → kernel → error/models → state → jobs → views → controllers → routes → tasks → main.
 
 1. `src/config.rs`: `Config`, `AppEnv`, `LogFormat`, `parse_queues`, `Config::test()` ([config](../guides/config.md))
 2. `src/kernel/mod.rs`, `kernel/db.rs` ([database](../guides/database.md#kerneldbrs-spec)) with `acquire_timeout(5 s)`
