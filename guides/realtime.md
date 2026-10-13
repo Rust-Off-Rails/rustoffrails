@@ -119,6 +119,8 @@ pub async fn stream(
     // first: missed signals (with ids) or `refresh`, then `ready` with the cursor
     // live: signals for this stream with `.id(sig.id)`, skipping exact replayed ids; Lagged → `refresh`
     // `bye` (data "revoked") when kchannels::session_ended(..) resolves, then the stream ends
+    // heartbeat: merge a named `ping` event (data: unix seconds) every 25s, so pages can tell idle from dead
+    //   (KeepAlive comments are invisible to page JS); see "Robust live regions"
     Ok(Sse::new(first.chain(live.take_until(ended)).chain(bye).take_until(s.pubsub.closed()))
         .keep_alive(KeepAlive::default()).into_response())
 }
@@ -191,6 +193,15 @@ document.addEventListener("htmx:sseMessage", (e) => e.detail?.target?.url && rem
 ```
 - htmx's history cache must be off (`historyCacheSize: 0`, `refreshOnHistoryMiss: true` in the layout's `htmx-config`, [frontend-htmx](frontend-htmx.md)). Otherwise a page reached with Back or Forward is a restored DOM snapshot whose `EventSource` is dead, and live updates silently stop. The real-browser smoke caught this too.
 
+**Robust live regions (htmx).** Verified in real browsers on a Kanban board (opencode, framework 0.3.0); each rule fixes a failure that curl and request tests can't see:
+
+- **Never reconnect by editing `sse-connect`** (removing it, re-adding it, or changing its URL). htmx has no `MutationObserver`: the old `EventSource` closes only on `htmx:beforeCleanupElement`, which fires only for htmx-managed swaps, so every "reconnect" **leaks one open stream**. To force a reconnect, swap the whole `sse-connect` element through htmx (e.g. refresh its parent with `hx-get`), or reload the page.
+- **The connection budget.** Over HTTP/1.1 (local dev, or any proxy that downgrades), a browser allows **about 6 open connections per origin**, across all tabs. Each `EventSource` holds one forever. Leaked or duplicated streams, or 6 tabs of the same app, exhaust the budget, and new streams then **queue silently forever**: no error ever fires. Rules: **one `sse-connect` per page** (multiplex several signal streams through one connection by listening to several event names on it); never open streams in hidden, offscreen or duplicated elements; production behind HTTP/2 (Cloudflare, Fly, kamal-proxy with TLS) multiplexes and avoids the cap, but don't rely on it in dev.
+- **Serialize refetches:** put `hx-sync="this:replace"` on every live region (or `this:abort`), so two signals in quick succession can't land out of order. Without it, two concurrent refetches race and the slower (older) response wins.
+- **A named heartbeat the page can see.** SSE `KeepAlive` comments are invisible to page JS, so a client watchdog can't tell "idle" from "dead" (one agent's watchdog reloaded healthy idle boards every ~50s). Have the stream also send a named `ping` event every 25s, observe it with a hidden element (`<span hidden sse-swap="ping" hx-swap="none"></span>`; `hx-swap="none"` is a real no-op in htmx 2.0.11), and treat **no `ping` for 60s** as dead → reload the region or the page.
+- **Show the connection state.** A small badge driven by `htmx:sseOpen` (live) and `htmx:sseError` (reconnecting…), so a dead stream is visible instead of a silently stale page.
+- **The app layout needs the `pageshow` guard too** (`if (e.persisted) location.reload()`, the same snippet as the error pages in [errors-and-logging](errors-and-logging.md)): a back/forward-cache restore otherwise resurrects a page whose streams are dead.
+
 **inertia** (pass the cursor as a page prop, `signal_cursor`, read before the data):
 
 ```ts
@@ -220,6 +231,7 @@ useEffect(() => {
 - htmx history snapshots (see above).
 - **No cursor**: a page rendered without `?since=`, or htmx reconnects without the `createEventSource` override, loses every signal sent while it was disconnected (the reference app shipped this; the human noticed a stale review list after a deploy).
 - **The sse extension in a page's head block**: dead after any boosted navigation (see Client side).
+- **Reconnecting by editing `sse-connect`, unserialized refetches, no visible heartbeat, more than one stream per page:** see "Robust live regions" above. Together they turn into "the board silently goes stale after a while".
 - Fly/Kamal proxies: SSE works over HTTP/1.1 and HTTP/2 with no special config. WebSocket channels have their own notes in [deployment](deployment.md).
 
 ## Testing
