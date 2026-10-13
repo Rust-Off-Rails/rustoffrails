@@ -224,7 +224,7 @@ pub fn spa_csp(html: &str, js: &[String]) -> String {
 
 ## Islands
 
-Same contract as React islands ([frontend-htmx](frontend-htmx.md#islands)): one entry, lazy chunks, `data-island` plus HTML-escaped JSON `data-props`, mount on `DOMContentLoaded` and `htmx:afterSwap`, unmount on `htmx:beforeSwap`. `web/` is a plain Vite + `@sveltejs/vite-plugin-svelte` project (no SvelteKit, no Inertia, no `@tailwindcss/vite`). `build: { manifest: true, rolldownOptions: { input: "src/islands/mount.ts" } }`, and the dev script is `src/islands/mount.ts` with no preamble.
+Same contract as React islands ([frontend-htmx](frontend-htmx.md#islands)): one entry, lazy chunks, `data-island` plus HTML-escaped JSON `data-props`, mount on `DOMContentLoaded` and `htmx:afterSwap`, unmount on `htmx:beforeSwap`. `web/` is a plain Vite + `@sveltejs/vite-plugin-svelte` project (no SvelteKit, no Inertia, no `@tailwindcss/vite`). `build: { manifest: true, rolldownOptions: { input: "src/islands/mount.ts" } }`, and development uses `vite build --watch` with the manifest, never the dev server, exactly like React islands ([why](frontend-htmx.md#islands)).
 
 `web/src/islands/mount.ts` (verified: props round-trip, the lazy CSS chunk loads, and the swap remounts):
 

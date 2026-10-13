@@ -10,20 +10,33 @@
 #
 #   bash .offrails/tools/brand/render.sh "Notes" "#4f46e5" "Private notes, anywhere." static
 #
-# Needs only Google Chrome (or Chromium) at generation time; outputs are committed, never rendered at runtime.
+# Renders with Google Chrome (or Chromium) at generation time; outputs are committed, never rendered at runtime.
 # CHROME=/path/to/chrome overrides the default location. Re-running overwrites the outputs.
+# Without Chrome: rsvg-convert (librsvg: brew install librsvg / apt install librsvg2-bin) rasterizes the SVGs (the social card
+# becomes a plain SVG card); with none of them, the neutral set in tools/brand/default/ is copied
+# and favicon.svg still carries the app's initial. Re-run with Chrome later for the full og.png.
+# RENDERER=chrome|rsvg|default forces one path. (ImageMagick isn't used: its SVG text needs local font setup.)
 set -euo pipefail
 
 NAME="${1:?app name}"; ACCENT="${2:?accent color, e.g. #4f46e5}"; TAGLINE="${3:-}"; OUT="${4:-static}"
 CHROME="${CHROME:-}"
-if [ -z "$CHROME" ]; then
+RENDERER="${RENDERER:-auto}"   # auto | chrome | rsvg | default (force one, e.g. to test a fallback)
+if [ -z "$CHROME" ] && { [ "$RENDERER" = auto ] || [ "$RENDERER" = chrome ]; }; then
   for c in "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
            "/Applications/Chromium.app/Contents/MacOS/Chromium" \
            "$(command -v google-chrome || true)" "$(command -v chromium || true)" "$(command -v chromium-browser || true)"; do
     if [ -n "$c" ] && [ -x "$c" ]; then CHROME="$c"; break; fi
   done
 fi
-[ -n "$CHROME" ] || { echo "no Chrome/Chromium found: set CHROME=… (or ship favicon.svg only and log it in docs/decisions.md)" >&2; exit 1; }
+RASTER=""
+case "$RENDERER" in
+  rsvg) CHROME=""; RASTER=rsvg ;;
+  default) CHROME="" ;;
+  chrome) [ -n "$CHROME" ] || { echo "RENDERER=chrome but no Chrome/Chromium found: set CHROME=…" >&2; exit 1; } ;;
+esac
+if [ -z "$CHROME" ] && [ "$RENDERER" = auto ]; then
+  if command -v rsvg-convert >/dev/null 2>&1; then RASTER=rsvg; fi
+fi
 
 INITIAL="$(printf '%s' "$NAME" | sed 's/^[^[:alnum:]]*//' | cut -c1 | tr '[:lower:]' '[:upper:]')"
 esc() { printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g'; }
@@ -57,17 +70,40 @@ shot() { # shot <html file> <w> <h> <out.png>   (headless Chrome hangs below ~48
     --user-data-dir="$PROFILE" --window-size="$2,$3" --screenshot="$4" "file://$1" >/dev/null 2>&1
   [ -s "$4" ] || { echo "render failed: $4" >&2; exit 1; }
 }
+raster() { # raster <svg> <w> <h> <out.png>   (the no-Chrome path)
+  rsvg-convert -w "$2" -h "$3" -o "$4" "$1"
+  [ -s "$4" ] || { echo "render failed: $4" >&2; exit 1; }
+}
 icon_page() { # icon_page <size> → html that shows favicon.svg at that size
   printf '<!doctype html><html><head><style>html,body{margin:0;background:transparent}img{display:block;width:%spx;height:%spx}</style></head><body><img src="file://%s"></body></html>' "$1" "$1" "$OUT/favicon.svg" > "$WORK/icon-$1.html"
   echo "$WORK/icon-$1.html"
 }
-shot "$(icon_page 48)" 48 48 "$WORK/favicon-48.png"
-shot "$(icon_page 180)" 180 180 "$OUT/apple-touch-icon.png"
-shot "$(icon_page 512)" 512 512 "$OUT/icon-512.png"
-sed "s|FAVICON_SRC|file://$OUT/favicon.svg|" "$SRC/og.html" > "$WORK/og.html"
-shot "$WORK/og.html" 1200 630 "$OUT/og.png"
+if [ -n "$CHROME" ]; then
+  shot "$(icon_page 48)" 48 48 "$WORK/favicon-48.png"
+  shot "$(icon_page 180)" 180 180 "$OUT/apple-touch-icon.png"
+  shot "$(icon_page 512)" 512 512 "$OUT/icon-512.png"
+  sed "s|FAVICON_SRC|file://$OUT/favicon.svg|" "$SRC/og.html" > "$WORK/og.html"
+  shot "$WORK/og.html" 1200 630 "$OUT/og.png"
+elif [ -n "$RASTER" ]; then
+  echo "no Chrome/Chromium: rasterizing with rsvg-convert (og.png is a plain card; re-run with Chrome for og.html's design)" >&2
+  raster "$OUT/favicon.svg" 48 48 "$WORK/favicon-48.png"
+  raster "$OUT/favicon.svg" 180 180 "$OUT/apple-touch-icon.png"
+  raster "$OUT/favicon.svg" 512 512 "$OUT/icon-512.png"
+  cat > "$WORK/og.svg" <<SVG
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630"><rect width="1200" height="630" fill="#0f1115"/><rect x="96" y="150" width="112" height="112" rx="24" fill="$ACCENT"/><text x="152" y="232" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="66" font-weight="800" fill="#fff">$(esc "$INITIAL")</text><text x="96" y="390" font-family="Helvetica,Arial,sans-serif" font-size="88" font-weight="800" fill="#fff">$(esc "$NAME")</text><text x="96" y="460" font-family="Helvetica,Arial,sans-serif" font-size="38" fill="#c9ced8">$(esc "$TAGLINE")</text><rect y="616" width="1200" height="14" fill="$ACCENT"/></svg>
+SVG
+  raster "$WORK/og.svg" 1200 630 "$OUT/og.png"
+else
+  DEFAULTS="$(cd "$(dirname "$0")" && pwd)/default"
+  echo "no Chrome/Chromium or rsvg-convert: copying the neutral icon set from $DEFAULTS." >&2
+  echo "favicon.svg has the app's initial; log it in docs/decisions.md and re-run render.sh where Chrome exists." >&2
+  cp "$DEFAULTS/apple-touch-icon.png" "$DEFAULTS/icon-512.png" "$DEFAULTS/og.png" "$DEFAULTS/favicon.ico" "$OUT/"
+  echo "wrote $OUT/favicon.svg; copied the neutral favicon.ico, apple-touch-icon.png, icon-512.png, og.png"
+  exit 0
+fi
 
 # favicon.ico: one 48×48 PNG in an ICO container (valid since Windows Vista; every current browser).
+# shellcheck disable=SC2059  # the format is built from hex escapes on purpose
 le32() { printf "\\x$(printf %02x $(($1 & 255)))\\x$(printf %02x $((($1 >> 8) & 255)))\\x$(printf %02x $((($1 >> 16) & 255)))\\x$(printf %02x $((($1 >> 24) & 255)))"; }
 SIZE=$(wc -c < "$WORK/favicon-48.png" | tr -d ' ')
 { printf '\x00\x00\x01\x00\x01\x00'; printf '\x30\x30\x00\x00\x01\x00\x20\x00'; le32 "$SIZE"; le32 22; cat "$WORK/favicon-48.png"; } > "$OUT/favicon.ico"

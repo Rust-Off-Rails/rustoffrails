@@ -258,7 +258,14 @@ document.addEventListener("htmx:afterSwap", (e) => void mountAll(e.target as Ele
 document.addEventListener("htmx:beforeSwap", (e) => unmountWithin(e.target as Element));
 ```
 
-- `kernel/assets.rs` reads `web/dist/.vite/manifest.json` for `src/islands/mount.tsx` (`file`, plus `css` if any) and emits one `<script type="module">`. Lazy island chunks load themselves. In dev, it emits the React refresh preamble script and `http://localhost:5173/@vite/client` + `http://localhost:5173/src/islands/mount.tsx`, exactly as in `inertia` mode.
+- `kernel/assets.rs` reads `web/dist/.vite/manifest.json` for `src/islands/mount.tsx` (`file`, plus `css` if any) and emits one `<script type="module">`. Lazy island chunks load themselves. **The same in development:** `/assets/*` serves `web/dist/assets/` and the manifest is re-read per request in development only.
+- **Development loop: `vite build --watch`, not the Vite dev server.** `bin/dev` runs `pnpm --dir web exec vite build --watch --mode development` next to Tailwind's watch, and you reload the page after an island change. Decided because:
+  - **the dev CSP stays the production CSP.** The dev server needs `http://localhost:5173` in `script-src`/`style-src`/`connect-src`, `ws://localhost:5173` and `'unsafe-inline'` styles ([security](security.md)); with islands the rest of the app is server-rendered htmx, so that loosening would cover every page to speed up one widget, and CSP bugs would only show in production;
+  - **one origin, one scheme.** `bin/dev` serves HTTPS + HTTP/2 ([realtime](realtime.md#many-tabs-stall-http11-vs-http2)); a second plain-http origin on :5173 brings mixed-content and certificate questions for no gain;
+  - **one code path.** Dev and production both read the manifest, so the path that ships is the path you test;
+  - **the cost is small:** islands are a few widgets, a rebuild takes about a second, and HMR state preservation matters little for them.
+
+  `inertia` and `spa` keep the Vite dev server: there the whole UI is JS and HMR pays for the dev-only CSP additions.
 - Islands talk to the server through JSON endpoints under `/api` (`controllers.md#json-api`).
 
 ## Gotchas agents get wrong

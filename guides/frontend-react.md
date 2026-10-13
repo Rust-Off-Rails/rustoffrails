@@ -25,7 +25,7 @@ browser ──► Rust binary (:3000)
 ```
 
 - **Production:** `routes.rs` serves `web/dist` with `ServeDir`, plus a fallback that returns `web/dist/index.html` for any `GET` not under `/api`, `/assets` or `/up` that accepts `text/html`. `/api/*` misses still 404 as JSON.
-- **Development:** Vite on `:5173` with `server.proxy` forwarding `/api`, `/up`, `/streams` (SSE), `/blobs` and `/dev` to `http://localhost:3000`. Browse `:5173`. Same origin from the browser's view, so cookies just work.
+- **Development:** Vite on `:5173` with `server.proxy` forwarding `/api`, `/up`, `/streams` (SSE), `/blobs` and `/dev` to `http://localhost:3000` (`bin/dev` runs the Rust server without TLS in `spa` mode). Browse `:5173`. Same origin from the browser's view, so cookies just work. Vite proxies over HTTP/1.1, so check many live tabs against the built app ([realtime](realtime.md#many-tabs-stall-http11-vs-http2)).
 
 ## Setup (verified with Vite 8, React 19, React Router 8, TanStack Query 5)
 

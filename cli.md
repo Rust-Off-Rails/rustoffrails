@@ -65,9 +65,10 @@ The binary embeds the `migration` crate. The Docker entrypoint (`bin/docker-entr
 ## Running the app from an agent
 
 - **Start it as a tracked background task** using your harness's mechanism (Claude Code: Bash with `run_in_background`), running `bin/dev` or `cargo run -- serve`. Don't use `nohup … &` from a tool call: the harness can reap it within minutes, and the human then gets "connection refused".
-- **Pick a free port** and set `PORT`. Check it first with `lsof -nP -iTCP:$PORT -sTCP:LISTEN`: on macOS, binding `0.0.0.0:$PORT` succeeds even when another process holds `127.0.0.1:$PORT`, and then `localhost:$PORT` silently reaches the *other* app. After starting, confirm `/up` answers from **your** process (the PID from `lsof`). In development, `APP_URL` defaults to `http://localhost:{PORT}` ([config](guides/config.md)), so email links and the CSRF origin check follow the port.
-- **Prove it's up before telling the human:** `curl -fsS localhost:$PORT/up`. Re-check after any restart.
+- **Pick a free port** and set `PORT`. Check it first with `lsof -nP -iTCP:$PORT -sTCP:LISTEN`: on macOS, binding `0.0.0.0:$PORT` succeeds even when another process holds `127.0.0.1:$PORT`, and then `localhost:$PORT` silently reaches the *other* app. After starting, confirm `/up` answers from **your** process (the PID from `lsof`). In development, `APP_URL` defaults to `https://localhost:{PORT}` with `bin/dev` (`http://` with `APP_TLS=off` or plain `cargo run -- serve`) ([config](guides/config.md)), so email links and the CSRF origin check follow the port and scheme.
+- **Prove it's up before telling the human:** `curl -fsSk https://localhost:$PORT/up` (`http://` without TLS). Re-check after any restart.
 - **Stop only what you started**, by PID or port (`lsof -ti tcp:$PORT -sTCP:LISTEN`). Never `pkill` by name, which can kill the human's own servers.
+- **Non-interactive runs (`claude -p`, `opencode run`, `codex exec`, CI): stop every server you started before your final message.** A background `bin/dev` (or `cargo watch`, Vite, Tailwind watch) keeps the session's process tree alive, so the run never exits. Last step: `lsof -ti tcp:$PORT -sTCP:LISTEN | xargs kill` for each port you used (Vite's too), then confirm with `lsof -nP -iTCP:$PORT -sTCP:LISTEN` printing nothing. In an interactive session, leave it running only if the human will use it, and say on which URL.
 - **Read emails through the mailbox JSON** (`/dev/mailbox/latest.json?to=…`), never by grepping raw `.eml` files ([mailers](guides/mailers.md)).
 
 ## Tasks (`src/tasks/`)

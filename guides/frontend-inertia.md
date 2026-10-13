@@ -213,6 +213,20 @@ TS_RS_EXPORT_DIR = { value = "web/src/types", relative = true }
 TS_RS_LARGE_INT = "number"
 ```
 
+- **When `.cargo/config.toml` can't be written** (a sandbox that blocks dotfiles, a monorepo whose root config belongs to someone else): put both settings on the types instead, and log it in `docs/decisions.md`. Checked against ts-rs 12.0.1 (`ts-rs-macros` field attributes `type`/`as`; `export_to` is relative to `./bindings` when `TS_RS_EXPORT_DIR` is unset):
+
+  ```rust
+  #[derive(Serialize, TS)]
+  #[ts(export, export_to = "../web/src/types/")]   // = web/src/types/BookJson.ts (SvelteKit: "../web/src/lib/types/")
+  pub struct BookJson {
+      #[ts(type = "number")] pub id: i64,
+      #[ts(type = "number | null")] pub cover_blob_id: Option<i64>,
+      #[ts(type = "Array<number>")] pub tag_ids: Vec<i64>,
+      pub title: String,
+  }
+  ```
+
+  Every `i64`/`u64` field of every exported type needs its override, or that one field is `bigint`. Check after each export: `grep -rn bigint web/src/types/` prints nothing.
 - **Commit `web/src/types/`.** ts-rs writes it during `cargo test`, but the Docker `web` stage and a fresh checkout run `tsc -b` before any Rust test. CI checks it's current with `git diff --exit-code web/src/types` after `cargo nextest run`.
 
 `vite.config.ts`:

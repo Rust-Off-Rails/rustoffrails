@@ -91,7 +91,7 @@ By response class (all verified by `tests/app/headers_test.rs`, in development a
 - `Secure` and `__Host-` cookies work on `http://localhost` (a secure context), so the production cookie path is testable locally.
 - The Permissions-Policy above logs no console warnings.
 
-**Development adjustments**, for Vite modes only (`APP_ENV=development`):
+**Development adjustments**, for `inertia` and `spa` only (`APP_ENV=development`; islands build with `vite build --watch` and keep the production CSP, [frontend-htmx](frontend-htmx.md#islands)):
 - add `http://localhost:5173` to `script-src`, `style-src` and `connect-src`;
 - add `ws://localhost:5173` to `connect-src`;
 - add `'unsafe-inline'` to `style-src`.
