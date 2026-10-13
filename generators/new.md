@@ -20,11 +20,11 @@ The cost is generation time, not runtime: an idle queue polls once a second, and
 
 ## 1. Create the project
 
-`$FW` is the framework you're reading: the plugin root when run through `/offrails:new`, or the path the human gave you.
+`$FW` is the framework you're reading: the plugin root when run through `/offrails:new`, `~/.offrails/current` after the one-line install, or the path the human gave you. **Vendor a release, never a moving working tree:** if `$FW` is a git checkout, export the tag matching its `VERSION` (`git -C "$FW" archive v$(head -n1 "$FW/VERSION") | tar -x -C <tmp>`, then use `<tmp>` as `$FW`). The excludes are anchored with `/`, because unanchored names also drop nested paths such as `tools/brand/`.
 
 ```sh
 cargo new <dir> --name <crate_name> && cd <dir>   # also runs git init (edition 2024); --name only if the dir differs
-rsync -a --exclude .git --exclude .claude-plugin --exclude skills --exclude hooks --exclude evals --exclude brand "$FW"/ .offrails/
+rsync -a --delete --exclude /.git --exclude /.claude-plugin --exclude /skills --exclude /hooks --exclude /evals --exclude /brand --exclude /.github "$FW"/ .offrails/
 date -u +"vendored %F" >> .offrails/VERSION    # first line stays the framework version
 ```
 

@@ -138,12 +138,13 @@ services:
         condition: service_healthy
 
   db:
-    image: postgres:18
+    image: postgres:17                 # match your production major (managed hosts commonly run 16/17); CI uses the same
     environment:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: myapp
     ports: ["127.0.0.1:${DB_PORT:-5432}:5432"]
-    volumes: ["pg:/var/lib/postgresql"]
+    volumes: ["pg:/var/lib/postgresql/data"]   # postgres:18+ moved PGDATA: mount /var/lib/postgresql instead
+    # Upgrading an app that already has a compose file: keep its existing volume name, or you orphan local data.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d myapp"]
       interval: 2s
@@ -310,7 +311,7 @@ This is the cheapest production setup, and the common one: one VPS already runs 
 
 Cloudflare injects scripts into proxied HTML on its own: **Web Analytics / RUM** (`static.cloudflareinsights.com/beacon.min.js`, auto-enabled on new free zones), Rocket Loader, Email Address Obfuscation, and Bot Fight Mode's JS detections. The strict CSP ([security](security.md)) correctly blocks them, which logs a console error and an Issues-panel entry, and that costs points in Lighthouse Best Practices. **Never loosen the CSP to fit them.** Turn them off at the zone:
 
-- Web Analytics: register the zone with auto-install off: `POST /accounts/{account}/rum/site_info {"zone_tag": "<zone>", "auto_install": false}`. If the zone already has a site, `PUT` it with `auto_install: false`. It takes a few minutes to apply at the edge.
+- Web Analytics: `auto_install: false` alone is not enough; new zones get an enabled ruleset with a catch-all rule. Register or update the site with both off: `POST /accounts/{account}/rum/site_info {"zone_tag": "<zone>", "auto_install": false}`, then `PUT /accounts/{account}/rum/site_info/{site_tag} {"zone_tag": "<zone>", "auto_install": false, "enabled": false}`. The injection stops within about a minute.
 - Rocket Loader and Email Obfuscation: `PATCH /zones/{zone}/settings/rocket_loader {"value":"off"}`, and the same for `email_obfuscation`.
 - Verify with a real browser (or `curl -A '<Chrome UA>'`, since injection skips non-browser clients): the page must load with a clean console.
 

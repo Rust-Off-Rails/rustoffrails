@@ -130,6 +130,33 @@ These live in `tests/app/security_test.rs`. Most iterate over `ROUTES`, so new r
 
 See [security](security.md#automated-enforcement). A failing scanner is a failing test: fix it, or triage it in the committed config with a reason (and, for advisories, a recheck date).
 
+**Every mounted route has a `ROUTES` row.** The access matrix only covers what `ROUTES` lists, so a route mounted without a row is silently untested. Guard it by parsing the router sources:
+
+```rust
+#[test]
+fn every_mounted_route_is_in_the_routes_table() {
+    // Every file that calls .route(...): the app router plus the kernel routers it nests.
+    let sources = [
+        include_str!("../../src/routes.rs"),
+        include_str!("../../src/controllers/dev.rs"),
+        include_str!("../../src/kernel/mailbox.rs"),
+        include_str!("../../src/kernel/jobs/web.rs"),
+    ];
+    let mounted: Vec<&str> = sources
+        .iter()
+        .flat_map(|src| src.split(".route(").skip(1))
+        .filter_map(|rest| rest.trim_start().strip_prefix('"')?.split('"').next())
+        .collect();
+    // If this fails the parser went blind (formatting changed); fix the parser, don't lower the bar.
+    assert!(mounted.len() >= 20, "parsed the routers: {mounted:?}");
+    for path in mounted {
+        assert!(ROUTES.iter().any(|r| r.1 == path), "{path} is routed but has no ROUTES row (add it with its Access)");
+    }
+}
+```
+
+Adjust `sources` to the files in your app that call `.route(`, and the threshold to roughly 80% of your route count.
+
 ## 4. Tenant isolation suite (multi-tenant apps)
 
 `tests/app/tenancy_test.rs` creates two tenants, A and B, each with one record of **every** tenant-scoped model. Acting as a user of A, it then requests every route (and every API endpoint) that takes an id, using B's ids. Every response must be 404. It also asserts that list pages and exports never contain B's data. When a model is added, add it to this test's setup; `/offrails:doctor` checks that it's there.

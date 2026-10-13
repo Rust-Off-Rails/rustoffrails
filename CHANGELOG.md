@@ -144,7 +144,7 @@ Spec: `guides/channels.md` (new), plus changes to `guides/realtime.md`. Verified
 
 1. **Every app: route table drift.**
    - *Detect:* any `.route("…")` path in `src/routes.rs` without a `ROUTES` row.
-   - *Converge:* add the rows with their real `Access` (check each handler's extractor). Then add the `every_mounted_route_is_in_the_routes_table` test from `guides/channels.md`'s reference (`tests/app/security_test.rs`), and run the security suite, which may now fail on routes it never covered. Fix those routes, not the test.
+   - *Converge:* add the rows with their real `Access` (check each handler's extractor). Then add the `every_mounted_route_is_in_the_routes_table` test from `guides/test-standards.md` §3 (`tests/app/security_test.rs`), and run the security suite, which may now fail on routes it never covered. Fix those routes, not the test.
 2. **Apps with SSE channels: faster signals.**
    - *Detect:* `kernel/pubsub.rs` without `pg_notify` / `WAKE`.
    - *Converge:* add the `NOTIFY` (Postgres) and `WAKE` (SQLite) calls in `broadcast`, `start_with`, and the dedicated listener task, per realtime.md's kernel spec.
