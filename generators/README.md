@@ -4,6 +4,7 @@ A generator here is a recipe you execute: a list of files to create and edit, in
 
 | Rails command | Recipe | Produces |
 |---------------|--------|----------|
+| `rails app:update` | [upgrade.md](upgrade.md) | Re-vendors `.offrails/` to a newer release and migrates the app (reconcile, never re-create) |
 | `rails new` | [new.md](new.md) | The app skeleton, kernel, CI, Dockerfile, smoke tests |
 | `rails g authentication` | [authentication.md](authentication.md) | Users, sessions, login/logout, password reset, (sign-up) |
 | `rails g scaffold` | [scaffold.md](scaffold.md) | Migration, model, controller, routes, views/pages, tests |
