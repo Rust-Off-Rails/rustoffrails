@@ -246,7 +246,9 @@ else
   mkdir -p "$TMPD/x"
   tar -xzf "$TMPD/$ASSET" -C "$TMPD/x" || die "could not unpack $ASSET"
   top=$(find "$TMPD/x" -mindepth 1 -maxdepth 1 -type d | head -n1)
-  [ -f "$top/VERSION" ] && [ -f "$top/AGENTS.md" ] || die "$ASSET doesn't look like a Rust off Rails release"
+  if [ ! -f "$top/VERSION" ] || [ ! -f "$top/AGENTS.md" ]; then
+    die "$ASSET doesn't look like a Rust off Rails release"
+  fi
   VERSION_INSTALLED=$(head -n1 "$top/VERSION")
   dest="$OFFRAILS_HOME/$VERSION_INSTALLED"
   mkdir -p "$OFFRAILS_HOME"
