@@ -36,7 +36,7 @@ We take the best ideas of two great ecosystems and bring them together in one st
 
 | Rails gave you…                     | Rust off Rails gives your agent…                     |
 |------------------------------------|------------------------------------------------------|
-| A gem with 300k lines of Ruby      | ~30 Markdown files                                   |
+| A gem with 300k lines of Ruby      | ~50 Markdown files                                   |
 | `rails generate scaffold`          | `generators/scaffold.md`: a recipe the agent runs    |
 | Convention over configuration      | Convention over *deliberation*: the agent never debates which crate to use |
 | "Optimized for programmer happiness" | Optimized for agent correctness: compiler-checked everything |

@@ -5,6 +5,7 @@ Each entry lists convention changes and what an existing app must do about them.
 ## Unreleased
 
 - **Parallel helpers only after the skeleton compiles** ([workflow](workflow.md#parallel-helpers-subagents)). A real migration (Fizzy → Rust off Rails, run in opencode) had three helpers writing the jobs executor, the jobs dashboard and the dev mailbox into one uncompiled crate at once. Each tripped over the others' half-written files, and two built stub crates in `/tmp` just to type-check their own part. Now: the coordinator builds the skeleton alone, up to the first green `cargo check` and the baseline commit. After that it runs at most one helper per vertical slice, with each helper's files listed. Shared registries (`routes.rs`, `mod.rs` files, `migration/src/lib.rs`, `Cargo.toml`) stay with the coordinator, and a helper blocked by another's file stops and reports. **App migration:** docs only. *Detect:* the app's `AGENTS.md` or any decision line telling agents to fan out helpers on code before the tree compiles. *Converge:* drop it and follow the workflow rule.
+- **README: "~50 Markdown files"**, not ~30 (27 guides, 15 root docs, 8 generators, 4 blueprints). **App migration:** none.
 
 ## 0.6.1 (2026-10-13)
 
