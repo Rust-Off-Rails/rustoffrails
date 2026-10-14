@@ -6,7 +6,7 @@ in_offrails_app || exit 0
 
 cmd="$(json_get .tool_input.command)"
 if printf '%s' "$cmd" | grep -qE '(^|[;&|[:space:]])(pkill|killall)([[:space:]]|$)'; then
-  echo "Blocked: never kill processes by name or pattern (pkill/killall); it can kill other sessions' servers. Kill the PID you captured at launch, or by your own port: lsof -ti tcp:\$PORT -sTCP:LISTEN | xargs kill (cli.md, 'Running the app from an agent')." >&2
+  echo "Blocked: never kill processes by name or pattern (pkill/killall); it can kill other sessions' servers. Stop the PID file you started: kill \"\$(cat storage/pids/dev-\$PORT.pid)\" for bin/dev (it stops its whole tree), storage/pids/serve-\$PORT.pid for a plain serve (cli.md, 'Running the app from an agent')." >&2
   exit 2
 fi
 exit 0

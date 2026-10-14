@@ -82,15 +82,36 @@ The fallback message says: no locally trusted certificate, so plain HTTP/1.1 at 
 
 ### The `bin/dev` script
 
-htmx mode (islands add `pnpm --dir web exec vite build --watch --mode development &`; `inertia` adds Vite; `spa` serves the Rust app over http behind Vite's proxy). Copy it; verified in the reference app in all three certificate situations:
+htmx mode (islands add `pnpm --dir web exec vite build --watch --mode development &`; `inertia` adds Vite; `spa` serves the Rust app over http behind Vite's proxy). Copy it; verified in the reference app in all three certificate situations. The PID file and process-tree stop were verified on macOS with a mock tree started from a non-interactive shell (the caller survives, every descendant and the PID file are gone, a second start refuses); `--watch=always --minify` with Tailwind 4.3.3 (a rebuild after a template edit stays minified):
 
 ```bash
 #!/usr/bin/env bash
 # Everything for development in one terminal: server (rebuilt on change) + Tailwind watcher.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-trap 'kill 0' EXIT
 port="${PORT:-3000}"
+
+# One PID file per server: stop exactly this bin/dev with `kill "$(cat storage/pids/dev-$PORT.pid)"`.
+pidfile="storage/pids/dev-$port.pid"
+mkdir -p storage/pids
+if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+  echo "bin/dev is already running on port $port (PID $(cat "$pidfile")). Stop it: kill \$(cat $pidfile)" >&2
+  exit 1
+fi
+if command -v lsof >/dev/null && lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null; then
+  echo "port $port is taken by another process (lsof -nP -iTCP:$port -sTCP:LISTEN); pick another: PORT=… bin/dev" >&2
+  exit 1
+fi
+echo $$ > "$pidfile"
+# On exit (Ctrl-C, `kill <pid>`, an error) stop our own process tree, leaves first, and nothing else.
+# Never `kill 0`: started from an agent's shell, bin/dev shares that shell's process group, and
+# `kill 0` would kill the caller too.
+children() { ps -A -o pid= -o ppid= | awk -v p="$1" '$2 == p { print $1 }'; }
+stop_tree() { local c; for c in $(children "$1"); do stop_tree "$c"; done; kill "$1" 2>/dev/null || true; }
+cleanup() { trap - EXIT INT TERM; rm -f "$pidfile"; for c in $(children $$); do stop_tree "$c"; done; }
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # HTTPS + HTTP/2 only with a locally trusted certificate (bin/dev-cert: mkcert + `mkcert -install`).
 # Without one, plain HTTP/1.1: login works, live pages stall past ~6 tabs. APP_TLS=off forces http.
@@ -123,7 +144,9 @@ echo "Compiling and migrating (the first build takes several minutes)…"
 cargo run -q -- db migrate
 
 # Rebuild CSS on every template change, so a new class is never missing from static/app.css.
-bin/tailwindcss -i assets/app.css -o static/app.css --watch=always &
+# --minify as in the production build: without it the watcher overwrites a minified file with an
+# unminified one, and any check of the built CSS sees a different file in development.
+bin/tailwindcss -i assets/app.css -o static/app.css --watch=always --minify &
 # Migrate on every rebuild too, so a new migration never meets a stale database.
 cargo watch -q -w src -w templates -w migration -x 'run -q -- db migrate' -x 'run -- serve' &
 
@@ -157,7 +180,7 @@ wait
 Templates are compiled (Askama), so "hot reload" is the boring loop, all inside `bin/dev`:
 
 1. **Rust and templates:** `cargo watch -w src -w templates -w migration` rebuilds, migrates and restarts `serve`.
-2. **CSS:** `bin/tailwindcss -i assets/app.css -o static/app.css --watch=always` rewrites the CSS when a template or `assets/app.css` changes. In development the asset catalog rescans per request, so the next page gets the new digest.
+2. **CSS:** `bin/tailwindcss -i assets/app.css -o static/app.css --watch=always --minify` rewrites the CSS when a template or `assets/app.css` changes. In development the asset catalog rescans per request, so the next page gets the new digest.
 3. **The browser:** the layout loads `static/dev-reload.js` when `ctx.dev`. It polls `GET /dev/reload` once a second while the tab is visible and calls `location.reload()` when `version` changes: a new `BOOT_ID` (the server restarted) or a newer file under `static/` (`version` is `BOOT_ID:<newest mtime>:<file count>`; mtimes, not digests, because every open tab asks once a second). While the server is down mid-rebuild, the fetch fails and it keeps polling.
 
 Why a poll and not the signal stream or a socket: on the plain-HTTP fallback every held connection costs one of the ~6 per origin, and a reload stream in every tab would halve the tabs a live page survives. One short request a second costs nothing. Measured in the reference app: a CSS-only edit reached an open tab in 0.6 s; a template edit in about 17 s, of which ~9 s is the incremental build inside the watcher (Tailwind rebuilding alongside), ~1.7 s startup, up to 1 s the poll, the rest the page load.
@@ -251,11 +274,12 @@ pub async fn run(State(s): State<AppState>, Form(f): Form<RunForm>) -> Result<Re
 **Nothing in `serve` may read an app table before the listener is up.** The guard renders from the kernel layout and `seaql_migrations` alone; everything else that touches app tables at boot (realtime's pub/sub and cluster, the inline worker, a cache warm-up) waits for `pending()` to be empty ([realtime](realtime.md#kernel-spec-srckernelpubsubrs)). **Fresh-database smoke**, after any change to `serve` or to what starts at boot (`bin/dev` migrates first, so it never shows this):
 
 ```sh
-rm -f storage/fresh.sqlite3 && PORT=4321 DATABASE_URL='sqlite://storage/fresh.sqlite3?mode=rwc' cargo run -q -- serve & sleep 5
+mkdir -p storage/pids && rm -f storage/fresh.sqlite3
+PORT=4321 DATABASE_URL='sqlite://storage/fresh.sqlite3?mode=rwc' sh -c 'echo $$ > storage/pids/serve-4321.pid; exec cargo run -q -- serve' & sleep 5
 curl -s -o /dev/null -w '%{http_code}\n' http://localhost:4321/          # 503: the pending-migrations page, not a crash
 curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Sec-Fetch-Site: same-origin' -d return_to=/ http://localhost:4321/dev/migrations   # 303
 sleep 6; curl -s -o /dev/null -w '%{http_code}\n' http://localhost:4321/up   # 200; the log says "migrations applied; realtime starting"
-lsof -ti tcp:4321 -sTCP:LISTEN | xargs kill; rm -f storage/fresh.sqlite3*
+kill "$(cat storage/pids/serve-4321.pid)"; rm -f storage/pids/serve-4321.pid storage/fresh.sqlite3*
 ```
 
 `bin/dev` runs `cargo run -- db migrate` before serving, and again on every rebuild (`cargo watch -x 'run -q -- db migrate' -x 'run -- serve'`), so the page is mostly seen after a `git pull` with the server stopped, or after a rollback. Tests (`kernel_web_test.rs`): a fully rolled-back dev DB shows the page (with the migration names, the button and `return_to`), `/up` is 503, the kernel stylesheet still loads, the button applies all and redirects back with the flash, no open redirect; production with one pending: `/up` 503, `/` unaffected, `/dev/migrations` 404.

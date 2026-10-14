@@ -40,6 +40,7 @@ b() { printf '{"tool_input":{"command":"%s"}}' "$1"; }
 check 2 guard-bash.sh "$(b 'pkill -f myapp')"                      "pkill is blocked"
 check 2 guard-bash.sh "$(b 'cd x && killall myapp')"               "killall is blocked"
 check 0 guard-bash.sh "$(b 'lsof -ti tcp:3000 -sTCP:LISTEN | xargs kill')" "kill by listener port is allowed"
+check 0 guard-bash.sh "$(b 'kill $(cat storage/pids/dev-3000.pid)')" "kill by PID file is allowed"
 
 check 0 stop-gate.sh '{"stop_hook_active":true}'                   "stop gate never loops"
 out=$(printf '{}' | CLAUDE_PROJECT_DIR="$APP" bash "$H/session-start.sh"); case "$out" in *"Rust off Rails app"*) echo "ok   session start orients the agent";; *) echo "FAIL session start"; fail=1;; esac
