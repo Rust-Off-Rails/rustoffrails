@@ -94,6 +94,7 @@ impl PubSub {
     pub fn subscribe(&self, stream: &str) -> broadcast::Receiver<Signal>;         // this stream only
     pub fn subscribe_prefix(&self, prefix: &str) -> broadcast::Receiver<Signal>;  // kernel watchers only ("member:")
     pub fn topic_count(&self) -> usize;                         // live per-stream senders: tests, /dev introspection
+    pub fn streams(&self) -> Vec<(String, usize)>;              // each live stream and its receiver_count(): /dev/introspect.json
     pub fn version(&self, stream: &str) -> u64;                 // the stream's entry version, else `observed`: the
                                                                 //   cache key for shared renders (never 0-reset)
     pub fn closed(&self) -> impl Future<Output = ()> + Send + use<>;   // resolves on shutdown

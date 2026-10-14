@@ -32,7 +32,7 @@ In development the app serves a toolbox at `/dev`. It's for the human clicking a
 
 ```
 src/controllers/dev.rs          router(): /dev, /dev/routes, /dev/system, /dev/sockets (with channels), /dev/introspect.json, /dev/reload, /dev/mailers (redirect), POST /dev/jobs/test, POST /dev/migrations
-src/kernel/introspect.rs        snapshot(state, frontend_mode, live), BOOT_ID, reload_version(state)
+src/kernel/introspect.rs        snapshot(state, frontend_mode, live), BOOT_ID, reload_version() (the full file is below)
 src/kernel/css.rs               class_lists, missing_classes (template classes with no rule in static/app.css), css_escape, has_selector
 static/dev-reload.js            the reload poll (htmx mode; TS modes use Vite's own reload: islands rebuild with --watch and the poll sees the new digest)
 src/controllers/migrations.rs   pending(), the development guard middleware, the Run button handler
@@ -234,17 +234,194 @@ One way for an agent to ask the running app about its state, instead of grepping
 | `assets` | the layout's digested asset URLs |
 | `css` | `built`, `stale`, and up to 50 `missing_classes` (template classes with no rule in `static/app.css`, from `kernel::css::missing_classes`) |
 
+The whole file. Copy it, then change only the lines marked `// APP:`. It's the reference implementation an upgrading app wrote from this spec (axum 0.8.9, sea-orm 2.0.4, 2026-10-13), with the app-specific lines generalized:
+
 ```rust
-// src/kernel/introspect.rs (shape; the reference app's is ~90 lines)
+//! Ask the running app, don't guess (.offrails/guides/dev-tools.md#introspection): the snapshot behind
+//! `GET /dev/introspect.json` and `app introspect`, and the version `GET /dev/reload` hands to
+//! `static/dev-reload.js`. Development only: the routes live in `controllers::dev::router()`, which
+//! production and test never mount, and `app introspect` refuses outside development.
+
+use std::fs;
+use std::path::Path;
+use std::sync::LazyLock;
+use std::time::SystemTime;
+
+use migration::{MigrationStatus, Migrator, MigratorTrait}; // migration/src/lib.rs: `pub use sea_orm_migration::MigrationStatus;`
+use serde_json::{Map, Value, json};
+
+use crate::kernel::ui::BOOTED_AT;
+use crate::kernel::{css, jobs::admin};
+use crate::routes::ROUTES;
+use crate::state::AppState;
+
+/// One id per process: a restart changes it, so open tabs reload.
 pub static BOOT_ID: LazyLock<String> =
     LazyLock::new(|| format!("{}-{}", std::process::id(), BOOTED_AT.timestamp_micros()));
-pub fn reload_version() -> String; // BOOT_ID + ":" + newest mtime under static/ + ":" + file count
-pub async fn snapshot(state: &AppState, frontend_mode: &str, live: bool) -> anyhow::Result<serde_json::Value>;
+
+/// The most missing classes listed (the count is always exact).
+const MAX_MISSING: usize = 50;
+
+/// `BOOT_ID:<newest mtime under static/ in ms>:<file count>`. Mtimes, not digests: every open tab
+/// asks once a second.
+pub fn reload_version() -> String {
+    let (mut newest, mut count) = (0u128, 0usize);
+    walk(Path::new("static"), &mut newest, &mut count);
+    format!("{}:{newest}:{count}", *BOOT_ID)
+}
+
+fn walk(dir: &Path, newest: &mut u128, count: &mut usize) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            walk(&path, newest, count);
+        } else if let Ok(modified) = entry.metadata().and_then(|m| m.modified()) {
+            *count += 1;
+            let ms = modified.duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+            *newest = (*newest).max(ms);
+        }
+    }
+}
+
+/// The app's state as JSON. `live` (the HTTP handler) adds what only a serving process knows.
+pub async fn snapshot(state: &AppState, frontend_mode: &str, live: bool) -> anyhow::Result<Value> {
+    let c = &state.config;
+    let tls = c.tls.is_some();
+    let migrations = Migrator::get_migration_with_status(&state.db).await?;
+    let applied = migrations.iter().filter(|m| matches!(m.status(), MigrationStatus::Applied)).count();
+    let pending: Vec<String> = migrations
+        .iter()
+        .filter(|m| matches!(m.status(), MigrationStatus::Pending))
+        .map(|m| m.name().to_owned())
+        .collect();
+    // null while the jobs table doesn't exist yet (a fresh database before `db migrate`).
+    let jobs = match admin::stats(&state.db).await {
+        Ok(s) => json!({
+            "by_state": s.by_state.iter().map(|(st, n)| (state_name(st), json!(n))).collect::<Map<_, _>>(),
+            "by_queue": s.by_queue.iter().map(|(q, counts)| {
+                (q.clone(), Value::Object(counts.iter().map(|(st, n)| (state_name(st), json!(n))).collect()))
+            }).collect::<Map<_, _>>(),
+        }),
+        Err(_) => Value::Null,
+    };
+    let css = match css::missing_classes() {
+        None => json!({ "built": false, "stale": false, "missing_count": 0, "missing_classes": [] }),
+        Some(missing) => json!({
+            "built": true,
+            "stale": !missing.is_empty(),
+            "missing_count": missing.len(),
+            "missing_classes": missing.iter().take(MAX_MISSING).collect::<Vec<_>>(),
+        }),
+    };
+    let assets = state.assets.assets();
+    Ok(json!({
+        "app": {
+            "name": crate::config::APP_NAME,
+            "version": env!("CARGO_PKG_VERSION"),
+            "framework": fs::read_to_string(".offrails/VERSION").ok().and_then(|v| v.lines().next().map(str::to_owned)),
+            "frontend_mode": frontend_mode,
+            "env": format!("{:?}", c.env).to_lowercase(),
+            "boot_id": *BOOT_ID,
+            "booted_at": BOOTED_AT.to_rfc3339(),
+        },
+        "url": {
+            "app_url": c.app_url,
+            "tls": tls,
+            "dev_http_port": c.dev_http_port,
+            "protocol": if tls { "h2" } else { "http/1.1" },
+            "note": if tls {
+                "HTTPS with ALPN h2 (a locally trusted certificate)"
+            } else {
+                "plain HTTP/1.1: browsers hold ~6 connections per origin, so live pages stall past ~6 tabs"
+            },
+        },
+        "config": format!("{c:?}"), // Config's hand-written Debug redacts credentials (config.md)
+        "routes": ROUTES.iter().map(|(method, path, handler, access)| json!({
+            "method": method, "path": path, "handler": handler, "access": format!("{access:?}"),
+        })).collect::<Vec<_>>(),
+        "migrations": { "applied": applied, "pending": pending, "current": pending.is_empty() },
+        "jobs": jobs,
+        "realtime": if live { realtime(state) } else { Value::Null },
+        "live": live,
+        "assets": { "css": assets.css, "app_js": assets.app_js, "htmx": assets.htmx, "htmx_sse": assets.htmx_sse },
+        "css": css,
+    }))
+}
+
+fn state_name(st: &impl std::fmt::Debug) -> String {
+    format!("{st:?}").to_lowercase()
+}
+
+/// APP: what only the serving process knows about live connections. No realtime: `Value::Null`.
+fn realtime(state: &AppState) -> Value {
+    json!({
+        // pubsub.streams(): (stream, receiver count) per live per-stream sender (realtime.md)
+        "streams": state.pubsub.streams().into_iter().map(|(s, n)| json!({ "stream": s, "subscribers": n })).collect::<Vec<_>>(),
+        "topic_count": state.pubsub.topic_count(),
+        // with channels: the /dev/sockets snapshot (connections per member and transport, topics, presence,
+        // frame counters, nodes). `Snapshot` derives Serialize.
+        // "channels": serde_json::to_value(state.hub.snapshot()).unwrap_or(Value::Null),
+        // with SSE presence: the label per room
+        // "presence": state.presence.labels(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reload_version_starts_with_the_boot_id() {
+        let v = reload_version();
+        assert!(v.starts_with(&format!("{}:", *BOOT_ID)), "{v}");
+        assert_eq!(v.split(':').count(), 3, "{v}");
+    }
+}
 ```
+
+The handlers (`controllers/dev.rs`, both in `router()` and in `ROUTES` with `Access::Dev`) and the CLI arm:
+
+```rust
+/// `GET /dev/introspect.json`: the app's state for agents.
+pub async fn introspect(State(s): State<AppState>) -> Result<Response, AppError> {
+    Ok(Json(kernel::introspect::snapshot(&s, FRONTEND_MODE, true).await?).into_response())
+}
+
+/// `GET /dev/reload`: polled once a second by `static/dev-reload.js`.
+pub async fn reload() -> Response {
+    Json(serde_json::json!({ "version": kernel::introspect::reload_version() })).into_response()
+}
+
+// main.rs, `Command::Introspect` (needs the database, not the listener):
+anyhow::ensure!(config.is_development(), "app introspect is development only (APP_ENV is {:?})", config.env);
+let state = AppState::new(config, db)?;
+println!("{}", serde_json::to_string_pretty(&kernel::introspect::snapshot(&state, controllers::dev::FRONTEND_MODE, false).await?)?);
+```
+
+The router's `.layer(kernel::ui::no_store())` already covers both responses. Apps without the jobs kernel drop `jobs` (and its import); `api` mode has no `css` or `assets` (drop both keys and the `css` import). Add `pub fn streams(&self) -> Vec<(String, usize)>` to `PubSub` (under the map lock: each stream and its `receiver_count()`) when the app has signals.
 
 Tests (`kernel_web_test.rs`): in development it answers JSON with every key above, lists itself in `routes`, and contains none of a configured admin password or SMTP credentials; with a production **and** a test `Config`, `/dev/introspect.json` and `/dev/reload` are 404 and pages don't load `dev-reload.js`. Add both paths to `ROUTES` with `Access::Dev`.
 
-**The development CSS banner** uses the same check: `Ctx.css_warning` is `app_css_problem()` (missing or empty) or else "static/app.css is stale: N template class(es) have no CSS rule (first: …)". An mtime check can't do this: Tailwind 4 doesn't rewrite unchanged output.
+**The development CSS banner** uses the same check. Every UI app has one: if `Ctx` has no `css_warning` field yet, add it (`Option<String>`, set by the `Ctx` extractor only when `config.is_development()`, rendered as the first plain-text line in `<main>`; [frontend-htmx](frontend-htmx.md#assets--cache-busting-kernelassetsrs)). An mtime check can't do this: Tailwind 4 doesn't rewrite unchanged output.
+
+```rust
+// src/kernel/css.rs (next to missing_classes)
+/// The development CSS banner: the CSS is missing, or stale (template classes with no rule).
+pub fn css_warning() -> Option<String> {
+    if let Some(problem) = crate::kernel::assets::app_css_problem() {
+        return Some(problem);
+    }
+    let missing = missing_classes()?;
+    let first = missing.first()?;
+    Some(format!(
+        "{CSS_BUILT} is stale: {} template class(es) have no CSS rule (first: {first}). bin/dev rebuilds it.",
+        missing.len()
+    ))
+}
+// the Ctx extractor:
+css_warning: if s.config.is_development() { crate::kernel::css::css_warning() } else { None },
+```
 
 ## No `confirm()` dialogs in kernel pages
 
@@ -298,7 +475,7 @@ HTTP tests can't see boosted navigation, `<head>` swaps, the back/forward cache 
 
    It goes app page → "Dev tools" link (styled?) → seeds 3 mails with the **Send a test email** button → opens one (styled, sandboxed iframe) → **Clear all** → Back (no resurrected rows) → Forward → **Enqueue a test job** → opens and deletes it → Back (redirected to the list, flash shown), and fails on any CSP violation. Every step waits with `waitForNavigation`/`waitForSelector`, with no fixed sleeps, and seeds only through the dev-only buttons, so it needs no app routes.
 
-3. **Multi-tab live updates** (any app with live pages): open N tabs in one profile on a live page, change something once, and assert every tab updates. It catches the HTTP/1.1 connection pool and an undersized per-user cap ([realtime](realtime.md#many-tabs-stall-http11-vs-http2)). The app supplies a small scenario module (`path`, `login`, `mutate`, `seen`); the reference app's is `tests/e2e/live-tabs.scenario.mjs`:
+3. **Multi-tab live updates** (any app with live pages): open N tabs in one profile on a live page, change something once, and assert every tab updates. It catches the HTTP/1.1 connection pool and an undersized per-user cap ([realtime](realtime.md#many-tabs-stall-http11-vs-http2)). The app supplies a small scenario module, `tests/e2e/live-tabs.scenario.mjs`: `export const path` (the live page), optional `login(page, base)`, `mutate(page, base)` returning a token, and `seen(page, token)` returning whether a tab shows it (the full contract is the header of `.offrails/tools/browser-smoke/smoke-live-tabs.mjs`):
 
    ```sh
    SCENARIO=tests/e2e/live-tabs.scenario.mjs BASE=https://localhost:3000 TABS=12 \
