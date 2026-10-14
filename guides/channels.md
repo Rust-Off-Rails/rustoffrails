@@ -244,6 +244,21 @@ pub async fn relay_post<S: Channels>(s: S, headers: &HeaderMap, member: Option<M
 pub fn session_ended<S: Channels>(s: S, member: Member) -> impl Future<Output = ()> + Send;   // shared by every transport
 ```
 
+**Per-socket buffers: set them in `upgrade`.** axum's `WebSocketUpgrade` defaults to a 128 KiB read buffer and a 128 KiB write buffer per socket, sized for throughput, not for ten thousand idle board watchers. offrails.v1 frames are ≤ 4 KiB, so:
+
+```rust
+// kernel/channels.rs, upgrade(): verified against axum 0.8.9's WebSocketUpgrade
+ws.protocols([PROTOCOL])
+    .read_buffer_size(4 * 1024)          // frames are ≤ 4 KiB (max_frame)
+    .write_buffer_size(0)                // write each frame straight through; no per-socket staging copy
+    .max_write_buffer_size(256 * 1024)   // backpressure cap when writes fail; the default is unlimited
+    .max_message_size(cfg.max_frame)
+    .max_frame_size(cfg.max_frame)
+    .on_upgrade(move |socket| run(s, socket, member))
+```
+
+Measured by a peer at **10,000 sockets** on one box (a Kanban, release build): server memory **1.37 GB → 160–225 MB**, failed handshakes **17 → 0**, fan-out p50 **320–590 ms → 58–88 ms**. Slow consumers are still handled by `TOPIC_BUFFER` and `slow`/`too_slow`, not by the socket's write buffer.
+
 All three transports drive the same `Session`, so joins, authorization, limits, resume and revocation are identical everywhere. Per WebSocket, one task `select!`s over: incoming frames, the joined topics' receivers, the ping timer, the idle check, the revalidation timer, the member's revocation signal, and `hub.closed()`.
 
 | Situation | What happens |
@@ -362,6 +377,39 @@ addEventListener("offrails:revoked", () => (location.href = "/session/new"));  /
   - start rooms on `DOMContentLoaded` and `htmx:load`;
   - on `htmx:beforeSwap` with `detail.boosted`, leave the page's channels, so presence updates for everyone else when you navigate away;
   - put **`hx-boost="false"` on any form the socket sends**: a boosted form submit also navigates (to `?body=…`), which the browser check caught.
+
+## Live boards over a channel (snapshot, patches, reducer)
+
+For a page whose whole state many people watch (a Kanban board, a seating plan), the channel carries the state itself instead of "re-fetch" signals, so a change costs one small frame per watcher and **no re-fetch**. Measured by a peer: **10,000 watchers** on one board, delivery p50 **58–88 ms**, zero re-fetches (with the buffer settings above).
+
+1. **The join's `ok.data` is the starting point.** Joined **without** `since` (a fresh page): `data` is the full JSON snapshot plus the `seq` it reflects (`{"seq": 812, "board": {…}}`), read in one query, after subscribing (the join rule above). Joined **with** `since` (a reconnect): `data` holds only the current `seq`, followed by `replay` patches after `since`; `gap: true` (more missed than the room keeps) means the client discards its state and rejoins without `since` to get a snapshot.
+2. **Patches carry final state, not deltas.** A move is `{"event":"card_moved","seq":813,"data":{"card":7,"column":3,"order":[5,7,9]}}`: the column's **whole final order**, never "insert at index 2". The client applies every patch through **one pure reducer**, `(state, patch) → state`, which ignores any patch with `seq ≤ state.seq` and sets fields to the patch's values. It's idempotent: a replayed or duplicated patch changes nothing, and replay/live overlap is harmless. Unit-test the reducer alone (Vitest in TS modes, or a small `node --test` file): applying a patch twice equals once; an old `seq` is ignored; a move then the snapshot it produced give the same state.
+3. **Actions stay HTTP POSTs.** Creating, moving and editing go through the normal routes (authorization, CSRF, validation, the same `Errors` as forms), never `push` on the socket. The client applies its own change **optimistically** through the same reducer, and the channel's patch, which every watcher including the actor receives, **confirms** it: the server's final order wins. A failed POST rolls back by re-applying the last confirmed state.
+4. **While the socket is down, poll a JSON snapshot.** The client keeps showing its state, marks it stale, and polls `GET /boards/{id}.json` (the same snapshot as `ok.data`, same authorization) every few seconds until the socket reconnects; then it rejoins with its `since`. The page never goes silently stale and never reloads.
+
+The room (`src/channels/board_room.rs`) writes the change in the POST's transaction (rows plus an event row whose id is the `seq`), and the forwarder below turns committed event rows into patches. Server tests: a join without `since` returns the snapshot and its `seq`; with `since`, exactly the patches after it, in order; a move's patch carries the whole final order; a reader without access gets no patches (authorization at join, as for every topic).
+
+## Feeding a topic from rows (forwarders)
+
+When events are written by HTTP handlers or another process (an outbox, `board_events`, chat rows posted over HTTP), a **forwarder** task turns new rows into `Hub::broadcast` frames. If it reads with a **look-back window** (rows of the last few seconds, or the last K ids, because a Postgres sequence can commit a lower id after a higher one) and skips what it already sent with an in-memory `forwarded` set, that set starts **empty at boot**, so the first poll after a restart forwards the whole window again: every client gets old events a second time, and a list reducer without the `seq` check reorders on them. A peer's Kanban, its board events and its chat all did this.
+
+**Seed `forwarded` from the window at start**, before the first poll: read the ids of every row inside the window and mark them sent without sending them. Anything committed after that read isn't in the set, so it's still forwarded.
+
+```rust
+pub struct Forwarder { db: DatabaseConnection, window: chrono::Duration, forwarded: HashSet<i64> }
+
+impl Forwarder {
+    /// Marks every row already inside the window as forwarded: a restart replays nothing.
+    pub async fn start(db: DatabaseConnection, window: chrono::Duration, now: DateTimeUtc) -> Result<Self, DbErr> {
+        let forwarded = board_event::ids_since(&db, now - window).await?.into_iter().collect();
+        Ok(Self { db, window, forwarded })
+    }
+    /// Sends each row in the window not sent yet, oldest first; forgets ids that left the window.
+    pub async fn poll_once(&mut self, hub: &Hub<AppRoom>, now: DateTimeUtc) -> Result<usize, DbErr>;
+}
+```
+
+Test (`kernel_channels_test.rs` or the room's test file): insert 3 events, `Forwarder::start` (a restart), insert a 4th, `poll_once`: a subscriber receives **exactly the 4th**. A second `poll_once` sends nothing. Pass `now` in; never sleep. The pub/sub poller doesn't have this bug: it `seek_to_end`s at start and reads `id > last_seen` ([realtime](realtime.md#kernel-spec-srckernelpubsubrs)).
 
 ## Presence over SSE (no WebSocket)
 
@@ -486,7 +534,7 @@ impl Hub<R> {
 | SSE signal latency, SQLite, before (250ms poll) → after (in-process wake) | **238 ms → 0.24 ms** |
 | SSE signal latency, Postgres, before → after (`NOTIFY`) | **238 ms → 2.1 ms** |
 
-A peer's load test on 0.6.0 (one box, signal streams): **5,000 SSE watchers held, 154 MB RSS, fan-out p50 ≈ 40 ms**; the database and page rendering, not open streams, were the bottleneck ([realtime](realtime.md#measured-capacity)).
+A peer's load test on 0.6.1 (one box, WebSocket channels, a board as snapshot + patches): **10,000 sockets**, 160–225 MB, 0 failed handshakes, delivery p50 58–88 ms, after the [buffer settings](#the-connection-kernelchannelsrs) (1.37 GB and 17 failed handshakes before). **At 128 connections per user, 10,000 sockets need at least 79 users**: with fewer, the excess is refused (`bye` `limit`, 1008) and shows up as "closed" in a load generator. A peer's load test on 0.6.0 (one box, signal streams): **5,000 SSE watchers held, 154 MB RSS, fan-out p50 ≈ 40 ms**; the database and page rendering, not open streams, were the bottleneck ([realtime](realtime.md#measured-capacity)).
 
 Run them with `cargo nextest run --run-ignored only -E 'test(bench_)' --no-capture` (and with `TEST_DATABASE_URL` for Postgres).
 
@@ -544,6 +592,8 @@ Real browser (`tests/e2e/realtime.spec.ts`, Playwright; the spec starts and stop
 - **Raw `PgListener::recv()` inside a `select!` with other branches.** If another branch wins, the `recv` future is dropped mid-read. Give the listener its own task and forward over a channel ([realtime.md](realtime.md)).
 - **No `hx-boost="false"`** on the socket's form (see the JS client section).
 - **Treating an `EventSource` reopen as the same connection** on the SSE transport: a reopen is a *new* server session with no joins. Close it and reconnect through the client, which rejoins.
+- **A forwarder whose `forwarded` set starts empty** with a look-back window: the first poll after a restart re-sends the window. Seed it at start ([forwarders](#feeding-a-topic-from-rows-forwarders)).
+- **Board patches as deltas** ("insert at index 2") or a reducer without the `seq` check: replays and duplicates reorder lists. Send the final order; reduce idempotently.
 - **Relay ids without a token**, or a token compared with `==` on secret material: bind relays to member + token, compare in constant time.
 - **`Result<_, Response>` in kernel helpers:** clippy's `result_large_err`; return a `StatusCode` and convert at the edge.
 

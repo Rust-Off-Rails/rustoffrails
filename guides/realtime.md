@@ -518,6 +518,7 @@ A load generator for live pages, to measure before raising a limit or adding cac
 **Lessons baked in:**
 
 - **Pick the target explicitly** (`STREAM`, `PAGE`, the user). Never "the first board in the list": that silently measured a different, smaller board.
+- **The per-user connection cap is 128** (channels and streams, per node). N connections need at least ⌈N/128⌉ users (10,000 → 79); with fewer, the excess is refused (429 on streams, `bye` `limit` + 1008 on sockets). The generator spreads connections over its users and, when any are refused or closed, **prints the cap as the reason** ("closed: 1,240, refused by the per-user cap (128 × 70 users = 8,960)") instead of a bare "closed" count that looks like a server failure.
 - **One Node process tops out at about 5,000 TLS + h2 streams.** Beyond that, shard across processes (`--shard i/n`) and merge the reports.
 - **Never `--ignore-certificate-errors` or `rejectUnauthorized: false` on a login check.** Trust the dev certificate (mkcert) or use the plain-HTTP port; the browser smokes run with no certificate overrides for the same reason ([dev-tools](dev-tools.md#https-in-development)).
 - Report what was **reached**, with the setup (build profile, machine, N, M, database), never a capacity promise.
