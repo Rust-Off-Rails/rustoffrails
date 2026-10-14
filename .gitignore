@@ -1,3 +1,6 @@
 evals/**/results/
 results/
 .DS_Store
+
+# Launch video sources and renders (large, local only)
+/media/
