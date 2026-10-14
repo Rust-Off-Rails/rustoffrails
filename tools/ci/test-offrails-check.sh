@@ -71,6 +71,20 @@ pub const ROUTES: &[(&str, &str, &str, Access)] = &[
 ];
 EOF
   echo '| GET | /notes/{id} | notes::show | user |' > "$d/docs/routes.md"
+  mkdir -p "$d/migration/src"
+  cat > "$d/migration/src/m20261013_000001_create_notes.rs" <<'EOF'
+        m.create_table(Table::create().table(Notes::Table)
+                .col(big_pk_auto(Notes::Id))
+                .col(big_integer(Notes::AuthorId))
+                .col(big_integer_null(Notes::ParentId))
+                .col(integer(Notes::Stars))
+                .col(ColumnDef::new(Notes::Position).integer().not_null())
+                .col(string(Notes::Paid))
+                .to_owned()).await
+EOF
+  cat > "$d/tests/app/support.rs" <<'EOF'
+let url = std::env::var("TEST_DATABASE_URL").ok();
+EOF
   printf '%s\n' "$d"
 }
 
@@ -94,7 +108,7 @@ expect() {
   fi
 }
 
-expect "a complete app passes" "$(make_app pass)" 0 "0 error(s)"
+expect "a complete app passes" "$(make_app pass)" 0 "0 error(s)" "1 migrations, every id and *_id column 64-bit" "reads TEST_DATABASE_URL"
 
 d=$(make_app no-agents); rm "$d/AGENTS.md"
 expect "a directory without AGENTS.md fails" "$d" 1 "no AGENTS.md here"
@@ -179,6 +193,42 @@ pub async fn index(RequireUser(_user): RequireUser) -> Result<Response, AppError
 EOF
 expect "unscoped lookups in handlers fail" "$d" 1 \
   'notes.rs:6: `RequireUser(_`' 'notes.rs:7: `::find(`' 'notes.rs:8: `::destroy(`' 'notes.rs:9: `Entity::find`'
+
+# 64-bit ids: INT4 on Postgres can't decode as i64 (SQLite's INTEGER is 64-bit, so only Postgres fails).
+M=migration/src/m20261013_000002_create_cards.rs
+d=$(make_app ids-helper)
+printf '.col(big_pk_auto(Cards::Id))\n.col(integer(Cards::ColumnId))\n.col(small_integer_null(Cards::TeamId))\n.col(big_integer(Cards::BoardId))\n' > "$d/$M"
+expect "integer()/small_integer_null() on *_id columns fails" "$d" 1 \
+  "$M: Cards::ColumnId is a 32-bit integer column" "$M: Cards::TeamId is a 32-bit integer column"
+
+d=$(make_app ids-coldef)
+cat > "$d/$M" <<'EOF'
+.col(ColumnDef::new(Cards::Id).integer().not_null().auto_increment().primary_key())
+.col(
+    ColumnDef::new(Cards::ColumnId)
+        .not_null()
+        .integer(),
+)
+.col(ColumnDef::new(Alias::new("team_id")).small_integer())
+.col(ColumnDef::new(Cards::BoardId).big_integer().not_null())
+EOF
+expect "ColumnDef ids with .integer() fail, across lines and with Alias" "$d" 1 \
+  "$M: Cards::Id is a 32-bit" "$M: Cards::ColumnId is a 32-bit" 'Alias::new("team_id") is a 32-bit'
+
+d=$(make_app ids-pk); printf '.col(pk_auto(Cards::Id))\n' > "$d/$M"
+expect "pk_auto (serial, INT4 on Postgres) fails" "$d" 1 "$M: Cards::Id is a 32-bit integer column"
+
+d=$(make_app ids-widened); printf '// offrails-check: ids widened in m20261014_000001_widen_ids\n.col(integer(Cards::ColumnId))\n' > "$d/$M"
+expect "a waiver naming a missing widening migration fails" "$d" 1 "doesn't exist"
+echo '// widen' > "$d/migration/src/m20261014_000001_widen_ids.rs"
+expect "a migration widened by a later one passes" "$d" 0 "0 error(s)"
+
+d=$(make_app ids-entity); mkdir -p "$d/src/models"
+printf 'pub struct Model {\n    pub id: i32,\n    pub team_id: Option<i32>,\n    pub votes: i32,\n    pub page_id: i32, // not a db id\n}\n' > "$d/src/models/card.rs"
+expect "an entity id typed i32 fails" "$d" 1 "src/models/card.rs:2: an id field typed i32" "src/models/card.rs:3: an id field typed i32"
+
+d=$(make_app pg); echo 'let db = connect("sqlite::memory:").await;' > "$d/tests/app/support.rs"
+expect "a support.rs that never reads TEST_DATABASE_URL fails" "$d" 1 "never reads TEST_DATABASE_URL"
 
 d=$(make_app routes); : > "$d/docs/routes.md"
 expect "a stale docs/routes.md only warns" "$d" 0 "docs/routes.md is missing ROUTES path(s): /notes/{id}"

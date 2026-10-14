@@ -62,7 +62,7 @@ Field names that imply ownership (`owner`, `user`, `author` + `references`) are 
    - `graphql` / `both`: in `src/graphql/types.rs` a `<Model>Object` (`#[graphql(name = "<Model>")]`, `From<Model>`), a `<Model>Input` (`From<…> for <Model>Params`), `<Model>Payload { <singular>, errors }` and `Delete<Model>Payload`; `query.rs` gets `<plural>(page, per)` (with the per-size complexity) and `<singular>(id)`; `mutation.rs` gets `create<Model>`, `update<Model>`, `delete<Model>`. Every association field resolves through a `Loader` in `loaders.rs`. Then `UPDATE_SCHEMAS=1 cargo nextest run schema_snapshot` and commit `docs/schema.graphql` ([graphql](../guides/graphql.md)).
    - Tests: the REST request matrix (`tests/app/<plural>_test.rs` with `post_json`/`patch_json`/`delete`), insta contract snapshots of `<Plural>Page` and `<Model>Body` (`api_contract_test.rs`), and the GraphQL rows (`graphql_test.rs`: anonymous, another user's record, read-only token, payload `errors`, N+1 guard per association, REST and GraphQL agreeing on a record).
 10. **Nav:** add a link in the layout if the resource is top-level.
-11. **Seeds:** add 3–5 realistic records to `tasks/seed.rs` (idempotent: skip if any exist).
+11. **Seeds:** add 3–5 realistic records to `tasks/seed.rs`: find-or-create each one by a natural key (email, slug, name), inside the seed's one `kernel::db::begin` transaction. Never gate the whole seed on "no rows yet" ([cli](../cli.md#seeds)).
 12. **Definition of Done**, then the real-browser smoke: create → edit → delete, Back after the delete (expect 404), and the console clean ([test-standards §9](../guides/test-standards.md#9-real-browser-smoke)).
 
 ## Resource

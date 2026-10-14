@@ -21,6 +21,8 @@ Checks a Rust off Rails app (default: the current directory):
   tenancy      TENANCY != none: tests/app/tenancy_test.rs and guard_test.rs exist and are registered
   guard        TENANCY != none: no unscoped lookups in src/{controllers,channels,graphql,api}
   env          every env var name in src/config.rs (a "SCREAMING_SNAKE" literal) is in .env.example
+  ids          no id / *_id column is a 32-bit integer in migration/src, and no entity id is i32
+  postgres     tests/app/support.rs reads TEST_DATABASE_URL (the suite can run on Postgres)
   routes       docs/routes.md lists every ROUTES path (warning only)
 
 Exit status: 0 when there are no errors (warnings allowed), 1 otherwise, 2 on bad usage.
@@ -261,6 +263,59 @@ if [ -f src/config.rs ]; then
     else
       pass env "$env_total env vars in src/config.rs, all in .env.example"
     fi
+  fi
+fi
+
+# ---- 64-bit ids ---------------------------------------------------------------------------------
+# Ids and foreign keys are i64 in Rust and must be BIGINT in the database. A 32-bit column (`.integer()`,
+# `integer(X::TeamId)`, `pk_auto`) is INTEGER on SQLite, which is 64-bit anyway, so the SQLite suite
+# passes; on Postgres it's INT4 and every write that returns an id fails to decode as i64 (a 500).
+# A migration repaired by a later one says so: `// offrails-check: ids widened in m<…>` (that file must exist).
+IDENT='([A-Za-z_][A-Za-z0-9_]*::([A-Z][A-Za-z0-9]*)?Id|Alias::new\([[:space:]]*"(id|[a-z0-9_]*_id)"[[:space:]]*\))'
+HELPER_RE="(^|[^A-Za-z0-9_])(pk_auto|integer|integer_null|integer_uniq|small_integer|small_integer_null|small_integer_uniq|tiny_integer|tiny_integer_null|tiny_integer_uniq)\\([[:space:]]*${IDENT}[[:space:]]*\\)"
+COLDEF_RE="ColumnDef::new\\([[:space:]]*${IDENT}[[:space:]]*\\)([[:space:]]*\\.[a-z_]+\\([^()]*\\))*[[:space:]]*\\.(integer|small_integer|tiny_integer)\\(\\)"
+ids_bad=0; ids_files=0
+for f in migration/src/m*.rs; do
+  [ -f "$f" ] || continue
+  ids_files=$((ids_files + 1))
+  widened=$(grep -oE 'offrails-check: ids widened in m[A-Za-z0-9_]+' "$f" | head -n1 | awk '{ print $NF }' || true)
+  if [ -n "$widened" ]; then
+    if [ ! -f "migration/src/$widened.rs" ]; then
+      ids_bad=$((ids_bad + 1))
+      fail ids "$f says its ids are widened in $widened, and migration/src/$widened.rs doesn't exist" \
+        "write that migration (.offrails/guides/migrations.md#ids-are-64-bit), or name the one that exists"
+    fi
+    continue
+  fi
+  # Join lines, so a ColumnDef chain split over several lines still matches.
+  # One line per offending definition; its first identifier is the column.
+  hits=$(tr '\n' ' ' < "$f" | grep -oE -e "$HELPER_RE" -e "$COLDEF_RE" \
+    | while IFS= read -r def; do printf '%s\n' "$def" | grep -oE "$IDENT" | head -n1 | tr -d '[:space:]'; echo; done || true)
+  for h in $hits; do
+    ids_bad=$((ids_bad + 1))
+    fail ids "$f: $h is a 32-bit integer column; ids and foreign keys must be 64-bit (INT4 on Postgres breaks every i64 id)" \
+      "use big_pk_auto / big_integer(_null) (.offrails/guides/migrations.md#ids-are-64-bit); an applied migration stays as it is: widen it in a new one"
+  done
+done
+for d in src entity/src; do
+  [ -d "$d" ] || continue
+  ehits=$(grep -rnE --include='*.rs' '^[[:space:]]*pub[[:space:]]+(id|[a-z0-9_]+_id)[[:space:]]*:[[:space:]]*(Option<)?(i32|i16|u32|u16)[[:space:]]*>?[[:space:]]*,' "$d" 2>/dev/null \
+    | grep -vF '// not a db id' | awk -F: '{ print $1 ":" $2 }' || true)
+  for h in $ehits; do
+    ids_bad=$((ids_bad + 1))
+    fail ids "$h: an id field typed i32/i16 (entity ids and foreign keys are i64)" \
+      "make it i64 (and the column big_integer); a field that isn't a database id gets a trailing // not a db id"
+  done
+done
+[ "$ids_files" -gt 0 ] && [ "$ids_bad" = 0 ] && pass ids "$ids_files migrations, every id and *_id column 64-bit"
+
+# ---- tests run on Postgres too ------------------------------------------------------------------
+if [ -f tests/app/support.rs ]; then
+  if grep -q 'TEST_DATABASE_URL' tests/app/support.rs; then
+    pass postgres "tests/app/support.rs reads TEST_DATABASE_URL"
+  else
+    fail postgres "tests/app/support.rs never reads TEST_DATABASE_URL, so the suite can only run on SQLite" \
+      "TestApp::new connects to TEST_DATABASE_URL when it's set (a database per test: .offrails/guides/testing.md#database-per-test), then run the suite on Postgres"
   fi
 fi
 

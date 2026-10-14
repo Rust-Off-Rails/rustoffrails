@@ -66,6 +66,7 @@ Never weaken without a decision entry **and** the human's OK: strict CSP (no `un
 22. **Overload is 503 + `Retry-After`, never 408:** pool `acquire_timeout` 5 s, the `TimeoutLayer` status 503, live re-fetches gated by `X-Live-Refresh`; shutdown drains at most `APP_SHUTDOWN_DRAIN_SECS` ([errors](guides/errors-and-logging.md#response-mapping)).
 23. **Never `location.reload()` after a mutation:** move the DOM optimistically, then `htmx.ajax` the live region ([frontend-htmx](guides/frontend-htmx.md#no-full-reload-after-a-mutation)).
 24. **Ask the running app before guessing:** `curl -s $URL/dev/introspect.json` (migrations, CSS staleness, protocol, streams), development only ([dev-tools](guides/dev-tools.md#introspection)).
+25. **Ids are 64-bit:** `big_pk_auto` and `big_integer` for every `id`/`*_id`, `i64` in entities. A 32-bit id passes on SQLite and is a 500 on every Postgres write; `TestApp` reads `TEST_DATABASE_URL` so the suite runs there (`offrails-check` `[ids]`, `[postgres]`; [migrations](guides/migrations.md#ids-are-64-bit)).
 
 ## Commands ([cli.md](cli.md))
 

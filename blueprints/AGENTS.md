@@ -30,6 +30,7 @@ Each line is a mistake an agent shipped. The check that catches it is in parenth
 - **NEVER change a header line (`FRONTEND_MODE`, `ISLANDS`, `UI_LIBRARY`, `TENANCY`, `FRAMEWORK`) without the code to match**, and never leave `FRAMEWORK` behind `.offrails/VERSION` (`offrails check`).
 - **NEVER tick an acceptance criterion without a test that cites its id,** or write a Security row without a test name (`offrails check`).
 - **NEVER edit `.offrails/` or delete a `docs/decisions.md` line.** Supersede it with a new line (`.offrails/workflow.md#decisions`).
+- **NEVER give an `id` or `*_id` a 32-bit column, or let the suite run only on SQLite.** `big_pk_auto`/`big_integer` and `i64`; `INT4` ids made every Postgres write a 500 behind a green SQLite suite (`offrails check` `[ids]`, `[postgres]`).
 - **NEVER `pkill`/`killall` by name.** Stop your own PID, or `lsof -ti tcp:$PORT -sTCP:LISTEN | xargs kill`.
 
 ## You are an agent working on a Rust off Rails app

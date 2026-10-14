@@ -10,7 +10,7 @@ app worker [--queues default:10,mailers:5]  # bin/jobs  (queue producers + Stage
 app db migrate                  # rails db:migrate   (embedded Migrator::up)
 app db rollback [--steps N]     # rails db:rollback  (Migrator::down)
 app db status                   # rails db:migrate:status (Migrator::get_migration_with_status; print `{:?}` of `m.status()`: "Applied/Pending <name>". MigrationStatus isn't in the prelude, and Debug needs no import)
-app db seed                     # rails db:seed      (src/tasks/seed.rs; idempotent)
+app db seed                     # rails db:seed      (src/tasks/seed.rs; one transaction, find-or-create per record: #seeds)
 app db setup                    # rails db:setup     (migrate + seed)
 app db reset                    # Migrator::fresh (drop all tables, migrate) + seed; refuses unless APP_ENV=development
 app db console                  # rails dbconsole    (runs sqlite3 <path> or psql <url>, based on DATABASE_URL; no pool opened)
@@ -58,7 +58,7 @@ The binary embeds the `migration` crate. The Docker entrypoint (`bin/docker-entr
 | (none: ask the running app)   | `curl -s $URL/dev/introspect.json` or `cargo run -q -- introspect` ([dev-tools](guides/dev-tools.md#introspection)) |
 | `rails test`                  | `cargo nextest run` (SQLite) / `TEST_DATABASE_URL=postgres://… cargo nextest run` |
 | `rubocop`                     | `cargo fmt --check && cargo clippy --all-targets -- -D warnings` |
-| (none: specs ↔ code gates)    | `sh .offrails/tools/offrails-check` or `offrails check`: header consistency, every AC cited, Security-table tests exist, tenancy suites, no unscoped lookups. Exit 1 on any `FAIL`; runs in CI ([workflow](workflow.md#definition-of-done)) |
+| (none: specs ↔ code gates)    | `sh .offrails/tools/offrails-check` or `offrails check`: header consistency, every AC cited, Security-table tests exist, tenancy suites, no unscoped lookups, `.env.example` complete, 64-bit ids, tests that can run on Postgres. Exit 1 on any `FAIL`; runs in CI ([workflow](workflow.md#definition-of-done)) |
 | `brakeman`                    | `guides/security.md` checklist (+ optional `cargo audit`) |
 | `rails assets:precompile`     | `htmx`: `bin/tailwindcss -i assets/app.css -o static/app.css --minify`. `inertia`/`spa`: `pnpm --dir web build` |
 | `yarn test`                   | `pnpm --dir web test --run` (Vitest) |
@@ -73,6 +73,10 @@ The binary embeds the `migration` crate. The Docker entrypoint (`bin/docker-entr
 - **Stop only what you started**, by PID or port (`lsof -ti tcp:$PORT -sTCP:LISTEN`). Never `pkill` by name, which can kill the human's own servers. For `bin/dev`, stop the `bin/dev` process you started (its `trap 'kill 0' EXIT` stops cargo watch, Tailwind and the server); killing only the listening PID leaves the watchers running.
 - **Non-interactive runs (`claude -p`, `opencode run`, `codex exec`, CI): stop every server you started before your final message.** A background `bin/dev` (or `cargo watch`, Vite, Tailwind watch) keeps the session's process tree alive, so the run never exits. Last step: `lsof -ti tcp:$PORT -sTCP:LISTEN | xargs kill` for each port you used (Vite's too), then confirm with `lsof -nP -iTCP:$PORT -sTCP:LISTEN` printing nothing. In an interactive session, leave it running only if the human will use it, and say on which URL.
 - **Read emails through the mailbox JSON** (`/dev/mailbox/latest.json?to=…`), never by grepping raw `.eml` files ([mailers](guides/mailers.md)).
+
+## Seeds
+
+`src/tasks/seed.rs` runs in **one transaction** (`kernel::db::begin`, committed at the end) and is idempotent **per record**: each record is found by a natural key (email, slug, team name) and created only if missing. Never key the whole seed on one check (`if teams::count(db) > 0 { return }`): a seed that failed after the first team then never retries, and the dev database stays half-seeded for good (a peer's `seed_if_empty` did exactly that). Running `app db seed` twice changes nothing; a failed run leaves nothing behind. Development only for accounts with known passwords: refuse in production.
 
 ## Tasks (`src/tasks/`)
 
