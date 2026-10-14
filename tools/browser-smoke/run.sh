@@ -16,8 +16,9 @@ here="$(cd "$(dirname "$0")" && pwd)"
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/offrails/browser-smoke"
 version="25.13.0"      # puppeteer-core, verified 2026-10-12
 axe_version="4.13.0"   # axe-core, verified 2026-10-13
-node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
-if [ "$node_major" -lt 22 ]; then
+# Node >= 22.12 (puppeteer-core 25's floor): major*100 + minor, so 22.0-22.11 are refused too.
+node_level="$(node -p 'const [a, b] = process.versions.node.split(".").map(Number); a * 100 + b' 2>/dev/null || echo 0)"
+if [ "$node_level" -lt 2212 ]; then
   echo "browser smoke needs Node >= 22.12 (Node 24 LTS recommended); found $(node --version 2>/dev/null || echo none)" >&2
   exit 1
 fi

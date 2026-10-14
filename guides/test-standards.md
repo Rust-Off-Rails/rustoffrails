@@ -612,7 +612,7 @@ Two template-level guards, in `tests/app/theme_test.rs` (every app with HTML tem
    - **(b)** dark text (`text-black`, `text-<color>-700…950`) needs a `dark:text-*` partner, because the surface under it turns dark;
    - **(c)** a faint tone (`text-<gray family>-400…600`, `text-<color>-500/600`, e.g. `text-slate-500`, `text-red-600`) needs a `dark:text-*` partner;
    - exempt: text on a background that is mid or dark in both schemes (`bg-<color>-300…950` with no `dark:bg-*`, e.g. a badge). Askama tags inside an attribute are dropped, so both branches of an `{% if %}` form one list: put each branch's partners in that branch.
-2. **Stale CSS.** Every class a template uses has its selector in the built `static/app.css` (escaped like `CSS.escape`: `dark:bg-gray-950` → `.dark\:bg-gray-950`, `md:w-1/2` → `.md\:w-1\/2`). Tailwind emits only the classes it saw when it last ran, so a template edited while no watcher ran renders with a silently missing class (a `dark:` partner that does nothing). Skipped when the CSS isn't built. JS/test hook classes go in `kernel::css::HOOK_CLASSES`, each with its reason.
+2. **Stale CSS.** Every class a template uses has its selector in the built `static/app.css` (escaped like `CSS.escape`: `dark:bg-gray-950` → `.dark\:bg-gray-950`, `md:w-1/2` → `.md\:w-1\/2`). Tailwind emits only the classes it saw when it last ran, so a template edited while no watcher ran renders with a silently missing class (a `dark:` partner that does nothing). Skipped when the CSS isn't built. **For each class it lists, in this order:** a class nothing styles or uses (a leftover from an earlier design, a typo) is **deleted from the template**; a real utility means the CSS is stale, so rebuild it; only a class that's a hook for JS, htmx or tests goes in `kernel::css::HOOK_CLASSES`, each with its reason. Never allowlist a dead class to make the guard pass.
 
 **TS modes** (`inertia`, `spa`, islands): the same rules apply to `className="…"`/`class="…"` in `web/src/**/*.{tsx,svelte}` (add those files to `class_lists` and match both attribute names; the HTML shell and error pages stay in `templates/`). The stale-CSS check is htmx-only: Vite builds the CSS with the bundle. Every mode keeps the palette in [views](views.md#dark-mode).
 
@@ -851,8 +851,9 @@ fn built_css_has_every_class_the_templates_use() {
     };
     assert!(
         missing.is_empty(),
-        "classes with no rule in {CSS_BUILT}: rebuild it (bin/dev runs `bin/tailwindcss --watch`), \
-         or list a JS/test hook in kernel::css::HOOK_CLASSES with its reason:\n{}",
+        "classes with no rule in {CSS_BUILT}: delete dead classes from the template, rebuild the CSS \
+         (bin/dev runs `bin/tailwindcss --watch`), or list a JS/test hook in kernel::css::HOOK_CLASSES \
+         with its reason:\n{}",
         missing.join("\n")
     );
 }

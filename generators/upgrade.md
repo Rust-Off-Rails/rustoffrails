@@ -35,6 +35,8 @@ If the fingerprints match, the app is current: say so and stop. (`offrails upgra
 
 Require a clean git tree. If it isn't clean, ask the human to commit first, or commit for them if they agree.
 
+**Preconditions for the proofs.** The App migration steps prove UI changes with the framework's browser smokes (`.offrails/tools/browser-smoke/run.sh`), which need **Node ≥ 22.12** (Node 24 LTS recommended; puppeteer-core 25 refuses older) and an installed Chrome. Check `node --version` now. Too old or missing: say so in the plan, and run the smokes once a Node that qualifies is on `PATH` (`run.sh` refuses older with that message). Postgres for `TEST_DATABASE_URL` is the other precondition ([workflow](../workflow.md#definition-of-done)).
+
 ## 3. Read what changed
 
 Read `$FW/CHANGELOG.md` from the app's version up to the new one. Each release lists **App migration** steps written for an agent, in reconcile style (detect → final shape → converge). Then diff the docs (`diff -ru .offrails "$FW" -x .git -x .claude-plugin -x skills -x hooks -x evals -x brand -x .in_use`) to catch anything the changelog doesn't mention.
@@ -60,7 +62,9 @@ Replace `.offrails/` with the release, using the same anchored `rsync` as [`new.
 
 ## 7. Apply in vertical slices
 
-Each slice must be green under the [Definition of Done](../workflow.md#definition-of-done) before the next one. Log `YYYY-MM-DD: upgraded Off Rails <old> → <new>` and each deviation in `docs/decisions.md`.
+Each slice must be green under the [Definition of Done](../workflow.md#definition-of-done) before the next one.
+
+**A step applies only where its *Detect* matches.** Many steps are for one kind of app: accounts, live regions, a development pending-migrations page, a CSS banner, channels. Run the detect first; a step for a feature the app doesn't have is **n/a**, listed as such in the plan with the reason, not built "to match". Where a step's proof needs something the app lacks, use the alternative it names (no accounts: `run.sh a11y` instead of `run.sh login`; its preflight still fails on an untrusted certificate). A detect that would match every app for a change that only some need is a changelog bug: apply what clearly applies, and say so in your report. Log `YYYY-MM-DD: upgraded Off Rails <old> → <new>` and each deviation in `docs/decisions.md`.
 
 ## 8. Verify nothing is stale
 
