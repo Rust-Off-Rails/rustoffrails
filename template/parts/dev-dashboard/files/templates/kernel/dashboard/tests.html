@@ -1,0 +1,58 @@
+{% extends "kernel/dashboard/_layout.html" %}
+{% block dash %}
+<header class="dash-head">
+  <h1>Tests</h1>
+  <form method="post" action="/dev/dashboard/tests/run" class="row">
+    <label class="visually-hidden" for="run-db">Database</label>
+    <select id="run-db" name="db"><option value="sqlite">SQLite</option>{% if postgres %}<option value="postgres">Postgres</option><option value="both" selected>SQLite and Postgres</option>{% endif %}</select>
+    <button class="btn primary">Run tests</button>
+  </form>
+</header>
+<div data-live="tests" aria-live="polite">{% include "kernel/dashboard/_test_progress.html" %}</div>
+{% if runs.is_empty() %}
+<div class="welcome">
+  <p><strong>No test runs yet.</strong> Run them here, or from a terminal with <code>app test</code>: nextest on SQLite and Postgres with JUnit output (the <code>dashboard</code> profile in <code>.config/nextest.toml</code>), saved in <code>{{ dir }}/</code>.</p>
+  <p>Coverage: <code>cargo llvm-cov nextest --json --summary-only --output-path {{ dir }}/coverage.json</code>.</p>
+</div>
+{% else %}
+<dl class="figures wide">
+  {% if let Some(r) = selected %}
+  {% if let Some(s) = r.sqlite %}<div class="fig tone-{{ s.tone }}"><dt>SQLite</dt><dd>{{ s.passed }} passed{% if s.failed > 0 %}, {{ s.failed }} failed{% endif %}</dd></div>{% endif %}
+  {% if let Some(s) = r.postgres %}<div class="fig tone-{{ s.tone }}"><dt>Postgres</dt><dd>{{ s.passed }} passed{% if s.failed > 0 %}, {{ s.failed }} failed{% endif %}</dd></div>{% endif %}
+  {% endif %}
+  <div class="fig"><dt>Line coverage</dt><dd>{% if let Some(c) = coverage %}{{ c }}{% else %}<span class="muted">no report</span>{% endif %}</dd></div>
+  <div class="fig tone-{% if spec.uncited.is_empty() %}ok{% else %}warn{% endif %}"><dt>Acceptance criteria tested</dt><dd>{% if spec.total == 0 %}<span class="muted">none in product/</span>{% else %}{{ spec.cited }} of {{ spec.total }}{% endif %}</dd></div>
+  <div class="fig tone-{% if flaky.is_empty() %}ok{% else %}warn{% endif %}"><dt>Flaky</dt><dd>{{ flaky.len() }}</dd></div>
+</dl>
+<div class="grid two">
+  <section class="panel" aria-labelledby="t-trend">
+    <header><h2 id="t-trend">Duration, last {{ trend.len() }} runs</h2><span class="muted">red: a failure</span></header>
+    <svg class="bars" viewBox="0 0 600 120" role="img" aria-label="Run durations, oldest to newest" focusable="false">{% for b in trend %}<rect class="b-{{ b.class }}" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="2"><title>{{ b.label }}</title></rect>{% endfor %}</svg>
+    <details class="data pad"><summary>Data table</summary><div class="scroll" tabindex="0" role="region" aria-label="Table"><table><thead><tr><th scope="col">Run</th><th scope="col">Duration</th><th scope="col">Result</th></tr></thead><tbody>{% for (id, dur, res) in trend_table %}<tr><td class="mono">{{ id }}</td><td>{{ dur }}</td><td>{{ res }}</td></tr>{% endfor %}</tbody></table></div></details>
+  </section>
+  <section class="panel" aria-labelledby="t-runs">
+    <header><h2 id="t-runs">Runs</h2><span class="muted">SQLite and Postgres side by side</span></header>
+    <div class="scroll" tabindex="0" role="region" aria-label="Table"><table class="data-table"><thead><tr><th scope="col">Run</th><th scope="col">SQLite</th><th scope="col">Postgres</th></tr></thead><tbody>
+    {% for r in runs %}<tr{% if r.current %} aria-current="true" class="current"{% endif %}><th scope="row"><a href="{{ r.href }}" class="mono">{{ r.id }}</a><span class="sub">{{ r.when }} · {{ r.source }}</span></th>
+      <td>{% if let Some(s) = r.sqlite %}<span class="badge tone-{{ s.tone }}">{{ s.passed }}/{{ s.passed + s.failed }}</span> <span class="muted">{{ s.duration }}</span>{% else %}<span class="muted">–</span>{% endif %}</td>
+      <td>{% if let Some(s) = r.postgres %}<span class="badge tone-{{ s.tone }}">{{ s.passed }}/{{ s.passed + s.failed }}</span> <span class="muted">{{ s.duration }}</span>{% else %}<span class="muted">–</span>{% endif %}</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+</div>
+{% if !failures.is_empty() %}
+<section class="panel" aria-labelledby="t-fail"><header><h2 id="t-fail">Failures</h2></header>
+  {% for c in failures %}<details class="failure" open><summary><span class="badge tone-err">{{ c.db }}</span> <span class="mono">{{ c.module }} {{ c.name }}</span> <span class="muted">{{ c.time }}</span></summary><pre class="code"><code>{{ c.output }}</code></pre></details>{% endfor %}
+</section>
+{% endif %}
+<div class="grid two">
+  <section class="panel" aria-labelledby="t-slow"><header><h2 id="t-slow">Slowest tests</h2></header>
+    <ol class="plain numbered">{% for c in slowest %}<li><span class="mono">{{ c.name }}</span> <span class="muted">{{ c.module }} · {{ c.db }}</span> <strong>{{ c.time }}</strong></li>{% endfor %}</ol></section>
+  <section class="panel" aria-labelledby="t-flaky"><header><h2 id="t-flaky">Flaky tests</h2><span class="muted">passed on a retry, or flipped between runs</span></header>
+    {% if flaky.is_empty() %}<p class="empty">None.</p>{% else %}<ul class="plain">{% for (name, n) in flaky %}<li class="mono">{{ name }} <span class="badge tone-warn">{{ n }}×</span></li>{% endfor %}</ul>{% endif %}</section>
+</div>
+{% if !spec.uncited.is_empty() %}
+<section class="panel" aria-labelledby="t-spec"><header><h2 id="t-spec">Acceptance criteria no test cites</h2><span class="muted">offrails-check's <code>ac</code> rule</span></header>
+  <ul class="plain">{% for (id, file) in spec.uncited %}<li><span class="mono">{{ id }}</span> <span class="muted">{{ file }}</span></li>{% endfor %}</ul></section>
+{% endif %}
+{% endif %}
+{% endblock %}

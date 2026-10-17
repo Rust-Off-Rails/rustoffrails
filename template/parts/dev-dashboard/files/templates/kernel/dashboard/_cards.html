@@ -1,0 +1,12 @@
+<ul class="cards" role="list">
+  {% for c in cards %}
+  <li class="card tone-{{ c.tone }}">
+    <a href="{{ c.href }}">
+      <span class="card-label">{{ c.label }}</span>
+      <span class="card-value">{{ c.value }}</span>
+      <span class="card-sub">{{ c.sub }}</span>
+      <svg class="spark" viewBox="0 0 120 32" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path class="spark-area" d="{{ c.spark.area }}"/><path class="spark-line" d="{{ c.spark.d }}"/></svg>
+    </a>
+  </li>
+  {% endfor %}
+</ul>

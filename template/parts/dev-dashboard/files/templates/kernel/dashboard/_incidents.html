@@ -1,0 +1,11 @@
+{# The watcher's incident cards (ai_watch.rs): the deterministic signal with its evidence, and the agent's investigation when a provider is set. #}
+<ol class="incidents" role="list">
+  {% for i in incidents %}
+  <li class="incident sev-{{ i.severity }}" id="incident-{{ i.id }}">
+    <div class="incident-head"><span class="badge sev">{{ i.kind }}</span><h3>{{ i.title }}</h3><span class="muted small">{{ i.when }}</span></div>
+    <div class="ai-text incident-evidence">{% for b in i.evidence %}{% include "kernel/dashboard/_ai_block.html" %}{% endfor %}</div>
+    {% if !i.narrative.is_empty() %}<div class="ai-text incident-story">{% for b in i.narrative %}{% include "kernel/dashboard/_ai_block.html" %}{% endfor %}</div>{% endif %}
+    <p class="incident-foot">{% if !i.run_page.is_empty() %}<a href="{{ i.run_page }}">{% if i.run_status.is_empty() %}The investigation{% else %}{{ i.run_status }}{% endif %}</a> · {% endif %}<a href="{{ i.href }}">See the evidence</a>{% if !i.note.is_empty() %} <span class="muted small">{{ i.note }}</span>{% endif %}</p>
+  </li>
+  {% endfor %}
+</ol>

@@ -1,0 +1,292 @@
+# samples/auth-password/sample.toml: the format is samples/FORMAT.md.
+name = "auth-password"
+version = "0.7.0"
+summary = "Email + password: argon2id (OWASP parameters, rehash on sign-in), sign-up with email verification, sign-in with progressive per-account delays, reset by single-use link, change password, a bundled common-password check and a live strength meter that works without JS"
+depends_on = ["auth-core"]
+extracted_from = "Rust off Rails apps"
+
+# Run in the app root, one per line, never with a version (cargo add picks it; read Cargo.lock).
+crates = [
+  "argon2",
+]
+
+[[wire]]
+file = "src/models/mod.rs"
+anchor = "model mods"
+text = '''
+pub mod password_credential;
+pub mod password_policy;
+'''
+
+[[wire]]
+file = "src/controllers/mod.rs"
+anchor = "controller mods"
+text = '''
+pub mod account_passwords;
+pub mod password_sessions;
+pub mod passwords;
+pub mod registrations;
+'''
+
+[[wire]]
+file = "src/views/mod.rs"
+anchor = "view mods"
+text = '''
+pub mod passwords;
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "routes"
+text = '''
+// Passwords (auth-password).
+app = app
+    .route("/session/password", axum::routing::post(crate::controllers::password_sessions::create))
+    .route("/account/confirm/password", axum::routing::post(crate::controllers::password_sessions::confirm))
+    .route("/registration/new", get(crate::controllers::registrations::new))
+    .route("/registration", axum::routing::post(crate::controllers::registrations::create))
+    .route("/registration/sent", get(crate::controllers::registrations::sent))
+    .route(
+        "/email-verification/{token}",
+        get(crate::controllers::registrations::verification)
+            .post(crate::controllers::registrations::verify),
+    )
+    .route("/passwords/new", get(crate::controllers::passwords::new))
+    .route("/passwords", axum::routing::post(crate::controllers::passwords::create))
+    .route("/passwords/sent", get(crate::controllers::passwords::sent))
+    .route("/passwords/{token}/edit", get(crate::controllers::passwords::edit))
+    .route("/passwords/{token}", axum::routing::post(crate::controllers::passwords::update))
+    .route("/password-strength", axum::routing::post(crate::controllers::passwords::strength))
+    .route("/account/password/edit", get(crate::controllers::account_passwords::edit))
+    .route("/account/password", axum::routing::post(crate::controllers::account_passwords::update));
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "paths"
+text = '''
+pub fn session_password() -> String {
+    "/session/password".into()
+}
+pub fn account_confirm_password() -> String {
+    "/account/confirm/password".into()
+}
+pub fn new_registration() -> String {
+    "/registration/new".into()
+}
+pub fn registration() -> String {
+    "/registration".into()
+}
+pub fn registration_sent() -> String {
+    "/registration/sent".into()
+}
+pub fn email_verification(token: &str) -> String {
+    format!("/email-verification/{token}")
+}
+pub fn new_password() -> String {
+    "/passwords/new".into()
+}
+pub fn passwords() -> String {
+    "/passwords".into()
+}
+pub fn password_sent() -> String {
+    "/passwords/sent".into()
+}
+pub fn edit_password(token: &str) -> String {
+    format!("/passwords/{token}/edit")
+}
+pub fn update_password(token: &str) -> String {
+    format!("/passwords/{token}")
+}
+pub fn password_strength() -> String {
+    "/password-strength".into()
+}
+pub fn edit_account_password() -> String {
+    "/account/password/edit".into()
+}
+pub fn account_password() -> String {
+    "/account/password".into()
+}
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "routes table"
+text = '''
+("POST", "/session/password",                  "password_sessions::create",    Access::Public),
+("POST", "/account/confirm/password",          "password_sessions::confirm",   Access::User),
+("GET",  "/registration/new",                  "registrations::new",           Access::Public),
+("POST", "/registration",                      "registrations::create",        Access::Public),
+("GET",  "/registration/sent",                 "registrations::sent",          Access::Public),
+("GET",  "/email-verification/{token}",        "registrations::verification",  Access::Public),
+("POST", "/email-verification/{token}",        "registrations::verify",        Access::Public),
+("GET",  "/passwords/new",                     "passwords::new",               Access::Public),
+("POST", "/passwords",                         "passwords::create",            Access::Public),
+("GET",  "/passwords/sent",                    "passwords::sent",              Access::Public),
+("GET",  "/passwords/{token}/edit",            "passwords::edit",              Access::Public),
+("POST", "/passwords/{token}",                 "passwords::update",            Access::Public),
+("POST", "/password-strength",                 "passwords::strength",          Access::Public),
+("GET",  "/account/password/edit",             "account_passwords::edit",      Access::User),
+("POST", "/account/password",                  "account_passwords::update",    Access::User),
+'''
+
+[[wire]]
+file = "templates/sessions/new.html"
+anchor = "sign in methods"
+text = '''
+{% include "password_sessions/_form.html" %}
+'''
+
+[[wire]]
+file = "templates/sessions/new.html"
+anchor = "sign in links"
+text = '''
+{% include "password_sessions/_links.html" %}
+'''
+
+[[wire]]
+file = "templates/shared/_auth_nav.html"
+anchor = "auth nav links"
+text = '''
+<a href="{{ paths::new_registration() }}" class="rounded-md bg-indigo-600 px-3 py-1 font-medium text-white hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-950">Sign up</a>
+'''
+
+[[wire]]
+file = "src/views/auth.rs"
+anchor = "account fields"
+text = '''
+/// "3 days ago", or `None` without a password (auth-password).
+pub password_changed: Option<String>,
+'''
+
+[[wire]]
+file = "src/controllers/account.rs"
+anchor = "account load"
+text = '''
+let password_changed = crate::models::password_credential::changed_at(&s.db, user.id)
+    .await?
+    .map(|t| crate::views::auth::time_ago(t, now));
+'''
+
+[[wire]]
+file = "src/controllers/account.rs"
+anchor = "account init"
+text = '''
+password_changed,
+'''
+
+[[wire]]
+file = "templates/account/show.html"
+anchor = "account sections"
+text = '''
+{% include "account/_password_section.html" %}
+'''
+
+[[wire]]
+file = "src/views/auth.rs"
+anchor = "confirm fields"
+text = '''
+/// The account has a password to confirm with (auth-password).
+pub has_password: bool,
+'''
+
+[[wire]]
+file = "src/controllers/account.rs"
+anchor = "confirm load"
+text = '''
+let has_password = crate::models::password_credential::changed_at(&s.db, user.id)
+    .await?
+    .is_some();
+'''
+
+[[wire]]
+file = "src/controllers/account.rs"
+anchor = "confirm init"
+text = '''
+has_password,
+'''
+
+[[wire]]
+file = "templates/account/confirm.html"
+anchor = "confirm methods"
+text = '''
+{% include "password_sessions/_confirm.html" %}
+'''
+
+[[wire]]
+file = "src/tasks/auth_demo.rs"
+anchor = "auth demo"
+text = '''
+// auth-password: an obviously fake password, printed so you can sign in.
+let password = "not-a-real-password-42";
+let digest = crate::models::password_credential::hash(password.to_owned()).await?;
+crate::models::password_credential::set(&state.db, user.id, digest.clone(), now).await?;
+crate::models::password_credential::set(&state.db, two_factor.id, digest, now).await?;
+println!("  password:  {password} (both accounts)");
+'''
+
+[[wire]]
+file = "migration/src/lib.rs"
+anchor = "migration mods"
+text = '''
+mod m20261016_002000_create_password_credentials;
+'''
+
+[[wire]]
+file = "migration/src/lib.rs"
+anchor = "migrations"
+text = '''
+Box::new(m20261016_002000_create_password_credentials::Migration),
+'''
+
+[[wire]]
+file = "src/kernel/redact.rs"
+anchor = "token routes"
+text = '''
+"/email-verification/{token}",
+"/passwords/{token}/edit",
+"/passwords/{token}",
+'''
+
+[[wire]]
+file = "src/controllers/auth.rs"
+anchor = "claim unverified account"
+text = '''
+crate::models::password_credential::remove(txn, user_id).await?;
+'''
+
+[[wire]]
+file = "tests/app/main.rs"
+anchor = "test mods"
+text = '''
+mod auth_password_test;
+'''
+
+[[wire]]
+file = "tests/app/factories.rs"
+anchor = "factories"
+text = '''
+/// The password every `user_with_password` gets (auth-password). Fake, for tests only.
+pub const PASSWORD: &str = "violet tractor sandwich";
+
+/// A verified user with `PASSWORD`, hashed once per test binary (argon2 is slow on purpose).
+pub async fn user_with_password(
+    db: &sea_orm::DatabaseConnection,
+    email: &str,
+) -> offrails_host::models::user::Model {
+    static DIGEST: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
+    let digest = DIGEST
+        .get_or_init(|| async {
+            offrails_host::models::password_credential::hash(PASSWORD.to_owned())
+                .await
+                .expect("hash")
+        })
+        .await
+        .clone();
+    let user = user(db, email).await;
+    offrails_host::models::password_credential::set(db, user.id, digest, chrono::Utc::now())
+        .await
+        .expect("set password");
+    user
+}
+'''

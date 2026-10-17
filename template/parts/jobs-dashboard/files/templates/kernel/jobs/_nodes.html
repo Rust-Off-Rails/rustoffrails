@@ -1,0 +1,20 @@
+<div id="nodes" class="scroll" tabindex="0" role="region" aria-label="Nodes table"{% if live %} hx-get="/admin/jobs?part=nodes" hx-trigger="every 5s" hx-swap="outerHTML" hx-sync="this:drop"{% endif %}>
+  {% if nodes.is_empty() %}
+  <p class="empty">No worker has checked in. Jobs wait in their queues until one does: run <code>app worker</code>.</p>
+  {% else %}
+  <table class="data">
+    <thead><tr><th scope="col">Node</th><th scope="col">Queues</th><th scope="col" class="num">Running</th><th scope="col">Started</th><th scope="col">Heartbeat</th></tr></thead>
+    <tbody>
+      {% for n in nodes %}
+      <tr{% if !n.alive %} class="dim"{% endif %}>
+        <th scope="row" class="mono">{% if n.alive %}<span class="beat" aria-hidden="true"></span>{% endif %}{{ n.node }}</th>
+        <td class="mono">{{ n.queues }}</td>
+        <td class="num">{{ n.executing }}</td>
+        <td>{{ n.started }}</td>
+        <td>{{ n.heartbeat }}{% if !n.alive %} <span class="pill err">silent</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>

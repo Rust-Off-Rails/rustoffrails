@@ -1,0 +1,18 @@
+{# The room's header: a live region. Every page in the room re-fetches it (data-src) when the
+   server sends `refresh` for "room-header" (channels::refresh). #}
+<header id="room-header" data-live-region="room-header" data-src="/live/{{ room.slug }}/header" class="border-b border-gray-200 px-4 py-3 dark:border-gray-800">
+  <div class="flex flex-wrap items-baseline gap-x-2">
+    <h1 class="text-lg font-semibold">{{ room.name }}</h1>
+    {% if room.members_only %}<span class="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-900 dark:text-amber-100">Members only</span>{% endif %}
+  </div>
+  <p data-headline class="text-sm text-gray-700 dark:text-gray-300">{% if room.headline.is_empty() %}No headline yet.{% else %}{{ room.headline }}{% endif %}</p>
+  <details class="mt-1 text-sm"{% if !errors.is_empty() %} open{% endif %}>
+    <summary class="link cursor-pointer select-none">Edit headline</summary>
+    <form method="post" action="/live/{{ room.slug }}/headline" hx-post="/live/{{ room.slug }}/headline" hx-target="#room-header" hx-swap="outerHTML" class="mt-2 flex flex-wrap gap-2">
+      <label for="headline" class="sr-only">Headline</label>
+      <input id="headline" name="headline" value="{{ room.headline }}" maxlength="120" class="input mt-0 min-w-0 flex-1"{% if !errors.is_empty() %} aria-invalid="true" aria-describedby="headline-error"{% endif %}>
+      <button class="btn-secondary">Save</button>
+    </form>
+    {% for message in errors.full_messages() %}<p id="headline-error" class="field-error">{{ message }}</p>{% endfor %}
+  </details>
+</header>

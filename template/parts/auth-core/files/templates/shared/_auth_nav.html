@@ -1,0 +1,10 @@
+{% if let Some(user) = ctx.current_user %}
+<a href="{{ paths::account() }}" class="hidden sm:inline max-w-48 truncate text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100" title="Account security">{{ user.email }}</a>
+<a href="{{ paths::account() }}" class="sm:hidden text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100">Account</a>
+<form method="post" action="{{ paths::session_delete() }}" class="inline">
+  <button class="rounded-md px-2 py-1 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">Sign out</button>
+</form>
+{% else %}
+<a href="{{ paths::new_session() }}" class="rounded-md px-2 py-1 font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">Sign in</a>
+{# samples: auth nav links #}
+{% endif %}

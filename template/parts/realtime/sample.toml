@@ -1,0 +1,508 @@
+# samples/realtime/sample.toml: the format is samples/FORMAT.md.
+name = "realtime"
+version = "0.7.0"
+summary = "Channels over WebSocket (offrails.v1) with SSE and long-poll fallbacks: typed rooms, topic authorization on every join and push, presence across tabs and nodes, resume after reconnect, signed socket tokens, revocation, per-user caps, tuned buffers, a live room demo and /dev/sockets"
+# Works on a blank app with development guests (src/channels/identity.rs); point that file at an
+# auth sample's sessions when the app has accounts (README, "Adapting it").
+depends_on = []
+extracted_from = "Rust off Rails apps"
+
+# Run in the app root, one per line, never with a version (cargo add picks it; read Cargo.lock).
+crates = [
+  "axum --features ws",
+  "hmac",
+  "--dev tokio-tungstenite",
+]
+
+[[wire]]
+file = "src/lib.rs"
+anchor = "lib mods"
+text = '''
+pub mod channels;
+'''
+
+[[wire]]
+file = "src/kernel/mod.rs"
+anchor = "kernel mods"
+text = '''
+pub mod channels;
+pub mod cluster;
+pub mod hub;
+pub mod socket_token;
+pub mod sockets_web;
+pub mod transports;
+'''
+
+[[wire]]
+file = "src/kernel/ui.rs"
+anchor = "kernel tabs"
+text = '''
+Tab {
+    key: "sockets",
+    label: "Sockets",
+    href: "/dev/sockets",
+    dev_only: true,
+},
+'''
+
+[[wire]]
+file = "src/models/mod.rs"
+anchor = "model mods"
+text = '''
+pub mod guest;
+pub mod guest_session;
+pub mod room;
+pub mod room_message;
+'''
+
+[[wire]]
+file = "src/controllers/mod.rs"
+anchor = "controller mods"
+text = '''
+pub mod live;
+'''
+
+[[wire]]
+file = "src/views/mod.rs"
+anchor = "view mods"
+text = '''
+pub mod live;
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config fields"
+text = '''
+/// Realtime: transports, session re-checks, socket tokens, the cluster (samples/realtime).
+pub realtime: RealtimeConfig,
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config debug"
+text = '''
+d.field("realtime", &self.realtime);
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config parse"
+text = '''
+let realtime = RealtimeConfig::parse(&get, &mut invalid, env, &database_url);
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config init"
+text = '''
+realtime,
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config test"
+text = '''
+realtime: RealtimeConfig::test(),
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config sections"
+text = '''
+/// Realtime (samples/realtime). GUIDE: .offrails/guides/channels.md#transports
+#[derive(Clone)]
+pub struct RealtimeConfig {
+    /// `APP_REALTIME_TRANSPORTS` (default `websocket,sse,longpoll`): what the server offers.
+    /// Behind a proxy that breaks WebSockets, drop `websocket`; clients fall back by themselves.
+    pub transports: Vec<String>,
+    /// `APP_REALTIME_REVALIDATE_SECS` (60): how often a live connection re-checks its session.
+    pub revalidate: Duration,
+    /// `APP_REALTIME_SECRET` (32+ characters): signs socket tokens for clients that can't send
+    /// the session cookie. Unset: socket tokens are off (development makes one per boot).
+    pub secret: Option<String>,
+    /// `APP_REALTIME_ORIGINS`: origins, besides APP_URL's, a token-authenticated socket may come
+    /// from (comma-separated, exact `scheme://host[:port]`).
+    pub token_origins: Vec<String>,
+    /// `APP_CLUSTER` (false): several nodes share presence and broadcasts over Postgres
+    /// LISTEN/NOTIFY. Postgres only.
+    pub cluster: bool,
+    /// `APP_NODE`: this node's name on /dev/sockets (default `<host>:<pid>`).
+    pub node: Option<String>,
+}
+
+impl RealtimeConfig {
+    fn parse(
+        get: &dyn Fn(&str) -> Option<String>,
+        invalid: &mut Vec<String>,
+        env: AppEnv,
+        database_url: &str,
+    ) -> Self {
+        let list = |v: String| -> Vec<String> {
+            v.split(',')
+                .map(|s| s.trim().to_owned())
+                .filter(|s| !s.is_empty())
+                .collect()
+        };
+        let transports = get("APP_REALTIME_TRANSPORTS")
+            .map(list)
+            .unwrap_or_else(|| vec!["websocket".into(), "sse".into(), "longpoll".into()]);
+        if transports.is_empty()
+            || transports
+                .iter()
+                .any(|t| !matches!(t.as_str(), "websocket" | "sse" | "longpoll"))
+        {
+            invalid.push("APP_REALTIME_TRANSPORTS (websocket, sse and/or longpoll)".into());
+        }
+        let revalidate = match get("APP_REALTIME_REVALIDATE_SECS").map(|v| v.parse::<u64>()) {
+            None => 60,
+            Some(Ok(n)) if n >= 1 => n,
+            Some(_) => {
+                invalid.push("APP_REALTIME_REVALIDATE_SECS (a number of seconds, 1 or more)".into());
+                60
+            }
+        };
+        let secret = match get("APP_REALTIME_SECRET") {
+            Some(s) if s.len() < crate::kernel::socket_token::MIN_SECRET => {
+                invalid.push("APP_REALTIME_SECRET (at least 32 characters)".into());
+                None
+            }
+            Some(s) => Some(s),
+            // Development: a fresh secret per boot, so socket tokens work locally.
+            None if env == AppEnv::Development => Some(format!(
+                "{:032x}{:032x}",
+                rand::random::<u128>(),
+                rand::random::<u128>()
+            )),
+            None => None,
+        };
+        let token_origins = get("APP_REALTIME_ORIGINS").map(list).unwrap_or_default();
+        if token_origins
+            .iter()
+            .any(|o| !(o.starts_with("https://") || o.starts_with("http://")) || o.ends_with('/'))
+        {
+            invalid.push("APP_REALTIME_ORIGINS (scheme://host[:port], comma-separated)".into());
+        }
+        let cluster = match get("APP_CLUSTER").as_deref() {
+            None | Some("false") | Some("0") => false,
+            Some("true") | Some("1") => true,
+            Some(_) => {
+                invalid.push("APP_CLUSTER (expected true or false)".into());
+                false
+            }
+        };
+        if cluster && !database_url.starts_with("postgres") {
+            invalid.push("APP_CLUSTER (needs a postgres:// DATABASE_URL)".into());
+        }
+        Self {
+            transports,
+            revalidate: Duration::from_secs(revalidate),
+            secret,
+            token_origins,
+            cluster,
+            node: get("APP_NODE"),
+        }
+    }
+
+    /// The test suite's realtime config: every transport, a fixed token secret.
+    pub fn test() -> Self {
+        Self {
+            transports: vec!["websocket".into(), "sse".into(), "longpoll".into()],
+            revalidate: Duration::from_secs(60),
+            secret: Some("t".repeat(32)),
+            token_origins: Vec::new(),
+            cluster: false,
+            node: Some("test".into()),
+        }
+    }
+}
+
+// The secret lives here, so Debug is hand-written.
+impl fmt::Debug for RealtimeConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RealtimeConfig")
+            .field("transports", &self.transports)
+            .field("revalidate", &self.revalidate)
+            .field("secret", &self.secret.as_ref().map(|_| "[redacted]"))
+            .field("token_origins", &self.token_origins)
+            .field("cluster", &self.cluster)
+            .field("node", &self.node)
+            .finish()
+    }
+}
+'''
+
+[[wire]]
+file = "src/state.rs"
+anchor = "state fields"
+text = '''
+/// Channels: topics, rooms, presence, revocations (samples/realtime).
+pub hub: crate::kernel::hub::Hub<crate::channels::AppRoom>,
+'''
+
+[[wire]]
+file = "src/state.rs"
+anchor = "state build"
+text = '''
+let hub = crate::channels::build_hub(&config, &db)?;
+'''
+
+[[wire]]
+file = "src/state.rs"
+anchor = "state init"
+text = '''
+hub,
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "routes"
+text = '''
+// Realtime: the socket and its fallbacks, and the live room (samples/realtime).
+app = app
+    .merge(crate::channels::router())
+    .merge(crate::controllers::live::router());
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "dev routers"
+text = '''
+// SECURITY: development only: /dev/sockets shows frames and presence, and guests sign in without a password; in production these routes don't exist (test: development_guests_and_dev_sockets_do_not_exist_in_production_or_test).
+app = app
+    .merge(crate::controllers::live::dev_router())
+    .merge(crate::kernel::sockets_web::router());
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "paths"
+text = '''
+/// The live room (realtime sample). Links into it carry `hx-boost="false"`: its scripts load in <head>.
+pub fn live() -> String {
+    "/live".into()
+}
+/// `/dev/sockets` (development). Links into it carry `hx-boost="false"` (a kernel page).
+pub fn dev_sockets() -> String {
+    "/dev/sockets".into()
+}
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "routes table"
+text = '''
+("GET",  "/socket",                    "channels::socket",           Access::User),
+("GET",  "/socket/sse",                "channels::socket_sse",       Access::User),
+("POST", "/socket/sse/{id}",           "channels::socket_send",      Access::User),
+("POST", "/socket/poll",               "channels::socket_poll_open", Access::User),
+("GET",  "/socket/poll/{id}",          "channels::socket_poll",      Access::User),
+("POST", "/socket/poll/{id}",          "channels::socket_send",      Access::User),
+("POST", "/socket/token",              "channels::socket_token",     Access::User),
+("GET",  "/live",                      "live::index",                Access::User),
+("GET",  "/live/{name}",               "live::show",                 Access::User),
+("GET",  "/live/{name}/header",        "live::header",               Access::User),
+("POST", "/live/{name}/headline",      "live::update_headline",      Access::User),
+("GET",  "/dev/guests/sign-in",              "live::sign_in_form",         Access::Dev),
+("POST", "/dev/guests/sign-in",              "live::sign_in",              Access::Dev),
+("POST", "/dev/guests/sign-out",             "live::sign_out",             Access::Dev),
+("GET",  "/dev/sockets",               "sockets_web::index",         Access::Dev),
+("GET",  "/dev/sockets/live",          "sockets_web::live",          Access::Dev),
+("GET",  "/dev/sockets.json",          "sockets_web::json",          Access::Dev),
+'''
+
+[[wire]]
+file = "src/controllers/dev.rs"
+anchor = "dev tiles"
+text = '''
+Tile {
+    title: "Sockets",
+    href: "/dev/sockets",
+    description: "Connections, topics, who is present, frame rates and a live frame log.",
+    figure: crate::kernel::sockets_web::tile_figure(&state),
+},
+Tile {
+    title: "Live room",
+    href: "/live",
+    description: "Two panes, presence, typing and messages over offrails.v1. Open it in two browsers.",
+    figure: "/live".to_owned(),
+},
+'''
+
+[[wire]]
+file = "src/controllers/dev.rs"
+anchor = "system facts"
+text = '''
+facts.push(("Realtime transports", c.realtime.transports.join(", ")));
+facts.push((
+    "Realtime cluster",
+    if c.realtime.cluster {
+        "Postgres LISTEN/NOTIFY (APP_CLUSTER)".to_owned()
+    } else {
+        "off: one node".to_owned()
+    },
+));
+'''
+
+[[wire]]
+file = "src/kernel/introspect.rs"
+anchor = "introspect sections"
+text = '''
+out["realtime"] = json!({
+    "node": state.hub.node(),
+    "cluster": state.hub.cluster().kind(),
+    "transports": state.hub.config().transports,
+    "connections": state.hub.total_conns(),
+    "sockets": "/dev/sockets.json",
+});
+'''
+
+[[wire]]
+file = "src/main.rs"
+anchor = "serve start"
+text = '''
+// Realtime: join the cluster bus when APP_CLUSTER is on; the shutdown below closes every socket.
+state.hub.start().await?;
+let realtime_hub = state.hub.clone();
+'''
+
+[[wire]]
+file = "src/main.rs"
+anchor = "serve stop"
+text = '''
+// Every socket says `bye restart` and closes 1012; clients reconnect and resume.
+realtime_hub.close();
+'''
+
+[[wire]]
+file = "migration/src/lib.rs"
+anchor = "migration mods"
+text = '''
+mod m20261016_005000_create_guests;
+mod m20261016_005100_create_rooms;
+mod m20261016_005200_create_realtime_token_uses;
+'''
+
+[[wire]]
+file = "migration/src/lib.rs"
+anchor = "migrations"
+text = '''
+Box::new(m20261016_005000_create_guests::Migration),
+Box::new(m20261016_005100_create_rooms::Migration),
+Box::new(m20261016_005200_create_realtime_token_uses::Migration),
+'''
+
+[[wire]]
+file = "templates/shared/_nav.html"
+anchor = "nav links"
+text = '''
+<a href="{{ paths::live() }}" hx-boost="false" class="text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white">Live room</a>
+'''
+
+[[wire]]
+file = "templates/layouts/application.html"
+anchor = "dev footer links"
+text = '''
+&middot; <a href="{{ paths::dev_sockets() }}" hx-boost="false" class="link">Sockets</a>
+'''
+
+[[wire]]
+file = "tests/app/main.rs"
+anchor = "test mods"
+text = '''
+mod realtime_test;
+'''
+
+[[wire]]
+file = "tests/app/factories.rs"
+anchor = "factories"
+text = '''
+/// A room (the migration seeds `lobby`, `design` and the members-only `backstage`).
+pub async fn find_room(db: &sea_orm::DatabaseConnection, slug: &str) -> offrails_host::models::room::Model {
+    offrails_host::models::room::find_by_slug(db, slug)
+        .await
+        .expect("query")
+        .expect("seeded room")
+}
+'''
+
+[[wire]]
+file = "tests/app/security_test.rs"
+anchor = "router sources"
+text = '''
+"src/channels/mod.rs",
+"src/controllers/live.rs",
+"src/kernel/sockets_web.rs",
+'''
+
+[[wire]]
+file = "tests/app/theme_switch_test.rs"
+anchor = "kernel pages"
+text = '''
+"/dev/sockets",
+'''
+
+[[wire]]
+file = "tests/app/kernel_web_test.rs"
+anchor = "no-store paths"
+text = '''
+"/dev/sockets",
+"/dev/sockets/live",
+"/dev/sockets.json",
+'''
+
+[[wire]]
+file = ".env.example"
+anchor = "env"
+text = '''
+# --- realtime (samples/realtime) ---
+# APP_REALTIME_TRANSPORTS=websocket,sse,longpoll   # behind a proxy that breaks WebSockets, drop websocket: clients fall back
+# APP_REALTIME_REVALIDATE_SECS=60                  # how often a live connection re-checks its session
+# APP_REALTIME_SECRET=                             # 32+ chars: signs socket tokens for cross-origin clients (unset in production: tokens off)
+# APP_REALTIME_ORIGINS=                            # extra origins a token-authenticated socket may come from, comma-separated
+# APP_CLUSTER=false                                # true: nodes share presence and broadcasts over Postgres LISTEN/NOTIFY
+# APP_NODE=                                        # this node's name on /dev/sockets (default host:pid)
+'''
+
+# --- With auth-core: accounts replace the development guests (applied only when auth-core is
+# installed, before or after this sample; tools/install.sh `when`).
+
+[[wire]]
+file = "src/channels/mod.rs"
+anchor = "channel mods"
+when = "auth-core"
+text = '''
+pub mod accounts;
+'''
+
+[[wire]]
+file = "src/channels/identity.rs"
+anchor = "identity source"
+when = "auth-core"
+text = '''
+pub use crate::channels::accounts::{DEV_GUESTS, by_session, current, session_live};
+'''
+
+[[wire]]
+file = "src/controllers/auth.rs"
+anchor = "sessions ended"
+when = "auth-core"
+text = '''
+crate::channels::session_ended(state, user_id);
+'''
+
+[[wire]]
+file = "tests/app/realtime_test/mod.rs"
+anchor = "realtime test mods"
+when = "auth-core"
+text = '''
+mod accounts;
+mod people_accounts;
+'''
+
+[[wire]]
+file = "tests/app/realtime_test/people.rs"
+anchor = "realtime people"
+when = "auth-core"
+text = '''
+pub use super::people_accounts::{create, end_all_sessions, end_session, idle_session, start_session};
+'''

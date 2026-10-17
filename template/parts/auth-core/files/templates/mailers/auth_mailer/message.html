@@ -1,0 +1,30 @@
+{% extends "mailers/layout.html" %}
+{% block title %}{{ mail.subject }}{% endblock %}
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:20px;line-height:1.3;">{{ mail.heading }}</h1>
+{% for p in mail.intro %}<p style="margin:0 0 16px;">{{ p }}</p>{% endfor %}
+{% if let Some(code) = mail.code %}
+<p style="margin:0 0 8px;" class="mail-muted">Your code:</p>
+<p style="margin:0 0 24px;font:700 32px/1.2 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:6px;">{{ code }}</p>
+{% endif %}
+{% if let Some((label, href)) = mail.action %}
+<p style="margin:0 0 24px;">
+  <a href="{{ href }}" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;font-weight:600;padding:10px 18px;border-radius:6px;">{{ label }}</a>
+</p>
+<p class="mail-muted" style="margin:0 0 16px;color:#6b7280;font-size:13px;">Or paste this link into your browser: <a href="{{ href }}" class="mail-link" style="color:#4338ca;word-break:break-all;">{{ href }}</a></p>
+{% endif %}
+{% if !mail.details.is_empty() %}
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 16px;font-size:14px;">
+  {% for (label, value) in mail.details %}
+  <tr><td class="mail-muted" style="padding:2px 16px 2px 0;color:#6b7280;">{{ label }}</td><td style="padding:2px 0;">{{ value }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% for p in mail.outro %}<p style="margin:0 0 16px;">{{ p }}</p>{% endfor %}
+{% if let Some(href) = mail.not_me_url %}
+<p style="margin:0;">
+  <a href="{{ href }}" class="mail-link" style="color:#b91c1c;font-weight:600;">This wasn't me: secure my account</a>
+</p>
+<p class="mail-muted" style="margin:8px 0 0;color:#6b7280;font-size:13px;">That signs your account out on every device. You'll then be able to reset your password.</p>
+{% endif %}
+{% endblock %}

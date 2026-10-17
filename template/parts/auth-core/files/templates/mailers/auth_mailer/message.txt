@@ -1,0 +1,14 @@
+{{ mail.heading }}
+
+{% for p in mail.intro %}{{ p }}
+
+{% endfor %}{% if let Some(code) = mail.code %}Your code: {{ code }}
+
+{% endif %}{% if let Some((label, href)) = mail.action %}{{ label }}: {{ href }}
+
+{% endif %}{% for (label, value) in mail.details %}{{ label }}: {{ value }}
+{% endfor %}{% if !mail.details.is_empty() %}
+{% endif %}{% for p in mail.outro %}{{ p }}
+
+{% endfor %}{% if let Some(href) = mail.not_me_url %}This wasn't me: secure my account (signs out every device): {{ href }}
+{% endif %}

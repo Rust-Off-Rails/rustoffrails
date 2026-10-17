@@ -1,0 +1,27 @@
+{% extends "layouts/application.html" %}
+{% block head %}<script src="/static/auth.js" defer></script>{% endblock %}
+{% block content %}
+<section class="mx-auto max-w-md">
+  <div class="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm sm:p-8">
+    <h1 class="text-2xl font-semibold tracking-tight">Confirm your email</h1>
+    <p class="mt-2 text-gray-700 dark:text-gray-300">Finish creating the account for <strong class="font-medium text-gray-900 dark:text-gray-100">{{ email }}</strong>.</p>
+    <form method="post" action="{{ action }}" class="mt-6" novalidate>
+      {% if let Some(alert) = alert %}
+      <div role="alert" class="mb-4 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950 px-4 py-3 text-sm text-red-800 dark:text-red-200">{{ alert }}</div>
+      {% endif %}
+      {% if needs_password %}
+      <p class="mb-4 text-sm text-gray-600 dark:text-gray-400">You opened this link in a different browser from the one you signed up in, so enter the password you chose to confirm it's you.</p>
+      <input type="hidden" name="username" autocomplete="username" value="{{ email }}">
+      <label for="verify_password" class="label">Password</label>
+      <div class="relative">
+        <input id="verify_password" name="password" type="password" class="input pr-16" autocomplete="current-password" required
+               {% if !errors.on("password").is_empty() %}aria-invalid="true" aria-describedby="verify_password_error"{% endif %}>
+        <button type="button" data-reveal="verify_password" aria-pressed="false" aria-label="Show password" class="absolute inset-y-0 right-0 mt-1 rounded-r-md px-3 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span data-reveal-label>Show</span></button>
+      </div>
+      {% for m in errors.on("password") %}<p id="verify_password_error" class="field-error">Password {{ m }}</p>{% endfor %}
+      {% endif %}
+      <button class="btn mt-4 w-full justify-center">Confirm and sign in</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

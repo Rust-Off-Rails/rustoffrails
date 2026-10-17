@@ -1,0 +1,330 @@
+# samples/jobs/sample.toml: the format is samples/FORMAT.md.
+name = "jobs"
+version = "0.7.0"
+summary = "A DB-backed job queue (Oban-style): SKIP LOCKED / single-writer claims, typed args, retries with exponential backoff and jitter, unique jobs, priorities, scheduled and cron jobs, rate-limited queues, batches, timeouts, orphan rescue, graceful shutdown, pruning, an inline worker and an `app jobs` CLI"
+depends_on = []
+extracted_from = "Rust off Rails apps"
+
+# Run in the app root, one per line, never with a version (cargo add picks it; read Cargo.lock).
+crates = [
+  "croner",
+]
+
+# Every file under files/ is copied to the same path in the app.
+
+[[wire]]
+file = "src/kernel/mod.rs"
+anchor = "kernel mods"
+text = '''
+pub mod jobs;
+'''
+
+[[wire]]
+file = "src/lib.rs"
+anchor = "lib mods"
+text = '''
+pub mod jobs;
+'''
+
+[[wire]]
+file = "migration/src/lib.rs"
+anchor = "migration mods"
+text = '''
+mod m20261016_000200_create_jobs;
+'''
+
+[[wire]]
+file = "migration/src/lib.rs"
+anchor = "migrations"
+text = '''
+Box::new(m20261016_000200_create_jobs::Migration),
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config fields"
+text = '''
+/// The job queue: `APP_QUEUES`, `APP_INLINE_WORKER`, `APP_JOBS_*`.
+pub jobs: JobsConfig,
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config debug"
+text = '''
+d.field("jobs", &self.jobs);
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config parse"
+text = '''
+let jobs = JobsConfig::from_env(env)?;
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config init"
+text = '''
+jobs,
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config test"
+text = '''
+jobs: JobsConfig::test(),
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config sections"
+text = '''
+/// The job queue's settings (.offrails/guides/jobs.md#queues--configuration).
+#[derive(Debug, Clone)]
+pub struct JobsConfig {
+    /// `APP_QUEUES`: `name:limit[:rate]`, comma-separated. The limit is per node; the rate
+    /// (`30/1m`) is global across nodes.
+    pub queues: Vec<crate::kernel::jobs::QueueSpec>,
+    /// `APP_INLINE_WORKER`: run the worker inside `app serve` (default: development only).
+    pub inline_worker: bool,
+    /// `APP_JOBS_PRUNE_DAYS`: finished jobs are deleted after this many days (default 7).
+    pub prune_days: u32,
+    /// `APP_JOBS_SHUTDOWN_GRACE`: seconds in-flight jobs get after SIGTERM (default 25, 3 in
+    /// development; keep it below the platform's kill timeout).
+    pub shutdown_grace: Duration,
+    /// `APP_JOBS_NODE`: this process's name on the dashboard. Default: a random `node-<hex>`,
+    /// never the hostname.
+    pub node: Option<String>,
+}
+
+impl JobsConfig {
+    /// APP: the queues every node runs unless `APP_QUEUES` says otherwise. `webhooks` serves the
+    /// example workers (src/jobs/examples.rs); drop it with them.
+    pub const DEFAULT_QUEUES: &'static str = "default:10,mailers:5,webhooks:3:30/1m";
+
+    pub fn from_env(env: AppEnv) -> anyhow::Result<Self> {
+        let get = |name: &str| std::env::var(name).ok().filter(|v| !v.trim().is_empty());
+        let mut invalid: Vec<String> = Vec::new();
+        let queues = crate::kernel::jobs::QueueSpec::parse_list(
+            get("APP_QUEUES").as_deref().unwrap_or(Self::DEFAULT_QUEUES),
+        )
+        .unwrap_or_else(|e| {
+            invalid.push(format!("APP_QUEUES ({e})"));
+            Vec::new()
+        });
+        let inline_worker = match get("APP_INLINE_WORKER").as_deref() {
+            None => env == AppEnv::Development,
+            Some("true" | "1") => true,
+            Some("false" | "0") => false,
+            Some(_) => {
+                invalid.push("APP_INLINE_WORKER (expected true or false)".into());
+                false
+            }
+        };
+        let mut number = |name: &str, default: u64, range: std::ops::RangeInclusive<u64>| {
+            match get(name).map(|v| v.parse::<u64>()) {
+                None => default,
+                Some(Ok(n)) if range.contains(&n) => n,
+                Some(_) => {
+                    invalid.push(format!("{name} (expected {}-{})", range.start(), range.end()));
+                    default
+                }
+            }
+        };
+        let prune_days = number("APP_JOBS_PRUNE_DAYS", 7, 1..=3650) as u32;
+        // WHY: development restarts on every save (bin/dev); a long grace would stall each one.
+        let default_grace = if env == AppEnv::Development { 3 } else { 25 };
+        let shutdown_grace =
+            Duration::from_secs(number("APP_JOBS_SHUTDOWN_GRACE", default_grace, 0..=3600));
+        let node = get("APP_JOBS_NODE");
+        if let Some(n) = &node
+            && !(n.len() <= 64
+                && n.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':')))
+        {
+            invalid.push("APP_JOBS_NODE (1-64 characters of a-z, 0-9, - _ . :)".into());
+        }
+        if !invalid.is_empty() {
+            anyhow::bail!("invalid env vars: {} (see .env.example)", invalid.join(", "));
+        }
+        Ok(Self {
+            queues,
+            inline_worker,
+            prune_days,
+            shutdown_grace,
+            node,
+        })
+    }
+
+    pub fn test() -> Self {
+        Self {
+            queues: crate::kernel::jobs::QueueSpec::parse_list(Self::DEFAULT_QUEUES)
+                .unwrap_or_default(),
+            inline_worker: false,
+            prune_days: 7,
+            shutdown_grace: Duration::from_secs(1),
+            node: None,
+        }
+    }
+}
+
+'''
+
+[[wire]]
+file = "src/main.rs"
+anchor = "cli commands"
+text = '''
+/// Run the job worker and the cron scheduler (`bin/jobs`).
+Worker {
+    /// This process's queues, overriding APP_QUEUES: `default:10,mailers:5`.
+    #[arg(long)]
+    queues: Option<String>,
+},
+/// Inspect and operate the job queue (the same operations as /admin/jobs).
+Jobs {
+    #[command(subcommand)]
+    command: offrails_host::jobs::cli::JobsCommand,
+},
+'''
+
+[[wire]]
+file = "src/main.rs"
+anchor = "cli dispatch"
+text = '''
+Command::Worker { queues } => {
+    let state = app_state(config).await?;
+    offrails_host::jobs::run_worker(state, queues, shutdown_signal()).await
+}
+Command::Jobs { command } => {
+    let state = app_state(config).await?;
+    offrails_host::jobs::cli::run(&state, command).await
+}
+'''
+
+[[wire]]
+file = "src/main.rs"
+anchor = "serve start"
+text = '''
+// APP_INLINE_WORKER (development default): the job worker runs inside this process.
+let inline_worker = offrails_host::jobs::start_inline_worker(&state);
+'''
+
+[[wire]]
+file = "src/main.rs"
+anchor = "serve stop"
+text = '''
+if let Some(worker) = inline_worker {
+    worker.stop().await; // in-flight jobs get APP_JOBS_SHUTDOWN_GRACE
+}
+'''
+
+[[wire]]
+file = ".env.example"
+anchor = "env"
+text = '''
+# --- jobs (.offrails/guides/jobs.md) ---
+# APP_QUEUES=default:10,mailers:5,webhooks:3:30/1m   # name:limit[:rate per period]; limit is per node, rate is global
+# APP_INLINE_WORKER=true        # run the worker inside `app serve` (default: true in development only)
+# APP_JOBS_PRUNE_DAYS=7         # delete finished jobs after N days
+# APP_JOBS_SHUTDOWN_GRACE=25    # seconds in-flight jobs get on SIGTERM (default 25, 3 in development; below the platform's kill timeout)
+# APP_JOBS_NODE=web-1           # this process's name on the dashboard (default: random node-<hex>, never the hostname)
+'''
+
+[[wire]]
+file = "tests/app/main.rs"
+anchor = "test mods"
+text = '''
+mod jobs_test;
+'''
+
+[[wire]]
+file = "tests/app/support.rs"
+anchor = "test support"
+text = '''
+// ----- jobs (.offrails/guides/jobs.md#testing-obantesting-equivalents) -----
+
+/// Runs every due job through the real kernel path until none are due.
+pub async fn drain_jobs(&self) -> offrails_host::kernel::jobs::Drained {
+    self.drain(None, false).await
+}
+
+/// `drain_jobs` for one queue.
+pub async fn drain_queue(&self, queue: &str) -> offrails_host::kernel::jobs::Drained {
+    self.drain(Some(queue), false).await
+}
+
+/// Also runs `scheduled` jobs as if their time had come (each once per drain).
+pub async fn drain_all_jobs(&self) -> offrails_host::kernel::jobs::Drained {
+    self.drain(None, true).await
+}
+
+async fn drain(
+    &self,
+    queue: Option<&str>,
+    include_scheduled: bool,
+) -> offrails_host::kernel::jobs::Drained {
+    offrails_host::kernel::jobs::drain(
+        self.db(),
+        &offrails_host::jobs::dispatch_fn(self.state.clone()),
+        offrails_host::jobs::worker_config,
+        queue,
+        include_scheduled,
+    )
+    .await
+    .expect("drain jobs")
+}
+
+/// `available`/`scheduled` jobs of `W`, with their decoded args.
+pub async fn enqueued<W: offrails_host::jobs::Worker>(
+    &self,
+) -> Vec<(offrails_host::kernel::jobs::job::Model, W)> {
+    use offrails_host::kernel::jobs::{JobState, job};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+    job::Entity::find()
+        .filter(job::Column::Worker.eq(W::NAME))
+        .filter(job::Column::State.is_in([JobState::Available, JobState::Scheduled]))
+        .order_by_asc(job::Column::Id)
+        .all(self.db())
+        .await
+        .expect("enqueued jobs")
+        .into_iter()
+        .map(|row| {
+            let args = serde_json::from_value(row.args.clone()).expect("args decode");
+            (row, args)
+        })
+        .collect()
+}
+
+/// Panics, listing what is enqueued, unless an `available`/`scheduled` `W` matches.
+pub async fn assert_enqueued<W: offrails_host::jobs::Worker + std::fmt::Debug>(
+    &self,
+    pred: impl Fn(&W) -> bool,
+) {
+    let jobs = self.enqueued::<W>().await;
+    assert!(
+        jobs.iter().any(|(_, w)| pred(w)),
+        "no matching {} enqueued; enqueued: {:?}",
+        W::NAME,
+        jobs.iter().map(|(_, w)| w).collect::<Vec<_>>()
+    );
+}
+
+/// Panics if any `available`/`scheduled` `W` exists.
+pub async fn refute_enqueued<W: offrails_host::jobs::Worker>(&self) {
+    let jobs = self.enqueued::<W>().await;
+    assert!(jobs.is_empty(), "{} {} enqueued", jobs.len(), W::NAME);
+}
+
+/// Round-trips `w` through JSON (catching serde mistakes), then runs `perform` once.
+pub async fn perform_job<W: offrails_host::jobs::Worker>(
+    &self,
+    w: W,
+) -> anyhow::Result<offrails_host::kernel::jobs::Outcome> {
+    let json = serde_json::to_value(&w).expect("args serialize");
+    let w: W = serde_json::from_value(json).expect("args round-trip");
+    let info = offrails_host::kernel::jobs::JobInfo::synthetic(W::NAME, W::QUEUE);
+    w.perform(&info, &self.state).await
+}
+
+'''

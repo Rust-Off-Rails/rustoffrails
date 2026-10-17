@@ -1,0 +1,16 @@
+{# A run: live (dashboard-ai.js opens data-stream and appends each step) or finished. #}
+<article class="ai-run st-{{ r.status }}" data-ai-run{% if r.live %} data-stream="{{ r.stream }}"{% endif %}{% if !r.id.is_empty() %} aria-labelledby="run-h-{{ r.id }}"{% endif %}>
+{% if r.id.is_empty() %}
+  {% if let Some(e) = r.error %}<p class="notice-inline" role="alert">{{ e }}</p>{% endif %}
+{% else %}
+  <header class="ai-run-head">
+    <h3 id="run-h-{{ r.id }}">{{ r.kind }}</h3>
+    <span class="ai-status" data-ai-status role="status">{% if r.live %}<span class="spinner" aria-hidden="true"></span> {% endif %}<span data-ai-status-text>{{ r.status_text }}</span></span>
+    <a class="ai-permalink" href="{{ r.page }}">Permalink</a>
+  </header>
+  <p class="ai-q">{{ r.question }}</p>
+  <ol class="ai-steps" data-ai-steps>{% for s in r.steps %}{% include "kernel/dashboard/_ai_step.html" %}{% endfor %}</ol>
+  {% if r.live %}<noscript><p class="hint">Still investigating. <a href="{{ r.page }}?wait=1">Wait for the answer</a> (with JavaScript this page updates live).</p></noscript>{% endif %}
+  <div class="ai-end" data-ai-end>{% if !r.live %}{% include "kernel/dashboard/_ai_run_end.html" %}{% endif %}</div>
+{% endif %}
+</article>

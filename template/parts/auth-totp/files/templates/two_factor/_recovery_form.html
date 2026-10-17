@@ -1,0 +1,5 @@
+<form method="post" action="{{ paths::two_factor_recovery() }}" class="mt-3" novalidate>
+  <label for="recovery_code_inline" class="label">Recovery code</label>
+  <input id="recovery_code_inline" name="code" type="text" class="input font-mono uppercase tracking-widest" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXXX-XXXXX">
+  <button class="btn-secondary mt-3 w-full justify-center">Use recovery code</button>
+</form>

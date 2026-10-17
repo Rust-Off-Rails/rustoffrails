@@ -1,0 +1,35 @@
+<div id="charts" class="charts"{% if live %} hx-get="/admin/jobs?part=charts" hx-trigger="every 10s" hx-swap="outerHTML" hx-sync="this:drop"{% endif %}>
+  <figure class="chart-card">
+    <figcaption>
+      <span class="ch-title">Throughput <span class="muted">· last 60 min</span></span>
+      <span class="legend"><span class="sw ok" aria-hidden="true"></span>Completed <strong>{{ charts.completed }}</strong> <span class="sw err" aria-hidden="true"></span>Failed <strong>{{ charts.failed }}</strong></span>
+    </figcaption>
+    {% if charts.has_data %}
+    <svg class="chart" viewBox="0 0 600 120" preserveAspectRatio="none" role="img" aria-label="{{ charts.summary }}">
+      <line class="grid" x1="0" y1="60" x2="600" y2="60" vector-effect="non-scaling-stroke"/>
+      <line class="base" x1="0" y1="120" x2="600" y2="120" vector-effect="non-scaling-stroke"/>
+      {% for b in charts.bars %}<g><title>{{ b.title }}</title><rect class="hit" x="{{ b.x }}" y="0" width="{{ b.width }}" height="120"/>{% if b.has_ok %}<rect class="ok" x="{{ b.bar_x }}" y="{{ b.ok_y }}" width="{{ b.bar_width }}" height="{{ b.ok_h }}"/>{% endif %}{% if b.has_err %}<rect class="err" x="{{ b.bar_x }}" y="{{ b.err_y }}" width="{{ b.bar_width }}" height="{{ b.err_h }}"/>{% endif %}</g>{% endfor %}
+    </svg>
+    <div class="axis"><span>{{ charts.start_label }}</span><span>{{ charts.per_min }}/min avg · peak {{ charts.peak }}/min</span><span>{{ charts.end_label }} UTC</span></div>
+    {% else %}
+    <p class="chart-empty">No job finished in the last hour. Bars appear here as jobs complete or fail.</p>
+    {% endif %}
+  </figure>
+  <figure class="chart-card">
+    <figcaption>
+      <span class="ch-title">Queue wait <span class="muted">· scheduled → started</span></span>
+      <span class="legend"><span class="sw p95" aria-hidden="true"></span>p95 <strong>{{ charts.wait_p95 }}</strong> <span class="sw p50" aria-hidden="true"></span>p50 <strong>{{ charts.wait_p50 }}</strong></span>
+    </figcaption>
+    {% if charts.has_waits %}
+    <svg class="chart" viewBox="0 0 600 120" preserveAspectRatio="none" role="img" aria-label="Queue wait, 50th and 95th percentile per minute; worst p95 {{ charts.wait_peak }}">
+      <line class="grid" x1="0" y1="60" x2="600" y2="60" vector-effect="non-scaling-stroke"/>
+      <line class="base" x1="0" y1="120" x2="600" y2="120" vector-effect="non-scaling-stroke"/>
+      <polyline class="p95" points="{{ charts.p95 }}" vector-effect="non-scaling-stroke"/>
+      <polyline class="p50" points="{{ charts.p50 }}" vector-effect="non-scaling-stroke"/>
+    </svg>
+    <div class="axis"><span>{{ charts.start_label }}</span><span>worst p95 {{ charts.wait_peak }}</span><span>{{ charts.end_label }} UTC</span></div>
+    {% else %}
+    <p class="chart-empty">No job started in the last hour.</p>
+    {% endif %}
+  </figure>
+</div>

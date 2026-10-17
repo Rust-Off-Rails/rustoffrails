@@ -1,0 +1,17 @@
+{% if let Some(r) = run %}
+<div class="run{% if r.running %} running{% endif %}">
+  <p class="run-head"><strong>{{ r.label }}</strong> {% if r.running %}<span class="badge tone-info">running</span>{% else %}<span class="badge tone-ok">done</span>{% endif %} <span class="muted">{{ r.when }} · to {{ r.target }}</span></p>
+  <div class="progress" role="progressbar" aria-label="{{ r.label }} progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ r.percent }}"><svg viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect class="track" width="100" height="8" rx="4"/><rect class="fill" width="{{ r.percent }}" height="8" rx="4"/></svg></div>
+  <dl class="kv run-kv">
+    <dt>Sent</dt><dd>{{ r.sent }} of {{ r.total }}</dd>
+    <dt>OK / failed</dt><dd>{{ r.ok }} / <span class="t-err">{{ r.failed }}</span>{% if r.skipped > 0 %} · {{ r.skipped }} skipped at the in-flight cap{% endif %}</dd>
+    <dt>Rate</dt><dd>{{ r.rate }}</dd>
+    <dt>Latency</dt><dd>p50 {{ r.p50 }} · p95 {{ r.p95 }} · p99 {{ r.p99 }}</dd>
+    <dt>Routes</dt><dd class="mono">{{ r.paths }}</dd>
+  </dl>
+  {% if r.running %}<form method="post" action="/dev/dashboard/lab/stop"><button class="btn danger">Stop</button></form>{% endif %}
+</div>
+{% else %}
+<p class="empty">Nothing has run yet.</p>
+{% endif %}
+{% if let Some(s) = spike %}<p class="notice-inline">{{ s }}</p>{% endif %}

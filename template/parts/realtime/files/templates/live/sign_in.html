@@ -1,0 +1,15 @@
+{% extends "layouts/application.html" %}
+{% block content %}
+<div class="mx-auto max-w-md">
+  <h1 class="text-2xl font-semibold tracking-tight">Join the live room</h1>
+  <p class="mt-2 text-sm text-gray-700 dark:text-gray-300">Development only: pick a display name to join as a guest. Open a second browser (or a private window) to be someone else.</p>
+  {% include "shared/_errors.html" %}
+  <form method="post" action="/dev/guests/sign-in" hx-boost="false" class="mt-6 space-y-4">
+    <div>
+      <label for="name" class="label">Display name</label>
+      <input id="name" name="name" value="{{ name }}" maxlength="40" required autofocus autocomplete="nickname" class="input"{% if !errors.on("name").is_empty() %} aria-invalid="true"{% endif %}>
+    </div>
+    <button class="btn">Join</button>
+  </form>
+</div>
+{% endblock %}

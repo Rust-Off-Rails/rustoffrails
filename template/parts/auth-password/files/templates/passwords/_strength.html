@@ -1,0 +1,9 @@
+{% if let Some(s) = strength %}
+<div class="flex items-center gap-3">
+  <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-800" aria-hidden="true"><div class="h-full rounded-full {{ s.bar_class() }}"></div></div>
+  <span class="w-16 text-right text-xs font-medium text-gray-700 dark:text-gray-300">{{ s.label }}</span>
+</div>
+<p class="mt-1 text-xs text-gray-600 dark:text-gray-400">{{ s.hint }}</p>
+{% else %}
+<p class="text-xs text-gray-600 dark:text-gray-400">At least 12 characters. A few unrelated words work well; spaces are fine.</p>
+{% endif %}

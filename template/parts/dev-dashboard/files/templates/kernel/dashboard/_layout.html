@@ -1,0 +1,22 @@
+{% extends "kernel/layout.html" %}
+{% block content %}
+<div class="dash" data-dashboard data-stream="{{ d.live }}" data-refresh="{{ d.refresh }}" data-base="{{ d.base }}">
+  <svg class="defs" aria-hidden="true" focusable="false"><defs><linearGradient id="grad-s1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="stop-s1" stop-opacity=".38"/><stop offset="1" class="stop-s1" stop-opacity="0"/></linearGradient><linearGradient id="grad-s2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="stop-s2" stop-opacity=".38"/><stop offset="1" class="stop-s2" stop-opacity="0"/></linearGradient><linearGradient id="grad-s3" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="stop-s3" stop-opacity=".38"/><stop offset="1" class="stop-s3" stop-opacity="0"/></linearGradient><linearGradient id="grad-s4" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="stop-s4" stop-opacity=".38"/><stop offset="1" class="stop-s4" stop-opacity="0"/></linearGradient><linearGradient id="grad-ok" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="stop-ok" stop-opacity=".38"/><stop offset="1" class="stop-ok" stop-opacity="0"/></linearGradient><linearGradient id="grad-warn" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="stop-warn" stop-opacity=".38"/><stop offset="1" class="stop-warn" stop-opacity="0"/></linearGradient><linearGradient id="grad-err" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="stop-err" stop-opacity=".38"/><stop offset="1" class="stop-err" stop-opacity="0"/></linearGradient><linearGradient id="grad-idle" x1="0" y1="0" x2="0" y2="1"><stop offset="0" class="stop-idle" stop-opacity=".38"/><stop offset="1" class="stop-idle" stop-opacity="0"/></linearGradient></defs></svg>
+  <nav class="dash-nav" aria-label="Dashboard">
+    {% for n in d.nav %}<a href="{{ n.href }}"{% if n.current %} aria-current="page"{% endif %}>{{ n.label }}</a>{% endfor %}
+    {% if !d.live.is_empty() %}
+    <span class="dash-live" data-live-status><span class="dot" aria-hidden="true"></span><span data-live-text>Live</span></span>
+    <button type="button" class="btn quiet dash-pause" data-live-toggle aria-pressed="false" hidden>Pause</button>
+    {% endif %}
+  </nav>
+  {% if d.ro %}<p class="dash-ro">Read-only production view: no load lab, no EXPLAIN, no parameters, no logs.</p>{% endif %}
+  {% if !d.ai_tab.is_empty() %}
+  {# Ask AI: dashboard.js loads the panel (ai/panel) the first time it opens; without it, the link. #}
+  <details class="ai-panel" data-ai-panel data-src="{{ d.base }}/ai/panel?tab={{ d.ai_tab }}&amp;item={{ d.ai_item }}">
+    <summary><svg class="ai-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>Ask AI <span class="muted">about this page</span></summary>
+    <div class="ai-mount" data-ai-body><p class="pad"><a href="{{ d.base }}/ai?tab={{ d.ai_tab }}&amp;item={{ d.ai_item }}">Open the assistant</a> for this page.</p></div>
+  </details>
+  {% endif %}
+  {% block dash %}{% endblock %}
+</div>
+{% endblock %}

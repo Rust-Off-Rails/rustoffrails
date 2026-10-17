@@ -1,0 +1,26 @@
+<figure class="chart" id="chart-{{ chart.key }}" data-chart data-key="{{ chart.key }}" data-unit="{{ chart.unit }}" data-from="{{ chart.from }}" data-to="{{ chart.to }}" data-times="{{ chart.times }}"{% if chart.drill %} data-drill{% endif %}>
+  <figcaption>
+    <h2>{{ chart.title }}{% if chart.demo %} <span class="badge tone-info demo-badge">demo data</span>{% endif %}</h2>
+    <span class="legend">{% for l in chart.lines %}<span class="key {{ l.class }}"><span class="swatch" aria-hidden="true"></span>{{ l.name }} <b>{{ l.summary }}</b></span>{% endfor %}</span>
+  </figcaption>
+  <div class="plot-wrap" tabindex="0" role="group" aria-label="{{ chart.title }}: use the arrow keys to read values, Shift with the arrows to select a range, Enter to zoom{% if chart.drill %} or open that minute's traces{% endif %}, Escape to clear">
+    <svg class="plot" viewBox="0 0 {{ chart.w }} {{ chart.h }}" role="img" aria-label="{{ chart.summary }}" focusable="false" data-x0="{{ chart.x0 }}" data-x1="{{ chart.x1 }}">
+      {% for g in chart.grid %}<line class="grid" x1="{{ chart.x0 }}" x2="{{ chart.x1 }}" y1="{{ g.pos }}" y2="{{ g.pos }}"/><text class="ylab" x="{{ chart.x0 }}" dx="-6" y="{{ g.pos }}" dy="4">{{ g.label }}</text>{% endfor %}
+      {% for t in chart.xticks %}<text class="xlab" x="{{ t.pos }}" y="{{ chart.h }}" dy="-5">{{ t.label }}</text>{% endfor %}
+      {% for m in chart.marks %}<g class="mark mark-{{ m.kind }}"><title>{{ m.label }} ({{ m.when }})</title><line x1="{{ m.x }}" x2="{{ m.x }}" y1="{{ chart.y0 }}" y2="{{ chart.y1 }}"/><circle cx="{{ m.x }}" cy="{{ chart.y0 }}" r="3.5"/></g>{% endfor %}
+      {% for l in chart.lines %}<path class="area {{ l.class }}" d="{{ l.area }}"/>{% endfor %}
+      {% for l in chart.lines %}<path class="line {{ l.class }}" d="{{ l.d }}" data-name="{{ l.name }}" data-values="{{ l.values }}"/>{% endfor %}
+      <rect class="selection" x="0" y="{{ chart.y0 }}" width="0" height="{{ chart.h - 32 }}" hidden/>
+      <line class="cursor" x1="0" x2="0" y1="{{ chart.y0 }}" y2="{{ chart.y1 }}" hidden/>
+      {% if chart.empty %}<text class="nodata" x="{{ chart.w / 2 }}" y="{{ chart.h / 2 }}">Collecting: the first point arrives within a second</text>{% endif %}
+    </svg>
+  </div>
+  <details class="data">
+    <summary>Data table</summary>
+    <div class="scroll" tabindex="0" role="region" aria-label="{{ chart.title }} data"><table>
+      <caption class="visually-hidden">{{ chart.title }}, newest first</caption>
+      <thead><tr>{% for h in chart.table_head %}<th scope="col">{{ h }}</th>{% endfor %}</tr></thead>
+      <tbody>{% for row in chart.table %}<tr>{% for v in row %}<td>{{ v }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+    </table></div>
+  </details>
+</figure>

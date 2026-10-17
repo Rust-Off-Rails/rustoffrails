@@ -1,0 +1,20 @@
+{% extends "kernel/dashboard/_layout.html" %}
+{% block dash %}
+<header class="dash-head"><h1>Logs</h1>
+  <span class="dash-live" data-log-status><span class="dot" aria-hidden="true"></span><span data-log-status-text>Live</span></span>
+  <button type="button" class="btn" data-log-toggle aria-pressed="false" hidden>Pause</button>
+</header>
+<form class="filters" method="get" action="/dev/dashboard/logs" role="search">
+  <label>Level <select name="level">{% for (v, label) in levels %}<option value="{{ v }}"{% if f.level == *v %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+  <label>Target <input name="target" value="{{ f.target }}" placeholder="offrails_host::jobs"></label>
+  <label>Text <input name="q" type="search" value="{{ f.q }}" placeholder="message or field"></label>
+  <label>Show <select name="kind"><option value=""{% if f.kind.is_empty() %} selected{% endif %}>Logs and requests</option><option value="requests"{% if f.kind == "requests" %} selected{% endif %}>Requests only</option><option value="logs"{% if f.kind == "logs" %} selected{% endif %}>Logs only</option></select></label>
+  <button class="btn">Filter</button>
+</form>
+<p class="hint">Newest first, live over Server-Sent Events. Fields named like passwords, tokens or cookies show as [redacted]. <span data-log-buffered></span></p>
+<ol class="logs" reversed tabindex="0" aria-label="Log lines, newest first" data-logs data-log-stream="{{ stream }}" aria-live="off">
+{% for l in lines %}{% include "kernel/dashboard/_log_row.html" %}
+{% endfor %}
+</ol>
+{% if lines.is_empty() %}<p class="empty" data-logs-empty>No lines match yet.</p>{% endif %}
+{% endblock %}

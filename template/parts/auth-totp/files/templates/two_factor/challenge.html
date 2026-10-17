@@ -1,0 +1,43 @@
+{% extends "layouts/application.html" %}
+{% block head %}<script src="/static/auth.js" defer></script>{% endblock %}
+{% block content %}
+<section class="mx-auto max-w-md">
+  <div class="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm sm:p-8">
+    <div class="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-300">
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-6 w-6"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3"/></svg>
+    </div>
+    {% if let Some(alert) = alert %}
+    <div role="alert" class="mt-4 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950 px-4 py-3 text-sm text-red-800 dark:text-red-200">{{ alert }}</div>
+    {% endif %}
+    {% if mode == "recovery" %}
+    <h1 class="mt-4 text-2xl font-semibold tracking-tight">Use a recovery code</h1>
+    <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">Enter one of the recovery codes you saved when you turned on two-factor. Each code works once.</p>
+    <form method="post" action="{{ paths::two_factor_recovery() }}" class="mt-6" novalidate>
+      <label for="recovery_code" class="label">Recovery code</label>
+      <input id="recovery_code" name="code" type="text" class="input font-mono uppercase tracking-widest" autocomplete="off" autocapitalize="characters" spellcheck="false" required autofocus placeholder="XXXXX-XXXXX"
+             {% if !errors.on("code").is_empty() %}aria-invalid="true" aria-describedby="recovery_code_error"{% endif %}>
+      {% for m in errors.on("code") %}<p id="recovery_code_error" class="field-error">Code {{ m }}</p>{% endfor %}
+      <label class="mt-4 flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><input type="checkbox" name="trust_device" value="1" class="h-4 w-4 rounded border-gray-300 dark:border-gray-700"> Don't ask again on this device for 30 days</label>
+      <button class="btn mt-6 w-full justify-center">Verify</button>
+    </form>
+    <form method="get" action="{{ paths::two_factor() }}" class="mt-4 text-center"><button class="text-sm link">Use your authenticator app instead</button></form>
+    {% else %}
+    <h1 class="mt-4 text-2xl font-semibold tracking-tight">Two-factor authentication</h1>
+    <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">Open your authenticator app and enter the 6-digit code for {{ crate::config::APP_NAME }}.</p>
+    <form method="post" action="{{ paths::two_factor() }}" class="mt-6" novalidate>
+      <label for="totp_code" class="label">Authentication code</label>
+      <input id="totp_code" name="code" type="text" class="input text-center font-mono text-2xl tracking-[0.5em]" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" maxlength="7" required autofocus data-otp
+             {% if !errors.on("code").is_empty() %}aria-invalid="true" aria-describedby="totp_code_error"{% endif %}>
+      {% for m in errors.on("code") %}<p id="totp_code_error" class="field-error">Code {{ m }}</p>{% endfor %}
+      <label class="mt-4 flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><input type="checkbox" name="trust_device" value="1" class="h-4 w-4 rounded border-gray-300 dark:border-gray-700"> Don't ask again on this device for 30 days</label>
+      <button class="btn mt-6 w-full justify-center">Verify</button>
+    </form>
+    <details class="mt-6 text-sm text-gray-600 dark:text-gray-400">
+      <summary class="cursor-pointer font-medium text-gray-700 dark:text-gray-300">Lost your phone?</summary>
+      <p class="mt-2">Use one of your recovery codes instead.</p>
+      {% include "two_factor/_recovery_form.html" %}
+    </details>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

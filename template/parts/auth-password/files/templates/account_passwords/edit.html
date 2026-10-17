@@ -1,0 +1,27 @@
+{% extends "layouts/application.html" %}
+{% block head %}<script src="/static/auth.js" defer></script>{% endblock %}
+{% block content %}
+<section class="mx-auto max-w-md">
+  <div class="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm sm:p-8">
+    <h1 class="text-2xl font-semibold tracking-tight">{% if has_password %}Change your password{% else %}Set a password{% endif %}</h1>
+    <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">{% if has_password %}Every other device will be signed out.{% else %}You'll be able to sign in with your email and this password, as well as the way you do now.{% endif %}</p>
+    <form method="post" action="{{ paths::account_password() }}" class="mt-2" novalidate>
+      <input type="hidden" name="username" autocomplete="username" value="{{ user.email }}">
+      {% if has_password %}
+      <div class="mt-4">
+        <label for="current_password" class="label">Current password</label>
+        <input id="current_password" name="current_password" type="password" class="input" autocomplete="current-password" required
+               {% if !errors.on("current_password").is_empty() %}aria-invalid="true" aria-describedby="current_password_error"{% endif %}>
+        {% for m in errors.on("current_password") %}<p id="current_password_error" class="field-error">Current password {{ m }}</p>{% endfor %}
+      </div>
+      {% endif %}
+      {% let new_password_label = "New password" %}
+      {% include "passwords/_new_password.html" %}
+      <div class="mt-6 flex flex-wrap gap-3">
+        <button class="btn">{% if has_password %}Change password{% else %}Set password{% endif %}</button>
+        <a href="{{ paths::account() }}" class="btn-secondary">Cancel</a>
+      </div>
+    </form>
+  </div>
+</section>
+{% endblock %}

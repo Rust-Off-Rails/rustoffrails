@@ -1,0 +1,42 @@
+{% extends "kernel/layout.html" %}
+{% block content %}
+<div class="jobs" data-page="cron">
+{% include "kernel/jobs/_nav.html" %}
+<div class="page-head">
+  <h1>Cron</h1>
+  <p class="muted">Recurring jobs from <code>src/jobs/recurring.rs</code>. Times are <strong>UTC</strong>; each run happens once across all nodes.</p>
+</div>
+{% if entries.is_empty() %}
+<section class="panel"><p class="empty">No recurring jobs. Add a <code>Recurring { key, cron, job }</code> to <code>SCHEDULE</code>.</p></section>
+{% else %}
+<section class="panel flush scroll" tabindex="0" aria-label="Recurring jobs">
+  <table class="data">
+    <thead><tr><th scope="col">Entry</th><th scope="col">Schedule (UTC)</th><th scope="col">Worker</th><th scope="col">Next run</th><th scope="col">Last run</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+    <tbody>
+      {% for e in entries %}
+      <tr>
+        <th scope="row" class="mono">{{ e.key }}</th>
+        <td><code class="cronexpr">{{ e.cron }}</code><div class="muted small">{{ e.description }}</div></td>
+        <td><a class="mono" href="{{ e.worker_href }}">{{ e.worker }}</a><div class="muted small">queue {{ e.queue }}</div></td>
+        <td>{% if e.valid %}<strong>{{ e.next }}</strong><div class="muted small">{{ e.next_utc }}</div>{% else %}<span class="pill err">invalid</span>{% endif %}</td>
+        <td>{% if e.last_href.is_empty() %}{{ e.last }}{% else %}<a href="{{ e.last_href }}">{{ e.last }}</a>{% endif %}</td>
+        <td class="act"><form method="post" action="{{ e.run_url }}"><button class="btn small" type="submit" aria-label="Run now: {{ e.key }}">Run now</button></form></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+<details class="panel help-panel"><summary>Cron syntax</summary>
+  <div class="pad">
+    <p>Five fields, <code>minute hour day-of-month month day-of-week</code>, or <code>@hourly</code>, <code>@daily</code>, <code>@weekly</code>, <code>@monthly</code>. Always UTC. Seconds are not accepted.</p>
+    <table class="data compact"><tbody>
+      <tr><td><code>*/15 * * * *</code></td><td>every 15 minutes</td></tr>
+      <tr><td><code>0 * * * *</code></td><td>every hour, on the hour</td></tr>
+      <tr><td><code>30 2 * * *</code></td><td>02:30 UTC daily</td></tr>
+      <tr><td><code>0 8 * * MON</code></td><td>08:00 UTC on Mondays</td></tr>
+    </tbody></table>
+  </div>
+</details>
+{% endif %}
+</div>
+{% endblock %}

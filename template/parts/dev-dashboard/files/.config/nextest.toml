@@ -1,0 +1,12 @@
+# nextest profiles. `dashboard` (used by `app test` and the dev dashboard's Run tests button):
+# JUnit output for the Tests page, one retry so flaky tests show up as flaky, every failure shown.
+# GUIDE: .offrails/guides/testing.md
+[profile.dashboard]
+retries = 1
+fail-fast = false
+failure-output = "immediate-final"
+
+[profile.dashboard.junit]
+path = "junit.xml"
+store-success-output = false
+store-failure-output = true

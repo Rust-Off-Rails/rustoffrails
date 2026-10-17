@@ -1,0 +1,35 @@
+{% extends "kernel/dashboard/_layout.html" %}
+{% block dash %}
+<header class="dash-head"><h1>GitHub{% if let Some(r) = g.repo %} <span class="muted mono">{{ r }}</span>{% endif %}</h1>{% if let Some(u) = g.html_url %}<a class="btn quiet" href="{{ u }}" rel="noopener noreferrer">Open on GitHub</a>{% endif %}</header>
+{% if g.repo.is_none() %}
+<div class="welcome">
+  <p><strong>Which repository?</strong> Set <code>GITHUB_REPO=owner/name</code> in <code>.env</code> and reload: this page shows its CI runs and their success rate, open pull requests and issues, the latest release and, with a token that may read them, open Dependabot alerts.</p>
+  <p><code>GITHUB_TOKEN</code> is optional (public repos work without one, at 60 API calls an hour). A fine-grained token with read-only Actions, Metadata, Pull requests and Dependabot alerts is enough. Answers are cached for a minute; nothing is fetched until you open this page.</p>
+</div>
+{% else %}
+{% for e in g.errors %}<p class="notice-inline">{{ e }}</p>{% endfor %}
+<dl class="figures wide">
+  <div class="fig tone-{% if let Some(rate) = g.success_rate %}{% if *rate >= 90.0 %}ok{% else if *rate >= 60.0 %}warn{% else %}err{% endif %}{% else %}muted{% endif %}"><dt>CI success</dt><dd>{% if let Some(rate) = g.success_rate %}{{ rate|fmt("{:.0}") }}%{% else %}<span class="muted">no runs</span>{% endif %}</dd></div>
+  <div class="fig"><dt>Open pull requests</dt><dd>{% if let Some(n) = g.open_prs %}{{ n }}{% else %}–{% endif %}</dd></div>
+  <div class="fig"><dt>Open issues</dt><dd>{% if let Some(n) = g.open_issues %}{{ n }}{% else %}–{% endif %}</dd></div>
+  <div class="fig"><dt>Latest release</dt><dd>{% if let Some(r) = g.release %}{% if let Some(h) = r.href %}<a href="{{ h }}" rel="noopener noreferrer">{{ r.tag }}</a>{% else %}{{ r.tag }}{% endif %} <span class="muted small">{{ r.when }}</span>{% else %}<span class="muted">none</span>{% endif %}</dd></div>
+  <div class="fig {% match g.alerts %}{% when github::Alerts::Count(n) %}{% if *n > 0 %}tone-err{% else %}tone-ok{% endif %}{% else %}tone-muted{% endmatch %}"><dt>Dependabot alerts</dt><dd>{% match g.alerts %}{% when github::Alerts::Count(n) %}{{ n }}{% when github::Alerts::NotPermitted %}<span class="muted small">not readable with this token</span>{% when github::Alerts::Unknown %}<span class="muted">–</span>{% endmatch %}</dd></div>
+</dl>
+<div class="grid two">
+  <section class="panel" aria-labelledby="gh-trend"><header><h2 id="gh-trend">Success rate by day</h2><span class="muted">completed runs</span></header>
+    {% if trend.is_empty() %}<p class="empty">No completed runs.</p>{% else %}
+    <svg class="bars" viewBox="0 0 600 120" role="img" aria-label="CI success rate per day, oldest to newest" focusable="false">{% for b in trend %}<rect class="b-{{ b.class }}" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="2"><title>{{ b.label }}</title></rect>{% endfor %}</svg>
+    <details class="data pad"><summary>Data table</summary><div class="scroll" tabindex="0" role="region" aria-label="Table"><table><thead><tr><th scope="col">Day</th><th scope="col">Runs</th><th scope="col">Passed</th></tr></thead><tbody>{% for d in g.days %}<tr><td class="mono">{{ d.date }}</td><td>{{ d.runs }}</td><td>{{ d.success }}</td></tr>{% endfor %}</tbody></table></div></details>{% endif %}
+  </section>
+  <section class="panel" aria-labelledby="gh-repo"><header><h2 id="gh-repo">Repository</h2></header>
+    <dl class="kv"><dt>Description</dt><dd>{% if g.description.is_empty() %}<span class="muted">none</span>{% else %}{{ g.description }}{% endif %}</dd><dt>Default branch</dt><dd class="mono">{{ g.default_branch }}</dd><dt>Stars</dt><dd>{{ g.stars }}</dd><dt>API</dt><dd>{% if g.token %}with a token{% else %}anonymous{% endif %}{% if !rate.is_empty() %} · {{ rate }}{% endif %}</dd></dl>
+  </section>
+</div>
+<section class="panel" aria-labelledby="gh-runs"><header><h2 id="gh-runs">Latest workflow runs</h2></header>
+  {% if g.runs.is_empty() %}<p class="empty">No workflow runs (or GitHub couldn't be asked).</p>{% else %}
+  <div class="scroll" tabindex="0" role="region" aria-label="Table"><table class="data-table"><thead><tr><th scope="col">Run</th><th scope="col">Status</th><th scope="col">Branch</th><th scope="col">Commit</th><th scope="col">Duration</th><th scope="col">When</th></tr></thead>
+  <tbody>{% for r in g.runs %}<tr><th scope="row">{% if let Some(h) = r.href %}<a href="{{ h }}" rel="noopener noreferrer">{{ r.name }} #{{ r.number }}</a>{% else %}{{ r.name }} #{{ r.number }}{% endif %}<span class="sub">{{ r.title }}</span></th><td><span class="badge tone-{{ r.tone }}">{{ r.status }}</span></td><td class="mono">{{ r.branch }}</td><td class="mono">{{ r.sha }} <span class="muted">{{ r.event }}</span></td><td class="nowrap">{{ r.duration }}</td><td class="muted nowrap">{{ r.when }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+</section>
+{% if g.fixture %}<p class="hint">Showing recorded fixture data (<code>DASHBOARD_GITHUB_FIXTURE</code>), not the network.</p>{% endif %}
+{% endif %}
+{% endblock %}

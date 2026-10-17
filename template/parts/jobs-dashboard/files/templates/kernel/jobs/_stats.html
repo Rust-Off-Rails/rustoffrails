@@ -1,0 +1,8 @@
+<div id="stats" class="cards"{% if live %} hx-get="/admin/jobs?part=stats" hx-trigger="every 2s" hx-swap="outerHTML" hx-sync="this:drop"{% endif %}>
+  {% for card in cards %}
+  <a class="card st-{{ card.state }}" href="{{ card.href }}" title="{{ card.exact }} {{ card.help }}">
+    <span class="n">{{ card.count }}</span>
+    <span class="l">{{ card.label }}</span>
+  </a>
+  {% endfor %}
+</div>

@@ -1,0 +1,22 @@
+{# Re-authenticate with an emailed code (auth-magic-link). Included in account/confirm.html. #}
+{% if !second_factor %}
+<div class="group/method">
+  <div class="relative my-6 group-first/method:hidden" aria-hidden="true">
+    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200 dark:border-gray-800"></div></div>
+    <div class="relative flex justify-center"><span class="bg-white dark:bg-gray-900 px-3 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">or</span></div>
+  </div>
+  {% if let Some(alert) = self.alert_for("magic_link") %}
+  <div role="alert" class="mb-4 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950 px-4 py-3 text-sm text-red-800 dark:text-red-200">{{ alert }}</div>
+  {% endif %}
+  <form method="post" action="{{ paths::account_confirm_email() }}">
+    <button class="btn-secondary w-full justify-center">Email me a code</button>
+  </form>
+  <form method="post" action="{{ paths::account_confirm_email_code() }}" class="mt-4" novalidate>
+    <label for="reauth_code" class="label">Code from the email</label>
+    <input id="reauth_code" name="code" type="text" class="input text-center font-mono text-xl tracking-[0.4em]" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" maxlength="7" data-otp
+           {% if !self.errors_on("magic_link", "code").is_empty() %}aria-invalid="true" aria-describedby="reauth_code_error"{% endif %}>
+    {% for m in self.errors_on("magic_link", "code") %}<p id="reauth_code_error" class="field-error">Code {{ m }}</p>{% endfor %}
+    <button class="btn mt-4 w-full justify-center">Confirm with code</button>
+  </form>
+</div>
+{% endif %}

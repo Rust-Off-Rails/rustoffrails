@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="supported-color-schemes" content="light dark">
+  <title>{% block title %}{{ crate::config::APP_NAME }}{% endblock %}</title>
+  {# Email clients ignore <link>: styles are inline, plus this block for clients that honor it. #}
+  <style>
+    @media (prefers-color-scheme: dark) {
+      .mail-bg { background: #0b0f19 !important; }
+      .mail-card { background: #111827 !important; border-color: #374151 !important; }
+      .mail-text { color: #e5e7eb !important; }
+      .mail-muted { color: #9ca3af !important; }
+      .mail-link { color: #a5b4fc !important; }
+    }
+    @media (max-width: 600px) { .mail-card { padding: 20px !important; } }
+  </style>
+</head>
+<body class="mail-bg" style="margin:0;padding:0;background:#f3f4f6;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="mail-bg" style="background:#f3f4f6;">
+    <tr>
+      <td align="center" style="padding:32px 12px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;">
+          <tr>
+            <td class="mail-text" style="padding:0 4px 16px;font:600 16px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#111827;">{{ crate::config::APP_NAME }}</td>
+          </tr>
+          <tr>
+            <td class="mail-card mail-text" style="background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;padding:32px;font:15px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#111827;">
+              {% block content %}{% endblock %}
+            </td>
+          </tr>
+          <tr>
+            <td class="mail-muted" style="padding:16px 4px;font:12px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#6b7280;">
+              {% block footer %}You received this email from {{ crate::config::APP_NAME }}.{% endblock %}
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

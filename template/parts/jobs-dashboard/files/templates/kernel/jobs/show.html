@@ -1,0 +1,79 @@
+{% extends "kernel/layout.html" %}
+{% block content %}
+<div class="jobs" data-page="job">
+{% include "kernel/jobs/_nav.html" %}
+<p class="crumbs"><a href="/admin/jobs/list">← All jobs</a></p>
+{% include "kernel/jobs/_job_status.html" %}
+
+<div class="two">
+  <section class="panel" aria-labelledby="h-details">
+    <header><h2 id="h-details">Details</h2></header>
+    <dl class="kv">
+      <dt>Attempt</dt><dd>{{ job.attempts }}</dd>
+      <dt>Priority</dt><dd>{{ job.priority }} <span class="muted">(0 runs first)</span></dd>
+      <dt>Node</dt><dd class="mono">{{ job.node }}</dd>
+      <dt>Queue time</dt><dd>{{ job.queue_time }}</dd>
+      <dt>Run time</dt><dd>{{ job.run_time }}</dd>
+      <dt>Unique key</dt><dd class="mono">{{ job.unique_key }}</dd>
+      {% if !job.cron_key.is_empty() %}<dt>Cron entry</dt><dd><a class="mono" href="/admin/jobs/cron">{{ job.cron_key }}</a></dd>{% endif %}
+      <dt>Tags</dt><dd>{% for (tag, href) in job.tags %}<a class="tag" href="{{ href }}">{{ tag }}</a>{% endfor %}{% if job.tags.is_empty() %}<span class="muted">none</span>{% endif %}</dd>
+    </dl>
+  </section>
+  <section class="panel" aria-labelledby="h-timeline">
+    <header><h2 id="h-timeline">Timeline</h2></header>
+    <ol class="timeline">
+      {% for s in job.timeline %}
+      <li class="t-{{ s.class }}"><span class="t-label">{{ s.label }}</span> <time class="muted" title="{{ s.at }}">{{ s.ago }}</time>{% if !s.note.is_empty() %}<div class="t-note mono">{{ s.note }}</div>{% endif %}</li>
+      {% endfor %}
+    </ol>
+  </section>
+</div>
+
+{% if let Some(b) = job.batch %}
+<section class="panel" aria-labelledby="h-batch">
+  <header><h2 id="h-batch">Batch</h2><span class="muted small">#{{ b.id }}</span></header>
+  <div class="pad">
+    <p><strong>{{ b.name }}</strong>: {{ b.done }} of {{ b.total }} finished{% if b.failed > 0 %}, {{ b.failed }} discarded{% endif %}.
+    {% if b.finished %}{% if !b.callback_href.is_empty() %} Its callback ran as <a href="{{ b.callback_href }}">this job</a>.{% else %} Finished.{% endif %}{% else %} The callback runs when every job is final.{% endif %}</p>
+    <div class="prog wide"><progress max="{{ b.total }}" value="{{ b.done }}" aria-label="Batch progress">{{ b.done }}</progress></div>
+  </div>
+</section>
+{% endif %}
+
+<div class="two">
+  <section class="panel" aria-labelledby="h-args">
+    <header><h2 id="h-args">Args</h2><button class="btn quiet small" type="button" data-copy-target="args-json" aria-label="Copy the args">Copy</button></header>
+    <pre class="code" id="args-json">{{ job.args }}</pre>
+  </section>
+  <section class="panel" aria-labelledby="h-meta">
+    <header><h2 id="h-meta">Meta</h2></header>
+    {% if job.has_meta %}<pre class="code">{{ job.meta }}</pre>{% else %}<p class="empty">No meta.</p>{% endif %}
+  </section>
+</div>
+
+<section class="panel" aria-labelledby="h-errors">
+  <header><h2 id="h-errors">Errors <span class="count">{{ job.attempts_list.len() }}</span></h2><span class="muted small">newest first · the last 20 attempts are kept</span></header>
+  {% if job.attempts_list.is_empty() %}
+  <p class="empty">No errors: every attempt so far succeeded, or the job hasn't run yet.</p>
+  {% else %}
+  <ol class="attempts">
+    {% for e in job.attempts_list %}
+    <li class="attempt">
+      <div class="attempt-head">
+        <span class="badge {% if e.kind == "Cancelled" %}st-cancelled{% else if e.kind == "Interrupted" %}st-retryable{% else %}st-discarded{% endif %}">{{ e.kind }}</span>
+        <strong>Attempt {{ e.attempt }}</strong>
+        <time class="muted" title="{{ e.at }}">{{ e.ago }}</time>
+        {% if !e.node.is_empty() %}<span class="muted mono">{{ e.node }}</span>{% endif %}
+        {% if !e.duration.is_empty() %}<span class="muted">after {{ e.duration }}</span>{% endif %}
+      </div>
+      <pre class="code err-text">{{ e.error }}</pre>
+      {% if !e.detail.is_empty() %}
+      <details class="detail"><summary>Full report (causes and backtrace)</summary><pre class="code">{{ e.detail }}</pre></details>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+  {% endif %}
+</section>
+</div>
+{% endblock %}

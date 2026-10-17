@@ -1,0 +1,68 @@
+<div class="stats" role="group" aria-label="This node">
+  <div class="stat"><span class="muted">Node</span><strong class="mono">{{ live.snap.node }}</strong></div>
+  <div class="stat"><span class="muted">Connections</span><strong>{{ live.snap.connections }}</strong></div>
+  <div class="stat"><span class="muted">Frames in</span><strong>{{ live.snap.frames_in }}</strong><span class="muted">{{ Live::rate(live.snap.in_per_sec) }}</span></div>
+  <div class="stat"><span class="muted">Frames out</span><strong>{{ live.snap.frames_out }}</strong><span class="muted">{{ Live::rate(live.snap.out_per_sec) }}</span></div>
+  <div class="stat{% if live.snap.restarts > 0 %} stat-alert{% endif %}"><span class="muted">Room restarts</span><strong>{{ live.snap.restarts }}</strong></div>
+</div>
+
+<div class="grid">
+  <section class="panel">
+    <header><h2>Topics</h2><span class="muted">{{ live.snap.topics.len() }}</span></header>
+    {% if live.snap.topics.is_empty() %}<p class="empty">No topics. Open <a href="/live">the live room</a> in two browsers.</p>{% else %}
+    <div class="scroll" tabindex="0" role="region" aria-label="Topics"><table>
+      <thead><tr><th>Topic</th><th>Here</th><th>Local conns</th><th>Broadcasts</th><th>Room</th></tr></thead>
+      <tbody>
+      {% for t in live.snap.topics %}
+        <tr>
+          <td class="mono">{{ t.topic }}</td>
+          <td>{% if t.people.is_empty() %}<span class="muted">nobody</span>{% else %}{{ t.people.join(", ") }}{% endif %}</td>
+          <td>{{ t.connections }}</td>
+          <td>{{ t.broadcasts }}</td>
+          <td>{% if t.room_running %}<span class="badge access-public">running</span>{% else %}<span class="badge">idle</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    {% endif %}
+  </section>
+  <section class="panel">
+    <header><h2>Nodes</h2><span class="muted">{{ live.snap.nodes.len() }}</span></header>
+    <ul class="timeline">
+      {% for n in live.snap.nodes %}<li class="mono">{{ n.node }}{% if n.this %} <span class="badge access-user">this node</span>{% else %} <span class="muted">heard {{ n.seen_secs_ago }}s ago</span>{% endif %}</li>{% endfor %}
+    </ul>
+  </section>
+</div>
+
+<section class="panel">
+  <header><h2>Connections</h2><span class="muted">select one for its frames</span></header>
+  {% if live.snap.conns.is_empty() %}<p class="empty">No open connections.</p>{% else %}
+  <div class="scroll" tabindex="0" role="region" aria-label="Connections"><table>
+    <thead><tr><th>#</th><th>Person</th><th>Transport</th><th>Topics</th><th>Age</th><th>In</th><th>Out</th></tr></thead>
+    <tbody>
+    {% for c in live.snap.conns %}
+      <tr{% if let Some(sel) = live.selected %}{% if sel.id == c.id %} aria-current="true" class="selected"{% endif %}{% endif %}>
+        <td><a href="/dev/sockets?conn={{ c.id }}">{{ c.id }}</a></td>
+        <td>{{ c.label }} <span class="muted">({{ c.key }})</span></td>
+        <td><span class="badge transport-{{ c.transport }}">{{ c.transport }}</span></td>
+        <td class="mono">{{ c.topics.join(" ") }}</td>
+        <td>{{ Live::age(c.age_secs) }}</td>
+        <td>{{ c.frames_in }}</td>
+        <td>{{ c.frames_out }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% endif %}
+</section>
+
+{% if let Some(sel) = live.selected %}
+<section class="panel">
+  <header><h2>Frames of #{{ sel.id }} ({{ sel.label }}, {{ sel.transport }})</h2><a class="btn quiet" href="/dev/sockets">Close</a></header>
+  {% if !live.snap.logging %}<p class="empty">Frame logging is off.</p>{% else if sel.log.is_empty() %}<p class="empty">No frames yet.</p>{% else %}
+  <ol class="frames" tabindex="0" aria-label="Frames, newest first">
+    {% for f in sel.log %}<li class="frame frame-{{ f.dir }}"><span class="dir" aria-label="{{ f.dir }}">{% if f.dir == "in" %}&uarr;{% else %}&darr;{% endif %}</span><time class="muted">{{ f.at.format("%H:%M:%S%.3f") }}</time><code>{{ f.text }}</code></li>{% endfor %}
+  </ol>
+  {% endif %}
+</section>
+{% endif %}

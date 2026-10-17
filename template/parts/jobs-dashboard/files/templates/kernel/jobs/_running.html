@@ -1,0 +1,23 @@
+<div id="running" class="running"{% if live %} hx-get="/admin/jobs?part=running" hx-trigger="every 1s" hx-swap="outerHTML" hx-sync="this:drop"{% endif %}>
+  {% if running.is_empty() %}
+  <p class="empty">Nothing is running right now. Jobs show up here, with their progress, the moment a node starts them.</p>
+  {% else %}
+  <ul class="lane">
+    {% for r in running %}
+    <li class="run">
+      <div class="run-top">
+        <a class="mono strong" href="{{ r.href }}">{{ r.worker }} <span class="muted">#{{ r.id }}</span></a>
+        <span class="elapsed{% if r.over_half_timeout %} slow{% endif %}" title="Running for {{ r.elapsed }}{% if r.over_half_timeout %}: more than half its timeout{% endif %}">{{ r.elapsed }}</span>
+      </div>
+      <div class="mono args">{{ r.args }}</div>
+      {% if let Some(p) = r.progress %}
+      <div class="prog"><progress max="100" value="{{ p }}" aria-label="Progress of job {{ r.id }}">{{ p }}%</progress><span class="pct">{{ p }}%</span></div>
+      {% else %}
+      <div class="prog"><progress aria-label="Job {{ r.id }} is running (no progress reported)"></progress><span class="pct muted">running</span></div>
+      {% endif %}
+      <div class="run-meta muted">{{ r.queue }} · attempt {{ r.attempt }} · {{ r.node }}</div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</div>

@@ -1,0 +1,168 @@
+# samples/dev-mailbox/sample.toml: the format is samples/FORMAT.md.
+name = "dev-mailbox"
+version = "0.7.0"
+summary = "A live local inbox at /dev/mailbox: HTML/text/raw/headers, width and dark previews, codes and links with copy, attachments, search, checks, previews, JSON and a CLI. Development only."
+depends_on = ["mailer"]
+extracted_from = "Rust off Rails apps"
+
+crates = []
+
+[[wire]]
+file = "src/kernel/mod.rs"
+anchor = "kernel mods"
+text = '''
+pub mod mailbox_cli;
+pub mod mailbox_web;
+'''
+
+[[wire]]
+file = "src/kernel/ui.rs"
+anchor = "kernel tabs"
+text = '''
+Tab {
+    key: "mailbox",
+    label: "Mailbox",
+    href: "/dev/mailbox",
+    dev_only: true,
+},
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "dev routers"
+text = '''
+// SECURITY: development only; in production these routes don't exist (test: mailbox_routes_do_not_exist_in_production_or_test).
+app = app.merge(crate::kernel::mailbox_web::router(
+    crate::mailers::previews::PREVIEWS,
+));
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "paths"
+text = '''
+/// The dev mailbox. Links into it carry `hx-boost="false"` (a kernel page has its own <head>).
+pub fn dev_mailbox() -> String {
+    "/dev/mailbox".into()
+}
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "routes table"
+text = '''
+("GET",  "/dev/mailbox",                                "mailbox_web::index",         Access::Dev),
+("GET",  "/dev/mailbox.json",                           "mailbox_web::list_json",     Access::Dev),
+("GET",  "/dev/mailbox/latest.json",                    "mailbox_web::latest_json",   Access::Dev),
+("GET",  "/dev/mailbox/list",                           "mailbox_web::list_fragment", Access::Dev),
+("GET",  "/dev/mailbox/events",                         "mailbox_web::events",        Access::Dev),
+("POST", "/dev/mailbox/clear",                          "mailbox_web::clear",         Access::Dev),
+("POST", "/dev/mailbox/test",                           "mailbox_web::send_test",     Access::Dev),
+("GET",  "/dev/mailbox/previews",                       "mailbox_web::previews_index", Access::Dev),
+("GET",  "/dev/mailbox/previews/{mailer}/{action}",     "mailbox_web::preview_show",  Access::Dev),
+("GET",  "/dev/mailbox/previews/{mailer}/{action}/html", "mailbox_web::preview_html", Access::Dev),
+("GET",  "/dev/mailbox/{id}",                           "mailbox_web::show",          Access::Dev),
+("GET",  "/dev/mailbox/{id}/html",                      "mailbox_web::html_body",     Access::Dev),
+("GET",  "/dev/mailbox/{id}/message.eml",               "mailbox_web::download",      Access::Dev),
+("GET",  "/dev/mailbox/{id}/attachments/{n}",           "mailbox_web::attachment",    Access::Dev),
+("POST", "/dev/mailbox/{id}/delete",                    "mailbox_web::delete",        Access::Dev),
+("GET",  "/dev/mailers",                                "mailbox_web::mailers_redirect", Access::Dev),
+'''
+
+[[wire]]
+file = "src/controllers/dev.rs"
+anchor = "dev tiles"
+text = '''
+Tile {
+    title: "Mailbox",
+    href: "/dev/mailbox",
+    description: "Every email the app sent, rendered. Sign-in links and codes are one click away.",
+    figure: crate::kernel::mailbox_web::tile_figure(&state).await?,
+},
+Tile {
+    title: "Mailer previews",
+    href: "/dev/mailbox/previews",
+    description: "Render each mailer with sample data, without sending.",
+    figure: format!("{} previews", crate::mailers::previews::PREVIEWS.len()),
+},
+'''
+
+[[wire]]
+file = "src/controllers/dev.rs"
+anchor = "dev try-it"
+text = '''
+TryIt {
+    label: "Send a test email",
+    action: "/dev/mailbox/test",
+},
+'''
+
+[[wire]]
+file = "src/kernel/introspect.rs"
+anchor = "introspect sections"
+text = '''
+// null while the table doesn't exist yet (a fresh database before `db migrate`).
+out["mailbox"] = match crate::kernel::mailbox::counts(&state.db).await {
+    Ok((total, unread)) => json!({ "total": total, "unread": unread, "latest": "/dev/mailbox/latest.json" }),
+    Err(_) => Value::Null,
+};
+'''
+
+[[wire]]
+file = "src/main.rs"
+anchor = "cli commands"
+text = '''
+/// The dev mailbox from a terminal: tail, list, show, clear.
+Mailbox {
+    #[command(subcommand)]
+    command: offrails_host::kernel::mailbox_cli::MailboxCommand,
+},
+'''
+
+[[wire]]
+file = "src/main.rs"
+anchor = "cli dispatch"
+text = '''
+Command::Mailbox { command } => {
+    let db = kernel::db::connect(&config.database_url, config.database_pool).await?;
+    kernel::mailbox_cli::run(&db, command).await
+}
+'''
+
+[[wire]]
+file = "templates/layouts/application.html"
+anchor = "dev footer links"
+text = '''
+&middot; <a href="{{ paths::dev_mailbox() }}" hx-boost="false" class="link">Mailbox</a>
+'''
+
+[[wire]]
+file = "tests/app/main.rs"
+anchor = "test mods"
+text = '''
+mod dev_mailbox_test;
+'''
+
+[[wire]]
+file = "tests/app/security_test.rs"
+anchor = "router sources"
+text = '''
+"src/kernel/mailbox_web.rs",
+'''
+
+[[wire]]
+file = "tests/app/kernel_web_test.rs"
+anchor = "no-store paths"
+text = '''
+"/dev/mailbox",
+"/dev/mailbox/previews",
+"/dev/mailbox.json",
+'''
+
+[[wire]]
+file = "tests/app/theme_switch_test.rs"
+anchor = "kernel pages"
+text = '''
+"/dev/mailbox",
+"/dev/mailbox/previews",
+'''

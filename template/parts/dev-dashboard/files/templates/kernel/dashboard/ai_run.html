@@ -1,0 +1,5 @@
+{% extends "kernel/dashboard/_layout.html" %}
+{% block dash %}
+<header class="dash-head"><h1>Investigation <span class="muted">{{ r.when }}</span></h1><a href="{{ r.base }}/ai/history">All investigations</a></header>
+<section class="panel ai-page-answer" aria-label="Investigation"><div class="pad">{% include "kernel/dashboard/_ai_run.html" %}</div></section>
+{% endblock %}

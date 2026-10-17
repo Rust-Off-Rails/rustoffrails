@@ -1,0 +1,38 @@
+{% extends "kernel/layout.html" %}
+{% block content %}
+<div class="jobs" data-page="errors">
+{% include "kernel/jobs/_nav.html" %}
+<div class="page-head">
+  <h1>Errors</h1>
+  <p class="muted">Retryable and discarded jobs, grouped by worker and the root cause of their last error (the innermost error, numbers ignored, and the host it names); what differs around it is listed as variants.{% if !worker.is_empty() %} Worker <span class="mono">{{ worker }}</span> · <a href="{{ clear_href }}">all workers</a>{% endif %}</p>
+</div>
+{% if groups.is_empty() %}
+<section class="panel"><p class="empty big">Nothing is failing. Jobs that error show up here, grouped, so one bad deploy reads as one problem.</p></section>
+{% else %}
+<ul class="groups">
+  {% for g in groups %}
+  <li class="group panel">
+    <div class="g-count"><span class="n">{{ g.count }}</span><span class="muted small">{% if g.count == "1" %}job{% else %}jobs{% endif %}</span></div>
+    <div class="g-body">
+      <p class="g-msg mono">{{ g.message }}</p>
+      {% if !g.variants.is_empty() %}<p class="g-meta muted small mono">{{ g.variants }}</p>{% endif %}
+      <p class="g-meta muted small"><a class="mono" href="{{ g.worker_href }}">{{ g.worker }}</a> · {% if g.retryable > 0 %}{{ g.retryable }} retrying{% endif %}{% if g.retryable > 0 && g.discarded > 0 %}, {% endif %}{% if g.discarded > 0 %}{{ g.discarded }} discarded{% endif %} · first {{ g.first_seen }} · last <time title="{{ g.last_seen_utc }}">{{ g.last_seen }}</time></p>
+    </div>
+    <div class="g-actions">
+      <a class="btn small" href="{{ g.list_href }}">View jobs</a>
+      <a class="btn small quiet" href="{{ g.example_href }}">Latest</a>
+      {% if g.discarded > 0 && !g.retry_error.is_empty() %}
+      <form method="post" action="/admin/jobs/bulk">
+        <input type="hidden" name="action" value="retry"><input type="hidden" name="all_matching" value="1">
+        <input type="hidden" name="state" value="discarded"><input type="hidden" name="worker" value="{{ g.worker }}">
+        <input type="hidden" name="error" value="{{ g.retry_error }}"><input type="hidden" name="return_to" value="/admin/jobs/errors">
+        <button class="btn small primary" type="submit">Retry discarded</button>
+      </form>
+      {% endif %}
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+</div>
+{% endblock %}

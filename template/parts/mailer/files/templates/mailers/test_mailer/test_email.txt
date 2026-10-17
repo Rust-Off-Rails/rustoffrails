@@ -1,0 +1,5 @@
+Email works.
+
+This is a test email from {{ app_name }}, rendered at {{ sent_at }}. If you can read it, delivery is set up correctly.
+
+Open {{ app_name }}: {{ app_url }}

@@ -1,0 +1,30 @@
+{% extends "kernel/layout.html" %}
+{% block content %}
+<div class="jobs" data-page="overview">
+{% include "kernel/jobs/_nav.html" %}
+<h1 class="visually-hidden">Jobs overview</h1>
+{% include "kernel/jobs/_stats.html" %}
+<section class="panel" aria-labelledby="h-activity">
+  <header><h2 id="h-activity">Activity</h2></header>
+  {% include "kernel/jobs/_charts.html" %}
+</section>
+<section class="panel" aria-labelledby="h-running">
+  <header><h2 id="h-running">Now running</h2><a class="small" href="/admin/jobs/list?state=executing">All executing →</a></header>
+  {% include "kernel/jobs/_running.html" %}
+</section>
+<section class="panel" aria-labelledby="h-queues">
+  <header><h2 id="h-queues">Queues</h2><span class="muted small">limits are per node; rates are global</span></header>
+  {% include "kernel/jobs/_queues.html" %}
+</section>
+<div class="two">
+  <section class="panel" aria-labelledby="h-workers">
+    <header><h2 id="h-workers">Workers</h2><span class="muted small">last 60 min</span></header>
+    {% include "kernel/jobs/_workers.html" %}
+  </section>
+  <section class="panel" aria-labelledby="h-nodes">
+    <header><h2 id="h-nodes">Nodes</h2></header>
+    {% include "kernel/jobs/_nodes.html" %}
+  </section>
+</div>
+</div>
+{% endblock %}

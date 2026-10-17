@@ -1,0 +1,27 @@
+{% extends "kernel/dashboard/_layout.html" %}
+{% block dash %}
+<header class="dash-head"><h1>Query <span class="muted mono">{{ q.id }}</span></h1><span class="head-actions">{% if d.ai_on %}<a class="btn quiet" href="{{ d.ask_href("sql", &q.id) }}">Ask AI about this query</a> {% endif %}<a class="btn quiet" href="{{ base }}/sql">All statements</a></span></header>
+<pre class="code sql-code"><code>{{ q.sql }}</code></pre>
+<dl class="figures wide">
+  <div class="fig"><dt>Count</dt><dd>{{ q.count }}</dd></div>
+  <div class="fig"><dt>Total</dt><dd>{{ q.total }}</dd></div>
+  <div class="fig"><dt>Mean</dt><dd>{{ q.mean }}</dd></div>
+  <div class="fig"><dt>p95</dt><dd>{{ q.p95 }}</dd></div>
+  <div class="fig"><dt>Max</dt><dd>{{ q.max }}</dd></div>
+  <div class="fig"><dt>Last seen</dt><dd>{{ q.last }}</dd></div>
+</dl>
+<p class="hint">Routes: {% for r in q.routes %}<a class="mono" href="{{ base }}/traces?route={{ r|urlencode }}">{{ r }}</a> {% endfor %}{% if !q.params.is_empty() %} · last parameters: {{ q.params }}{% endif %}</p>
+{% if !d.ro %}
+<section class="panel" aria-labelledby="plan-title">
+  <header><h2 id="plan-title">Query plan</h2><span class="muted">{{ backend }}, with the last parameters; nothing is run or written</span></header>
+  {% if let Some(lines) = plan %}<pre class="code plan"><code>{% for l in lines %}{{ l }}
+{% endfor %}</code></pre>{% endif %}
+  {% if let Some(e) = plan_error %}<p class="notice-inline">{{ e }}</p>{% endif %}
+  {% if q.select %}<form method="post" action="/dev/dashboard/sql/{{ q.id }}/explain" class="pad"><button class="btn primary">{% if plan.is_some() %}Explain again{% else %}Explain{% endif %}</button></form>{% else %}<p class="empty">Only SELECTs can be explained.</p>{% endif %}
+</section>
+{% endif %}
+<section class="panel" aria-labelledby="qt-title">
+  <header><h2 id="qt-title">Recent requests that ran it</h2></header>
+  {% include "kernel/dashboard/_traces.html" %}
+</section>
+{% endblock %}

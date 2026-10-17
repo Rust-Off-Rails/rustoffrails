@@ -1,0 +1,104 @@
+<article class="mbx-msg" aria-labelledby="mbx-subject">
+  <p class="mbx-back"><a href="{% if m.preview %}/dev/mailbox/previews{% else %}/dev/mailbox{% endif %}">&larr; {% if m.preview %}Previews{% else %}Inbox{% endif %}</a></p>
+  {% if m.preview %}<p class="mbx-preview-note"><strong>Preview</strong> · rendered now from sample data, not sent</p>{% endif %}
+  <header class="mbx-msg-head">
+    <h2 id="mbx-subject">{% if m.subject.is_empty() %}(no subject){% else %}{{ m.subject }}{% endif %}</h2>
+    <div class="mbx-msg-actions">
+      {% if let Some(href) = m.eml_href %}<a class="btn" href="{{ href }}" download data-key-eml>Download .eml <kbd aria-hidden="true">e</kbd></a>{% endif %}
+      {% if let Some(action) = m.delete_action %}<form method="post" action="{{ action }}" data-key-delete><button class="btn danger">Delete <kbd aria-hidden="true">d</kbd></button></form>{% endif %}
+    </div>
+  </header>
+  <dl class="mbx-meta">
+    <dt>From</dt><dd>{{ m.from }}</dd>
+    <dt>To</dt><dd>{{ m.to }}</dd>
+    {% if !m.cc.is_empty() %}<dt>Cc</dt><dd>{{ m.cc.join(", ") }}</dd>{% endif %}
+    {% if !m.bcc.is_empty() %}<dt>Bcc</dt><dd>{{ m.bcc.join(", ") }}</dd>{% endif %}
+    {% if let Some(r) = m.reply_to %}<dt>Reply-To</dt><dd>{{ r }}</dd>{% endif %}
+    <dt>Date</dt><dd>{{ m.date }}</dd>
+  </dl>
+
+  {% if !m.codes.is_empty() || !m.links.is_empty() %}
+  <div class="mbx-extract">
+    {% if !m.codes.is_empty() %}
+    <section class="mbx-codes" aria-labelledby="mbx-codes-title">
+      <h3 id="mbx-codes-title">Code{% if m.codes.len() != 1 %}s{% endif %}</h3>
+      <ul role="list">
+        {% for code in m.codes %}
+        <li><output class="mbx-code mono">{{ code }}</output><button type="button" class="btn" data-copy="{{ code }}" aria-label="Copy code {{ code }}">Copy</button></li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+    {% if !m.links.is_empty() %}
+    <section class="mbx-links" aria-labelledby="mbx-links-title">
+      <h3 id="mbx-links-title">Link{% if m.links.len() != 1 %}s{% endif %} <span class="mbx-count mbx-count-quiet">{{ m.links.len() }}</span></h3>
+      <ul role="list">
+        {% for link in m.links %}
+        <li><a class="mbx-url mono" href="{{ link }}" target="_blank" rel="noopener noreferrer" data-link>{{ link }}</a><button type="button" class="btn quiet" data-copy="{{ link }}" aria-label="Copy link {{ loop.index }}">Copy</button></li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if !m.attachments.is_empty() %}
+  <section class="mbx-attachments" aria-labelledby="mbx-att-title">
+    <h3 id="mbx-att-title">Attachment{% if m.attachments.len() != 1 %}s{% endif %}</h3>
+    <ul role="list">
+      {% for a in m.attachments %}
+      <li>
+        {% if a.image %}{% if let Some(href) = a.href %}<img class="mbx-thumb" src="{{ href }}" alt="" loading="lazy">{% endif %}{% else %}<svg class="mbx-icon mbx-file" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h6.4L16 7.1v9.4A1.5 1.5 0 0 1 14.5 18h-9A1.5 1.5 0 0 1 4 16.5v-12A2 2 0 0 1 5 2.5Zm6 1.5v3.5h3.5Z"/></svg>{% endif %}
+        <span class="mbx-att-name">{{ a.filename }}</span>
+        <span class="muted">{{ a.content_type }} · {{ a.size }}</span>
+        {% if let Some(href) = a.href %}<a class="btn quiet" href="{{ href }}" download>Download<span class="visually-hidden"> {{ a.filename }}</span></a>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if !m.checks.is_empty() %}
+  <details class="mbx-checks"{% if m.problems > 0 %} open{% endif %}>
+    <summary>Checks <span class="mbx-count{% if m.problems == 0 %} mbx-count-quiet{% endif %}">{% if m.problems == 0 %}no problems{% else %}{{ m.problems }} to look at{% endif %}</span></summary>
+    <ul role="list">
+      {% for c in m.checks %}<li class="mbx-check mbx-check-{{ c.level }}"><span class="mbx-level">{{ c.level }}</span> {{ c.message }}</li>{% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+
+  <div class="mbx-viewbar">
+    <nav class="mbx-seg" aria-label="Message part">
+      {% for t in m.tabs %}<a href="{{ t.href }}"{% if t.current %} aria-current="page"{% endif %}>{{ t.label }}</a>{% endfor %}
+    </nav>
+    {% if m.tab == "html" %}
+    <nav class="mbx-seg" aria-label="Preview size and theme">
+      {% for v in m.views %}<a href="{{ v.href }}"{% if v.current %} aria-current="page"{% endif %}>{{ v.label }}</a>{% endfor %}
+    </nav>
+    {% endif %}
+  </div>
+
+  {% if m.tab == "html" %}
+  {# SECURITY: no allow-scripts, no allow-same-origin: mail can't run code or read this page (test: the_html_body_is_served_alone_in_a_sandbox) #}
+  <div class="mbx-stage mbx-stage-{{ m.view }}">
+    <iframe class="mbx-frame" src="{{ m.html_src }}" title="Email body: {{ m.subject }}" sandbox="allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" loading="lazy"></iframe>
+  </div>
+  {% else if m.tab == "text" %}
+  <pre class="mbx-pre" tabindex="0" aria-label="Text part">{{ m.text }}</pre>
+  {% else if m.tab == "raw" %}
+  <div class="mbx-pre-wrap">
+    <button type="button" class="btn quiet mbx-pre-copy" data-copy-from="mbx-raw">Copy raw message</button>
+    <pre class="mbx-pre" id="mbx-raw" tabindex="0" aria-label="Raw message">{{ m.raw }}</pre>
+  </div>
+  {% else %}
+  <div class="scroll">
+  <table class="mbx-headers">
+    <caption class="visually-hidden">All headers</caption>
+    <thead><tr><th scope="col">Header</th><th scope="col">Value</th></tr></thead>
+    <tbody>
+      {% for (name, value) in m.headers %}<tr><th scope="row" class="mono">{{ name }}</th><td class="mono">{{ value }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+</article>

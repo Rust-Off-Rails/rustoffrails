@@ -1,0 +1,19 @@
+{% extends "layouts/application.html" %}
+{% block content %}
+<section class="mx-auto max-w-md">
+  <div class="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm sm:p-8">
+    <h1 class="text-2xl font-semibold tracking-tight">Change your email</h1>
+    <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">Your address is <strong class="font-medium text-gray-900 dark:text-gray-100">{{ user.email }}</strong>. We'll email a link to the new address; it changes when you click it, and we'll let your current address know.</p>
+    <form method="post" action="{{ paths::account_email() }}" class="mt-6" novalidate>
+      <label for="email" class="label">New email address</label>
+      <input id="email" name="email" type="email" class="input" autocomplete="email" inputmode="email" required value="{{ email }}"
+             {% if !errors.on("email").is_empty() %}aria-invalid="true" aria-describedby="email_error"{% endif %}>
+      {% for m in errors.on("email") %}<p id="email_error" class="field-error">Email {{ m }}</p>{% endfor %}
+      <div class="mt-6 flex flex-wrap gap-3">
+        <button class="btn">Send confirmation link</button>
+        <a href="{{ paths::account() }}" class="btn-secondary">Cancel</a>
+      </div>
+    </form>
+  </div>
+</section>
+{% endblock %}

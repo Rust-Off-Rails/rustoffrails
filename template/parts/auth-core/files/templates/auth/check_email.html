@@ -1,0 +1,25 @@
+{% extends "layouts/application.html" %}
+{% block head %}<script src="/static/auth.js" defer></script>{% endblock %}
+{% block content %}
+<section class="mx-auto max-w-md">
+  <div class="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm sm:p-8">
+    <div class="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-300">
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-6 w-6"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75"/></svg>
+    </div>
+    <h1 class="mt-4 text-2xl font-semibold tracking-tight">{{ heading }}</h1>
+    <p class="mt-2 text-gray-700 dark:text-gray-300">{{ message }}</p>
+    {% include "shared/_dev_mailbox_hint.html" %}
+    {% if let Some(form) = code_form %}
+    <form method="post" action="{{ form.action }}" class="mt-6" data-otp-form>
+      <label for="login_code" class="label">Or type the 6-digit code from the email</label>
+      <input id="login_code" name="code" class="input text-center font-mono text-2xl tracking-[0.5em]" type="text"
+             inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" maxlength="7" required data-otp
+             {% if form.error.is_some() %}aria-invalid="true" aria-describedby="login_code_error"{% endif %}>
+      {% if let Some(error) = form.error %}<p id="login_code_error" class="field-error">{{ error }}</p>{% endif %}
+      <button class="btn mt-4 w-full justify-center">Sign in with code</button>
+    </form>
+    {% endif %}
+    <p class="mt-6 text-sm text-gray-600 dark:text-gray-400">Nothing yet? Check your spam folder, or <a class="link" href="{{ paths::new_session() }}">start over</a>.</p>
+  </div>
+</section>
+{% endblock %}

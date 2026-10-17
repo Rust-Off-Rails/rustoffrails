@@ -1,0 +1,16 @@
+{% extends "kernel/dashboard/_layout.html" %}
+{% block dash %}
+<header class="dash-head">
+  <h1>Charts <span class="muted">{{ range }}</span></h1>
+  <nav class="segmented" aria-label="Range">{% for r in ranges %}<a href="{{ r.href }}"{% if r.current %} aria-current="true"{% endif %}>{{ r.label }}</a>{% endfor %}</nav>
+  {% if zoomed %}<a class="btn" href="{{ reset }}">Reset zoom</a>{% endif %}
+</header>
+<p class="hint">Hover or focus a chart to read every series at that moment, on every chart at once. Drag (or Shift with the arrow keys) to zoom into a range; click Requests, Latency or Errors to open that minute's traces.</p>
+<div data-live="charts" data-base="{{ d.base }}">{% include "kernel/dashboard/_charts.html" %}</div>
+{% if !marks.is_empty() %}
+<section class="panel" aria-labelledby="marks-title">
+  <header><h2 id="marks-title">Events on these charts</h2></header>
+  <ul class="plain">{% for m in marks %}<li><span class="mark-dot mark-{{ m.kind }}" aria-hidden="true"></span>{{ m.label }} <span class="muted">{{ m.when }}</span></li>{% endfor %}</ul>
+</section>
+{% endif %}
+{% endblock %}

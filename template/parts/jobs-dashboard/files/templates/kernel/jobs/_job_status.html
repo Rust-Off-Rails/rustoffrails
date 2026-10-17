@@ -1,0 +1,19 @@
+<div id="job-status" class="job-head"{% if live && !job.is_final %} hx-get="/admin/jobs/{{ job.id }}?part=status" hx-trigger="every 2s" hx-swap="outerHTML" hx-sync="this:drop"{% endif %}>
+  <div class="job-title">
+    <h1>Job {{ job.id }} <span class="badge big st-{{ job.state }}">{{ job.state_label }}</span></h1>
+    <p class="sub"><a class="mono strong" href="{{ job.worker_href }}">{{ job.worker }}</a> <span class="muted">on</span> <a class="mono" href="{{ job.queue_href }}">{{ job.queue }}</a> · {{ job.when }}</p>
+    {% if job.executing %}
+      {% if let Some(p) = job.progress %}
+      <div class="prog wide"><progress max="100" value="{{ p }}" aria-label="Progress">{{ p }}%</progress><span class="pct">{{ p }}%</span></div>
+      {% else %}
+      <div class="prog wide"><progress aria-label="Running, no progress reported"></progress><span class="pct muted">running</span></div>
+      {% endif %}
+    {% endif %}
+  </div>
+  <div class="job-actions">
+    {% for a in job.actions %}
+    <form method="post" action="/admin/jobs/{{ job.id }}/{{ a.action }}"><input type="hidden" name="return_to" value="/admin/jobs/{{ job.id }}"><button class="btn {{ a.class }}" type="submit"{% if !a.key.is_empty() %} data-key="{{ a.key }}"{% endif %}>{{ a.label }}</button></form>
+    {% endfor %}
+    <span class="cli"><code data-copy-text>{{ job.cli }}</code><button class="btn quiet small" type="button" data-copy aria-label="Copy the command {{ job.cli }}">Copy</button></span>
+  </div>
+</div>

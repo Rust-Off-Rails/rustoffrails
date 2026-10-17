@@ -1,0 +1,5 @@
+{# The dev dashboard's Ask AI on another kernel page (wired at `kernel main`; development only). dashboard-ai.js loads the panel for this page the first time it opens; without it, the link. #}
+<details class="ai-panel ai-bar" data-ai-panel data-src="{{ bar.src }}">
+  <summary><svg class="ai-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>Ask AI <span class="muted">about this {{ bar.label }} page</span></summary>
+  <div class="ai-mount" data-ai-body><p class="pad"><a href="{{ bar.href }}">Open the assistant</a> for this page.</p></div>
+</details>

@@ -1,0 +1,18 @@
+[
+ {
+  "number": 1,
+  "state": "open",
+  "security_advisory": {
+   "severity": "medium",
+   "summary": "Example advisory (fixture)"
+  }
+ },
+ {
+  "number": 2,
+  "state": "open",
+  "security_advisory": {
+   "severity": "low",
+   "summary": "Example advisory (fixture)"
+  }
+ }
+]

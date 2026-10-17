@@ -1,0 +1,11 @@
+{% extends "kernel/layout.html" %}
+{% block content %}
+<h1>{{ title }}</h1>
+<p class="muted">{{ note }} Part of the dev dashboard's <a href="/dev/dashboard/lab">load lab</a>; the data is fake.</p>
+{% if rows.is_empty() %}<p class="empty">No orders yet: seed some in the load lab.</p>{% else %}
+<div class="scroll" tabindex="0" role="region" aria-label="Table"><table>
+  <thead><tr><th scope="col">Order</th><th scope="col">Customer</th><th scope="col">Status</th><th scope="col">Items</th><th scope="col">Total</th></tr></thead>
+  <tbody>{% for r in rows %}<tr><td class="mono">{{ r.reference }}</td><td>{{ r.customer }}</td><td>{{ r.status }}</td><td>{{ r.items }}</td><td>{{ r.total }}</td></tr>{% endfor %}</tbody>
+</table></div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,9 @@
+{% extends "kernel/dashboard/_layout.html" %}
+{% block dash %}
+<header class="dash-head"><h1>Ask AI history</h1><a href="{{ d.base }}/ai?tab=overview">New question</a></header>
+<p class="hint">The latest {{ keep }} investigations, kept in <code>storage/dashboard/ai-runs/</code> (tool results capped, answers redacted). Open one to see its steps, evidence and fix prompt again.</p>
+{% if rows.is_empty() %}<div class="welcome"><p><strong>No investigations yet.</strong> Ask a question from any page's Ask AI, or generate a health summary on the overview.</p></div>{% else %}
+<div class="scroll" tabindex="0" role="region" aria-label="Investigations"><table class="data-table ai-history"><thead><tr><th scope="col">When</th><th scope="col">Kind</th><th scope="col">Question</th><th scope="col">Result</th><th scope="col" class="num">Calls</th><th scope="col" class="num">Tokens</th></tr></thead><tbody>
+{% for r in rows %}<tr><td class="nowrap">{{ r.when }}</td><td>{{ r.kind }} <span class="muted">{{ r.tab }}</span></td><th scope="row"><a href="{{ d.base }}/ai/runs/{{ r.id }}">{{ r.question }}</a></th><td><span class="ai-pill st-{{ r.status }}">{{ r.status_text }}</span></td><td class="num">{{ r.calls }}</td><td class="num">{{ r.tokens }}</td></tr>{% endfor %}
+</tbody></table></div>{% endif %}
+{% endblock %}

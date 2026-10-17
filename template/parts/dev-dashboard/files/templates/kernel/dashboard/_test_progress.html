@@ -1,0 +1,11 @@
+{% if p.running %}
+<div class="run running">
+  <p class="run-head"><strong>Running on {% if let Some(db) = p.db %}{{ db.label() }}{% endif %}</strong> <span class="badge tone-info">{{ p.passed + p.failed + p.skipped }} of {{ p.total }}</span></p>
+  <div class="progress" role="progressbar" aria-label="Test progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ percent }}"><svg viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect class="track" width="100" height="8" rx="4"/><rect class="fill" width="{{ percent }}" height="8" rx="4"/></svg></div>
+  <p class="muted mono">{{ p.passed }} passed · {{ p.failed }} failed · {{ p.skipped }} skipped · {{ p.current }}</p>
+  {% if !p.lines.is_empty() %}<ul class="fails">{% for l in p.lines %}<li class="mono t-err">{{ l }}</li>{% endfor %}</ul>{% endif %}
+</div>
+{% else %}
+{% if let Some(e) = p.error %}<p class="notice-inline">The last run didn't finish: {{ e }}</p>{% endif %}
+{% if let Some(id) = p.finished_run %}<p class="muted">Finished: <a href="/dev/dashboard/tests?run={{ id }}">run {{ id }}</a> (reload to see it).</p>{% endif %}
+{% endif %}

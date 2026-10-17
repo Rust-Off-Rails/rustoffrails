@@ -1,0 +1,26 @@
+{# Sign in with email + password (auth-password). Included in sessions/new.html. #}
+<div class="group/method">
+  <div class="relative my-6 group-first/method:hidden" aria-hidden="true">
+    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200 dark:border-gray-800"></div></div>
+    <div class="relative flex justify-center"><span class="bg-white dark:bg-gray-900 px-3 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">or</span></div>
+  </div>
+  <form method="post" action="{{ paths::session_password() }}" novalidate>
+    {% if let Some(alert) = self.alert_for("password") %}
+    <div role="alert" id="password_form_alert" class="mb-4 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950 px-4 py-3 text-sm text-red-800 dark:text-red-200">{{ alert }}</div>
+    {% endif %}
+    <label for="signin_email" class="label">Email</label>
+    <input id="signin_email" name="email" type="email" class="input" autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false" required value="{{ email }}"
+           {% if self.alert_for("password").is_some() %}aria-describedby="password_form_alert"{% endif %}>
+    <div class="mt-4 flex items-baseline justify-between">
+      <label for="signin_password" class="label">Password</label>
+      <a href="{{ paths::new_password() }}" class="text-sm link">Forgot password?</a>
+    </div>
+    <div class="relative">
+      <input id="signin_password" name="password" type="password" class="input pr-16" autocomplete="current-password" required data-capslock="signin_capslock"
+             {% if self.alert_for("password").is_some() %}aria-invalid="true" aria-describedby="password_form_alert"{% endif %}>
+      <button type="button" data-reveal="signin_password" aria-pressed="false" aria-label="Show password" class="absolute inset-y-0 right-0 mt-1 rounded-r-md px-3 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span data-reveal-label>Show</span></button>
+    </div>
+    <p id="signin_capslock" class="hidden mt-1 text-sm text-amber-700 dark:text-amber-300" role="status">Caps Lock is on.</p>
+    <button class="btn mt-6 w-full justify-center">Sign in</button>
+  </form>
+</div>

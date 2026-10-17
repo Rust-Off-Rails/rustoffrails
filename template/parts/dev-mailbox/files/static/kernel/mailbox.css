@@ -1,0 +1,177 @@
+/* The dev mailbox's own stylesheet. Every mailbox page links it through its Chrome
+   (kernel/mailbox_web.rs: `.stylesheet(state.assets.path("kernel/mailbox.css"))`), after the shared
+   kernel/admin.css whose variables it uses. Nothing here lives in assets/app.css, which kernel
+   pages never load.
+   WHY: an app once moved these rules into app.css; the kernel layout never loads it, so the
+   mailbox rendered unstyled. The test `every_mailbox_page_links_its_own_stylesheet_and_script`
+   and `every_mailbox_class_has_a_rule` keep it from happening again.
+   Plain CSS, no inline styles (the CSP is style-src 'self'), usable at 320px.
+   Theme: tokens defined once with `light-dark(<light>, <dark>)`; admin.css sets `color-scheme` from
+   the kernel header's switch (`<html data-theme>`), so the mailbox follows it. No color-scheme
+   media queries: they would ignore the switch. Every pair meets WCAG 2.2 AA in both themes.
+   APP: change the tones below to match your brand. */
+
+:root {
+  --mbx-unread: light-dark(#4338ca, #a5b4fc);
+  --mbx-select: light-dark(#eef2ff, #312e81);
+  --mbx-select-edge: light-dark(#4338ca, #a5b4fc);
+  --mbx-code-bg: light-dark(#f5f3ff, #2e1065);
+  --mbx-stage: light-dark(#e7e5e4, #0c0a09);
+  --mbx-error: light-dark(#b91c1c, #fca5a5);
+  --mbx-warn: light-dark(#a16207, #fcd34d);
+  --mbx-info: light-dark(#0369a1, #7dd3fc);
+  --mbx-radius: 10px;
+  --mbx-shadow: 0 1px 2px light-dark(rgb(0 0 0 / .06), rgb(0 0 0 / .4)), 0 4px 16px light-dark(rgb(0 0 0 / .06), rgb(0 0 0 / .3));
+  /* WHY: fixed, not light-dark(): the frame element pins its own color-scheme (below), which
+     would resolve a light-dark() shadow by the email's scheme instead of the tool's. */
+  --mbx-frame-shadow: 0 1px 2px rgb(0 0 0 / .15), 0 4px 16px rgb(0 0 0 / .15);
+}
+
+/* The mailbox fills the window under the kernel header; each pane scrolls on its own. */
+main:has(> .mbx) { max-width: none; padding: 0; }
+.mbx { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); height: calc(100vh - 3.1rem); height: calc(100dvh - 3.1rem); }
+.mbx-side { display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-right: 1px solid var(--border); }
+.mbx-main { min-width: 0; min-height: 0; overflow: auto; }
+
+.mbx-side-head { display: flex; align-items: center; gap: .5rem; padding: .9rem 1rem .5rem; }
+.mbx-side-head h1 { margin: 0; font-size: 1.15rem; letter-spacing: -.01em; flex: 1; }
+.mbx-live { display: inline-flex; align-items: center; gap: .4rem; margin: 0; font-size: .8rem; color: var(--muted); }
+.mbx-dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--muted); }
+.mbx-live.is-live .mbx-dot { background: var(--ok); box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 60%, transparent); animation: mbx-pulse 2s infinite; }
+.mbx-live.is-error .mbx-dot { background: var(--warn); }
+@keyframes mbx-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 50%, transparent); } 70% { box-shadow: 0 0 0 .4rem transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+.mbx-live-toggle, .mbx-keys-open { padding: .15rem .45rem; }
+
+.mbx-tabs { display: flex; gap: .25rem; padding: 0 1rem; border-bottom: 1px solid var(--border); }
+.mbx-tabs a { display: inline-flex; align-items: center; gap: .4rem; padding: .5rem .6rem; color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 500; }
+.mbx-tabs a:hover { color: var(--fg); }
+.mbx-tabs a[aria-current="page"] { color: var(--accent); border-bottom-color: var(--accent); }
+.mbx-count { display: inline-block; min-width: 1.4em; padding: 0 .4em; border-radius: 999px; font-size: .72rem; font-weight: 700; line-height: 1.5; text-align: center; background: var(--accent); color: var(--on-accent); }
+.mbx-count:empty { display: none; }
+.mbx-count-quiet { background: var(--hover); color: var(--muted); }
+
+.mbx-search { position: relative; margin: .75rem 1rem .5rem; }
+.mbx-search .mbx-icon { position: absolute; left: .6rem; top: 50%; transform: translateY(-50%); color: var(--muted); }
+.mbx-search input { width: 100%; padding: .45rem 2rem .45rem 2rem; font-size: .9rem; border-radius: 8px; }
+.mbx-search kbd { position: absolute; right: .5rem; top: 50%; transform: translateY(-50%); }
+.mbx-bar { display: flex; align-items: center; gap: .4rem; padding: 0 1rem .6rem; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.mbx-total { margin: 0 auto 0 0; font-size: .8rem; color: var(--muted); }
+.mbx-hint { margin: .75rem 1rem; font-size: .85rem; color: var(--muted); }
+
+.mbx-icon { width: 1em; height: 1em; fill: currentColor; flex: none; vertical-align: -.125em; }
+kbd { display: inline-block; min-width: 1.3em; padding: 0 .3em; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; font: 600 .7rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); background: var(--bg); text-align: center; }
+.btn kbd { margin-left: .35rem; }
+
+/* list */
+.mbx-list { flex: 1; overflow: auto; min-height: 0; }
+.mbx-items { list-style: none; margin: 0; padding: 0; }
+.mbx-item { border-bottom: 1px solid var(--border); }
+.mbx-item a { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .1rem .75rem; padding: .7rem 1rem .7rem 1.1rem; color: var(--fg); text-decoration: none; position: relative; }
+.mbx-item a:hover { background: var(--hover); }
+.mbx-item a:focus-visible { outline-offset: -2px; }
+.mbx-item a[aria-current="true"] { background: var(--mbx-select); box-shadow: inset 3px 0 0 var(--mbx-select-edge); }
+.mbx-who { font-size: .82rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mbx-when { font-size: .75rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mbx-subject { grid-column: 1 / -1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mbx-snippet { grid-column: 1; font-size: .82rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mbx-clip { grid-column: 2; display: inline-flex; align-items: center; gap: .2rem; font-size: .75rem; color: var(--muted); justify-self: end; }
+.mbx-item.unread .mbx-subject, .mbx-item.unread .mbx-who { font-weight: 700; color: var(--fg); }
+.mbx-unread-dot { display: inline-block; width: .5rem; height: .5rem; margin-right: .45rem; border-radius: 50%; background: var(--mbx-unread); vertical-align: .1em; }
+.mbx-item.is-new a { animation: mbx-arrive 1.6s ease-out; }
+@keyframes mbx-arrive { from { background: color-mix(in srgb, var(--accent) 22%, transparent); } to { background: transparent; } }
+.mbx-empty { margin: 0; padding: 2rem 1.25rem; color: var(--muted); text-align: center; font-size: .9rem; }
+
+/* message */
+.mbx-msg { max-width: 1100px; margin: 0 auto; padding: 1.25rem 1.5rem 2.5rem; }
+.mbx-back { display: none; margin: 0 0 .75rem; }
+.mbx-preview-note { margin: 0 0 1rem; padding: .5rem .75rem; border-radius: 8px; background: var(--accent-bg); font-size: .85rem; }
+.mbx-msg-head { display: flex; align-items: flex-start; gap: 1rem; margin-bottom: .75rem; }
+.mbx-msg-head h2 { flex: 1; margin: 0; font-size: 1.35rem; line-height: 1.3; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.mbx-msg-actions { display: flex; gap: .4rem; flex-wrap: wrap; }
+.mbx-meta { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .15rem 1rem; margin: 0 0 1.1rem; font-size: .86rem; }
+.mbx-meta dt { color: var(--muted); }
+.mbx-meta dd { margin: 0; overflow-wrap: anywhere; }
+
+.mbx-extract { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: .75rem; margin-bottom: .9rem; }
+.mbx-codes, .mbx-links, .mbx-attachments { padding: .75rem .9rem; border: 1px solid var(--border); border-radius: var(--mbx-radius); background: var(--panel); }
+.mbx-extract h3, .mbx-attachments h3 { display: flex; align-items: center; gap: .4rem; margin: 0 0 .5rem; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.mbx-codes ul, .mbx-links ul, .mbx-attachments ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .4rem; }
+.mbx-codes li { display: flex; align-items: center; gap: .75rem; }
+.mbx-code { flex: 1; padding: .35rem .7rem; border-radius: 8px; background: var(--mbx-code-bg); font-size: 1.6rem; font-weight: 700; letter-spacing: .18em; color: var(--fg); }
+.mbx-codes .btn { padding: .45rem .9rem; font-size: .9rem; font-weight: 600; }
+.mbx-links li { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+.mbx-url { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8rem; }
+.mbx-here { font-size: .75rem; white-space: nowrap; }
+.btn.is-copied { border-color: var(--ok); color: var(--ok); }
+
+.mbx-attachments { margin-bottom: .9rem; }
+.mbx-attachments li { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.mbx-att-name { font-weight: 500; overflow-wrap: anywhere; }
+.mbx-thumb { width: 3rem; height: 3rem; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); }
+.mbx-file { width: 1.5rem; height: 1.5rem; color: var(--muted); }
+
+.mbx-checks { margin: 0 0 .9rem; border: 1px solid var(--border); border-radius: var(--mbx-radius); background: var(--panel); }
+.mbx-checks summary { display: flex; align-items: center; gap: .5rem; padding: .55rem .9rem; font-size: .85rem; font-weight: 600; color: var(--fg); }
+.mbx-checks ul { list-style: none; margin: 0; padding: 0 .9rem .7rem; display: grid; gap: .35rem; font-size: .85rem; }
+.mbx-check { display: flex; gap: .6rem; align-items: baseline; }
+.mbx-level { flex: none; min-width: 3.4rem; font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+.mbx-check-error .mbx-level { color: var(--mbx-error); }
+.mbx-check-warn .mbx-level { color: var(--mbx-warn); }
+.mbx-check-info .mbx-level { color: var(--mbx-info); }
+
+.mbx-viewbar { display: flex; justify-content: space-between; gap: .75rem; flex-wrap: wrap; margin: 0 0 .6rem; }
+.mbx-seg { display: inline-flex; padding: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+.mbx-seg a { padding: .25rem .7rem; border-radius: 6px; font-size: .82rem; color: var(--muted); text-decoration: none; }
+.mbx-seg a:hover { color: var(--fg); }
+.mbx-seg a[aria-current="page"] { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+
+/* The HTML body: a stage that shows the chosen width, the frame inside it. The stage is the
+   tool's chrome and follows the tool's theme; what's inside the frame is the EMAIL, and its
+   Desktop / Mobile / Dark views are about how mail clients show it, whatever the tool's theme. */
+.mbx-stage { padding: 1.25rem; border-radius: var(--mbx-radius); background: var(--mbx-stage); }
+/* The light/dark rendering of the mail itself is done by the server (mailbox_web::in_scheme): a
+   sandboxed frame is cross-origin and follows the OS theme, whatever its color-scheme says. */
+.mbx-frame { display: block; width: 100%; height: 70vh; min-height: 420px; margin: 0 auto; border: 0; border-radius: 8px; background: #fff; box-shadow: var(--mbx-frame-shadow); color-scheme: light; }
+.mbx-stage-600 .mbx-frame { width: 600px; max-width: 100%; }
+.mbx-stage-320 .mbx-frame { width: 320px; max-width: 100%; border: 8px solid #1c1917; border-radius: 28px; }
+/* Dark view: the mail's own dark-mode CSS, or the full inversion many mail apps apply. Only the
+   frame changes; the stage around it stays the tool's. */
+.mbx-stage-dark .mbx-frame { color-scheme: dark; background: #111; }
+
+.mbx-pre-wrap { position: relative; }
+.mbx-pre-copy { position: absolute; right: .5rem; top: .5rem; }
+.mbx-pre { margin: 0; padding: 1rem; max-height: 75vh; overflow: auto; border: 1px solid var(--border); border-radius: var(--mbx-radius); background: var(--panel); white-space: pre-wrap; overflow-wrap: anywhere; font: .82rem/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mbx-headers th[scope="row"] { color: var(--fg); text-transform: none; letter-spacing: 0; font-size: .82rem; white-space: nowrap; }
+.mbx-headers td { overflow-wrap: anywhere; font-size: .82rem; }
+
+/* empty state */
+.mbx-welcome { max-width: 32rem; margin: 12vh auto; padding: 0 1.5rem; text-align: center; }
+.mbx-welcome h2 { margin: 1rem 0 .5rem; font-size: 1.3rem; }
+.mbx-welcome p { color: var(--muted); }
+.mbx-welcome form { margin: 1.25rem 0; }
+.mbx-welcome-art { width: 5rem; height: auto; fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linejoin: round; }
+
+/* shortcuts */
+.mbx-keys { max-width: 24rem; padding: 1.25rem 1.5rem; border: 1px solid var(--border); border-radius: var(--mbx-radius); background: var(--panel); color: var(--fg); box-shadow: var(--mbx-shadow); }
+.mbx-keys::backdrop { background: rgb(0 0 0 / .35); }
+.mbx-keys h2 { margin: 0 0 .75rem; font-size: 1rem; }
+.mbx-keys dl { display: grid; grid-template-columns: max-content 1fr; gap: .4rem 1rem; margin: 0 0 1rem; font-size: .88rem; }
+.mbx-keys dd { margin: 0; }
+
+/* phones: one pane at a time */
+@media (max-width: 820px) {
+  .mbx { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .mbx-side { border-right: 0; }
+  .mbx.has-message .mbx-side { display: none; }
+  .mbx:not(.has-message) .mbx-main { display: none; }
+  .mbx-back { display: block; }
+  .mbx-msg { padding: 1rem; }
+  .mbx-msg-head { flex-direction: column; gap: .6rem; }
+  .mbx-stage { padding: .5rem; }
+  .mbx-frame { height: 65vh; }
+  .mbx-code { font-size: 1.3rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mbx-live.is-live .mbx-dot, .mbx-item.is-new a { animation: none; }
+}

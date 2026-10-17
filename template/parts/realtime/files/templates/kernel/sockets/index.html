@@ -1,0 +1,8 @@
+{% extends "kernel/layout.html" %}
+{% block content %}
+<h1>Sockets</h1>
+<p class="muted">Channels on this node: <code>offrails.v1</code> over {{ transports }}; cluster bus: <strong>{{ cluster }}</strong>. Development only. Agents: <code>curl -s /dev/sockets.json</code>.</p>
+<div hx-get="{{ live.live_url }}" hx-trigger="{{ live.refresh }}" hx-swap="innerHTML">
+  {% include "kernel/sockets/_live.html" %}
+</div>
+{% endblock %}

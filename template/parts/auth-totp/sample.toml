@@ -1,0 +1,374 @@
+# samples/auth-totp/sample.toml: the format is samples/FORMAT.md.
+name = "auth-totp"
+version = "0.7.0"
+summary = "Two-factor authentication (TOTP, RFC 6238): enrol with a server-side QR code or setup key, confirm before enable, a code step after any sign-in method, replay protection, 10 hashed recovery codes, 'trust this device for 30 days', re-auth with a code, secrets encrypted at rest"
+# Needs a sign-in method too: install auth-password or auth-magic-link (or both) as well.
+depends_on = ["auth-core"]
+extracted_from = "Rust off Rails apps"
+
+# Run in the app root, one per line, never with a version (cargo add picks it; read Cargo.lock).
+crates = [
+  "totp-rs --features otpauth",
+  "qrcode --no-default-features --features svg",
+  "aes-gcm",
+]
+
+[[wire]]
+file = "src/kernel/mod.rs"
+anchor = "kernel mods"
+text = '''
+pub mod secret_box;
+'''
+
+[[wire]]
+file = "src/models/mod.rs"
+anchor = "model mods"
+text = '''
+pub mod pending_login;
+pub mod recovery_code;
+pub mod totp_credential;
+pub mod trusted_device;
+'''
+
+[[wire]]
+file = "src/controllers/mod.rs"
+anchor = "controller mods"
+text = '''
+pub mod two_factor;
+'''
+
+[[wire]]
+file = "src/views/mod.rs"
+anchor = "view mods"
+text = '''
+pub mod two_factor;
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config fields"
+text = '''
+pub totp: TotpConfig,
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config debug"
+text = '''
+d.field("totp", &self.totp);
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config parse"
+text = '''
+let totp = TotpConfig::from_env(env, &mut missing, &mut invalid);
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config init"
+text = '''
+totp,
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config test"
+text = '''
+totp: TotpConfig::test(),
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config sections"
+text = '''
+/// Two-factor (samples/auth-totp). `APP_TOTP_ENCRYPTION_KEY`: 32 bytes, base64
+/// (`openssl rand -base64 32`), encrypts TOTP secrets at rest. During a key rotation, put the
+/// old key in `APP_TOTP_ENCRYPTION_KEY_PREVIOUS`; secrets move to the new key as they're used.
+#[derive(Clone)]
+pub struct TotpConfig {
+    pub key: [u8; 32],
+    pub previous_key: Option<[u8; 32]>,
+}
+
+/// Development only, never accepted in production: TOTP secrets in a development database are
+/// encrypted with this fixed, publicly known key.
+const DEV_TOTP_KEY: [u8; 32] = *b"development-only-totp-key-000001";
+
+impl TotpConfig {
+    fn parse(name: &str, invalid: &mut Vec<String>) -> Option<[u8; 32]> {
+        use base64::Engine;
+        let raw = std::env::var(name).ok().filter(|v| !v.trim().is_empty())?;
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(raw.trim())
+            .ok()
+            .and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok());
+        if decoded.is_none() {
+            invalid.push(format!("{name} (32 bytes, base64: openssl rand -base64 32)"));
+        }
+        decoded
+    }
+
+    pub fn from_env(env: AppEnv, missing: &mut Vec<String>, invalid: &mut Vec<String>) -> Self {
+        let previous_key = Self::parse("APP_TOTP_ENCRYPTION_KEY_PREVIOUS", invalid);
+        match Self::parse("APP_TOTP_ENCRYPTION_KEY", invalid) {
+            Some(key) => Self { key, previous_key },
+            None if env == AppEnv::Production => {
+                if std::env::var("APP_TOTP_ENCRYPTION_KEY").is_err() {
+                    missing.push("APP_TOTP_ENCRYPTION_KEY".into());
+                }
+                Self::test()
+            }
+            None => Self {
+                key: DEV_TOTP_KEY,
+                previous_key,
+            },
+        }
+    }
+
+    /// A random key per test config: no fixed secret in the test suite.
+    pub fn test() -> Self {
+        let mut key = [0u8; 32];
+        rand::fill(&mut key);
+        Self {
+            key,
+            previous_key: None,
+        }
+    }
+}
+
+impl std::fmt::Debug for TotpConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TotpConfig")
+            .field("key", &"[redacted]")
+            .field("previous_key", &self.previous_key.map(|_| "[redacted]"))
+            .finish()
+    }
+}
+
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "routes"
+text = '''
+// Two-factor (auth-totp).
+app = app
+    .route("/two-factor", get(crate::controllers::two_factor::show).post(crate::controllers::two_factor::verify))
+    .route("/two-factor/recovery", axum::routing::post(crate::controllers::two_factor::recovery))
+    .route("/account/two-factor/new", get(crate::controllers::two_factor::new))
+    .route("/account/two-factor", axum::routing::post(crate::controllers::two_factor::create))
+    .route("/account/two-factor/recovery-codes", axum::routing::post(crate::controllers::two_factor::regenerate))
+    .route("/account/two-factor/delete", axum::routing::post(crate::controllers::two_factor::destroy))
+    .route("/account/trusted-devices/{id}/delete", axum::routing::post(crate::controllers::two_factor::forget_device))
+    .route("/account/confirm/two-factor", axum::routing::post(crate::controllers::two_factor::confirm));
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "paths"
+text = '''
+pub fn two_factor() -> String {
+    "/two-factor".into()
+}
+pub fn two_factor_recovery() -> String {
+    "/two-factor/recovery".into()
+}
+pub fn new_account_two_factor() -> String {
+    "/account/two-factor/new".into()
+}
+pub fn account_two_factor() -> String {
+    "/account/two-factor".into()
+}
+pub fn account_recovery_codes() -> String {
+    "/account/two-factor/recovery-codes".into()
+}
+pub fn account_two_factor_delete() -> String {
+    "/account/two-factor/delete".into()
+}
+pub fn trusted_device_delete(id: &i64) -> String {
+    format!("/account/trusted-devices/{id}/delete")
+}
+pub fn account_confirm_two_factor() -> String {
+    "/account/confirm/two-factor".into()
+}
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "routes table"
+text = '''
+("GET",  "/two-factor",                        "two_factor::show",             Access::Public),
+("POST", "/two-factor",                        "two_factor::verify",           Access::Public),
+("POST", "/two-factor/recovery",               "two_factor::recovery",         Access::Public),
+("GET",  "/account/two-factor/new",            "two_factor::new",              Access::User),
+("POST", "/account/two-factor",                "two_factor::create",           Access::User),
+("POST", "/account/two-factor/recovery-codes", "two_factor::regenerate",       Access::User),
+("POST", "/account/two-factor/delete",         "two_factor::destroy",          Access::User),
+("POST", "/account/trusted-devices/{id}/delete", "two_factor::forget_device",  Access::User),
+("POST", "/account/confirm/two-factor",        "two_factor::confirm",          Access::User),
+'''
+
+[[wire]]
+file = "src/controllers/auth.rs"
+anchor = "before sign in"
+text = '''
+// auth-totp: two-factor on and this browser not trusted → the code step first.
+if let Some(step) =
+    crate::controllers::two_factor::intercept(state, headers, meta, &user, method).await?
+{
+    return Ok(step);
+}
+'''
+
+[[wire]]
+file = "src/controllers/auth.rs"
+anchor = "step-up second factor"
+text = '''
+needed = needed || crate::models::totp_credential::enabled_for(&state.db, user.id).await?;
+'''
+
+[[wire]]
+file = "src/controllers/auth.rs"
+anchor = "revoke everything"
+text = '''
+crate::models::trusted_device::revoke_all(txn, user_id).await?;
+crate::models::pending_login::revoke_all(txn, user_id).await?;
+'''
+
+[[wire]]
+file = "src/controllers/auth.rs"
+anchor = "revoke other access"
+text = '''
+crate::models::trusted_device::revoke_all(txn, user.id).await?;
+crate::models::pending_login::revoke_all(txn, user.id).await?;
+'''
+
+[[wire]]
+file = "src/views/auth.rs"
+anchor = "account fields"
+text = '''
+/// The two-factor card (auth-totp).
+pub two_factor: crate::views::two_factor::TwoFactorSummary,
+'''
+
+[[wire]]
+file = "src/controllers/account.rs"
+anchor = "account load"
+text = '''
+let two_factor = crate::views::two_factor::TwoFactorSummary::load(&s.db, &user, now).await?;
+'''
+
+[[wire]]
+file = "src/controllers/account.rs"
+anchor = "account init"
+text = '''
+two_factor,
+'''
+
+[[wire]]
+file = "templates/account/show.html"
+anchor = "account sections"
+text = '''
+{% include "account/_two_factor_section.html" %}
+'''
+
+[[wire]]
+file = "templates/account/confirm.html"
+anchor = "confirm second factor"
+text = '''
+{% include "two_factor/_confirm.html" %}
+'''
+
+[[wire]]
+file = "src/tasks/auth_cleanup.rs"
+anchor = "auth cleanup"
+text = '''
+more += crate::models::trusted_device::delete_expired(&state.db, now).await?;
+more += crate::models::pending_login::delete_expired(&state.db, now).await?;
+'''
+
+[[wire]]
+file = "src/tasks/auth_demo.rs"
+anchor = "auth demo"
+text = '''
+// auth-totp: a second demo account with two-factor on, using the fixed, obviously fake demo
+// secret (20 zero bytes: setup key AAAA AAAA …). The first account gets the same secret as a
+// pending enrolment, so the setup page shows a known QR code.
+crate::models::totp_credential::remove(&state.db, two_factor.id).await?;
+crate::models::totp_credential::replace_pending(
+    &state.db,
+    &state.config.totp,
+    two_factor.id,
+    &crate::models::totp_credential::DEMO_SECRET,
+    now,
+)
+.await?;
+crate::models::totp_credential::enable(&state.db, two_factor.id, now).await?;
+let codes = crate::models::recovery_code::regenerate(
+    &state.db,
+    &state.config.auth.secret_key,
+    two_factor.id,
+    now,
+)
+.await?;
+println!("  recovery codes for {DEMO_2FA_EMAIL}: {}", codes.join(" "));
+crate::models::totp_credential::remove(&state.db, user.id).await?;
+crate::models::totp_credential::replace_pending(
+    &state.db,
+    &state.config.totp,
+    user.id,
+    &crate::models::totp_credential::DEMO_SECRET,
+    now,
+)
+.await?;
+println!("  two-factor: on for {DEMO_2FA_EMAIL}, with the fake DEMO setup key AAAA AAAA AAAA AAAA AAAA AAAA AAAA AAAA");
+'''
+
+[[wire]]
+file = "migration/src/lib.rs"
+anchor = "migration mods"
+text = '''
+mod m20261016_004000_create_two_factor;
+'''
+
+[[wire]]
+file = "migration/src/lib.rs"
+anchor = "migrations"
+text = '''
+Box::new(m20261016_004000_create_two_factor::Migration),
+'''
+
+[[wire]]
+file = ".env.example"
+anchor = "env"
+text = '''
+# --- two-factor (auth-totp): required in production; 32 bytes base64 (openssl rand -base64 32) ---
+# APP_TOTP_ENCRYPTION_KEY=
+# APP_TOTP_ENCRYPTION_KEY_PREVIOUS=    # only during a key rotation
+'''
+
+[[wire]]
+file = "compose.yaml"
+anchor = "compose env"
+text = '''
+APP_TOTP_ENCRYPTION_KEY: ${APP_TOTP_ENCRYPTION_KEY:?set APP_TOTP_ENCRYPTION_KEY (openssl rand -base64 32)}
+'''
+
+[[wire]]
+file = "src/controllers/auth.rs"
+anchor = "claim unverified account"
+text = '''
+crate::models::totp_credential::remove(txn, user_id).await?;
+crate::models::recovery_code::remove_all(txn, user_id).await?;
+crate::models::trusted_device::revoke_all(txn, user_id).await?;
+crate::models::pending_login::revoke_all(txn, user_id).await?;
+'''
+
+[[wire]]
+file = "tests/app/main.rs"
+anchor = "test mods"
+text = '''
+mod auth_totp_test;
+'''

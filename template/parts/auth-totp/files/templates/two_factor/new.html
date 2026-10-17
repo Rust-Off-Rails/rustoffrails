@@ -1,0 +1,38 @@
+{% extends "layouts/application.html" %}
+{% block head %}<script src="/static/auth.js" defer></script>{% endblock %}
+{% block content %}
+<section class="mx-auto max-w-xl">
+  <div class="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm sm:p-8">
+    <h1 class="text-2xl font-semibold tracking-tight">Set up two-factor authentication</h1>
+    <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">Signing in will also need a code from an authenticator app on your phone (1Password, Google Authenticator, Microsoft Authenticator, Authy, …).</p>
+    {% if demo_secret %}
+    <div role="note" class="mt-4 rounded-md border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950 px-4 py-3 text-sm text-amber-900 dark:text-amber-100"><strong>Demo secret, development only:</strong> this QR code holds the fixed fake key <code>AAAA…</code> from <code>app task auth_demo</code>. Real enrolments always get a random secret.</div>
+    {% endif %}
+    <ol class="mt-6 space-y-6">
+      <li>
+        <h2 class="font-medium">1. Scan this QR code with your app</h2>
+        <div class="mt-3 flex flex-col items-center gap-4 sm:flex-row sm:items-start">
+          <img src="{{ qr_data_uri }}" width="220" height="220" alt="QR code to add {{ issuer }} ({{ account }}) to your authenticator app. Can't scan it? Use the setup key below." class="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-white p-2">
+          <div class="min-w-0 text-sm">
+            <p class="text-gray-700 dark:text-gray-300">Can't scan it? Enter this setup key in your app instead (time-based):</p>
+            <p id="manual_key" class="mt-2 rounded-md bg-gray-100 dark:bg-gray-800 px-3 py-2 font-mono text-sm tracking-wide text-gray-900 dark:text-gray-100">{% for group in manual_key.split(" ") %}<span class="inline-block whitespace-nowrap pr-2">{{ group }}</span>{% endfor %}</p>
+            <button type="button" data-copy="manual_key" class="btn-secondary mt-2">Copy key</button>
+            <p class="mt-2 text-xs text-gray-600 dark:text-gray-400">Account: {{ account }} · Issuer: {{ issuer }}</p>
+          </div>
+        </div>
+      </li>
+      <li>
+        <h2 class="font-medium">2. Enter the 6-digit code your app shows</h2>
+        <form method="post" action="{{ paths::account_two_factor() }}" class="mt-3 max-w-xs" novalidate>
+          <label for="enrol_code" class="label">Code from the app</label>
+          <input id="enrol_code" name="code" type="text" class="input text-center font-mono text-2xl tracking-[0.5em]" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" maxlength="7" required data-otp
+                 {% if !errors.on("code").is_empty() %}aria-invalid="true" aria-describedby="enrol_code_error"{% endif %}>
+          {% for m in errors.on("code") %}<p id="enrol_code_error" class="field-error">Code {{ m }}</p>{% endfor %}
+          <button class="btn mt-4">Turn on two-factor</button>
+        </form>
+      </li>
+    </ol>
+  </div>
+  <p class="mt-6 text-center text-sm"><a class="link" href="{{ paths::account() }}">Cancel</a></p>
+</section>
+{% endblock %}

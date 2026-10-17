@@ -1,0 +1,94 @@
+{% extends "kernel/dashboard/_layout.html" %}
+{% block dash %}
+<header class="dash-head">
+  <h1>Dashboard</h1>
+  <a class="explain-link" href="{{ d.base }}/explain">What am I looking at?</a>
+  {% if !d.ro %}<form method="post" action="/dev/dashboard/reset"><button class="btn quiet">Clear requests, SQL and logs</button></form>{% endif %}
+</header>
+{% if empty && !d.ro %}
+<div class="welcome">
+  <p><strong>Nothing recorded yet.</strong> The dashboard records every request the app serves, every SQL statement, and every log line, in this process.</p>
+  <p>Browse the app, or <a href="/dev/dashboard/lab">start the load lab</a>: a traffic burst and six scenarios that light up a panel each.</p>
+</div>
+{% endif %}
+<div data-live="cards">{% include "kernel/dashboard/_cards.html" %}</div>
+
+<div class="grid two ov-ai">
+  <section class="panel health tone-{{ health.tone }}" aria-labelledby="ov-health" id="health">
+    <header><h2 id="ov-health">Health</h2><a href="{{ d.base }}/explain">What am I looking at?</a></header>
+    <div class="pad" data-ai-scope>
+      <p class="verdict"><span class="badge tone-{{ health.tone }}">{{ health.verdict }}</span></p>
+      <ul class="health-reasons">{% for r in health.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
+      {% if health.ai %}{% if health.configured %}
+      <form class="ai-health" method="post" action="{{ d.base }}/ai/ask" data-ai-form data-runs="{{ d.base }}/ai/runs">
+        <input type="hidden" name="prepared" value="{{ health.prepared }}">
+        <input type="hidden" name="tab" value="overview">
+        <input type="hidden" name="item" value="">
+        <input type="hidden" name="kind" value="health">
+        <div class="row ai-actions"><button class="btn primary" data-ai-send>Generate health summary</button><span class="ai-busy" data-ai-busy hidden><span class="spinner" aria-hidden="true"></span> Starting…</span></div>
+        <details class="ai-preview"><summary>Preview what will be sent first</summary><pre class="code ai-json" tabindex="0">{{ health.preview }}</pre></details>
+      </form>
+      <div class="ai-answer" data-ai-answer aria-live="polite"></div>
+      {% else %}<p class="hint">With Ask AI on (your own key), <strong>Generate health summary</strong> has an agent investigate and write the status with evidence: <a href="{{ d.base }}/ai?tab=overview">turn it on</a>.</p>{% endif %}{% endif %}
+    </div>
+  </section>
+  <section class="panel digest" aria-labelledby="ov-away" id="away">
+    <header><h2 id="ov-away">{{ digest.title }}</h2></header>
+    <ul class="digest-list" role="list">{% for l in digest.lines %}<li class="tone-{{ l.tone }}"><span class="dot" aria-hidden="true"></span>{% if let Some(h) = l.href %}<a href="{{ h }}">{{ l.text }}</a>{% else %}{{ l.text }}{% endif %}</li>{% endfor %}</ul>
+  </section>
+</div>
+
+{% if !incidents.is_empty() %}
+<section class="panel" aria-labelledby="ov-incidents">
+  <header><h2 id="ov-incidents">Incidents</h2><a href="{{ d.base }}/insights#incidents">All incidents</a></header>
+  <div class="pad">{% include "kernel/dashboard/_incidents.html" %}</div>
+</section>
+{% endif %}
+
+{% if !d.ro && finding_total > 0 %}
+<section class="panel" aria-labelledby="ov-insights">
+  <header><h2 id="ov-insights">Insights</h2><a href="/dev/dashboard/insights">All {{ finding_total }} findings</a></header>
+  <ul class="findings compact" role="list">
+    {% for f in findings %}
+    <li class="finding sev-{{ f.severity }}"><span class="badge sev">{{ f.severity }}</span> <a href="{{ f.href }}">{{ f.title }}</a> <span class="muted">{{ f.evidence }}</span></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if !panels.is_empty() %}
+<div class="grid">
+  {% for p in panels %}
+  <section class="panel" aria-label="{{ p.title }}">
+    <header><h2>{{ p.title }}</h2>{% if let Some(h) = p.href %}<a href="{{ h }}">Open</a>{% endif %}</header>
+    <dl class="figures">{% for f in p.figures %}<div class="fig tone-{{ f.tone }}"><dt>{{ f.label }}</dt><dd>{{ f.value }}</dd></div>{% endfor %}</dl>
+  </section>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="grid two">
+  <section class="panel" aria-labelledby="ov-routes">
+    <header><h2 id="ov-routes">Slowest routes</h2><a href="{{ d.base }}/requests?sort=p95">Requests</a></header>
+    {% if slow_routes.is_empty() %}<p class="empty">No requests yet.</p>{% else %}
+    <div class="scroll" tabindex="0" role="region" aria-label="Table"><table class="data-table"><thead><tr><th scope="col">Route</th><th scope="col" class="num">p95</th><th scope="col" class="num">Hits</th></tr></thead><tbody>
+      {% for r in slow_routes %}<tr><th scope="row"><span class="method m-{{ r.method }}">{{ r.method }}</span> <a class="mono" href="{{ d.base }}/traces?route={{ r.route|urlencode }}">{{ r.route }}</a></th><td class="num">{{ r.p95 }}</td><td class="num">{{ r.count }}</td></tr>{% endfor %}
+    </tbody></table></div>{% endif %}
+  </section>
+  <section class="panel" aria-labelledby="ov-sql">
+    <header><h2 id="ov-sql">Slowest queries</h2><a href="{{ d.base }}/sql?sort=p95">SQL</a></header>
+    {% if slow_sql.is_empty() %}<p class="empty">No SQL yet.</p>{% else %}
+    <ul class="sql-list" role="list">{% for q in slow_sql %}<li><a href="{{ d.base }}/sql/{{ q.id }}"><code>{{ q.sql }}</code></a><span class="muted">p95 {{ q.p95 }} · {{ q.count }}×</span></li>{% endfor %}</ul>{% endif %}
+  </section>
+  <section class="panel" aria-labelledby="ov-traces">
+    <header><h2 id="ov-traces">Latest traces</h2><a href="{{ d.base }}/traces">Traces</a></header>
+    {% if traces.is_empty() %}<p class="empty">No traces yet.</p>{% else %}
+    <ul class="trace-list" role="list">{% for t in traces %}<li><span class="badge tone-{{ t.tone }}">{{ t.status }}</span> <a class="mono" href="{{ d.base }}/traces/{{ t.id }}">{{ t.method }} {{ t.path }}</a>{% if t.n_plus_one %} <span class="badge tone-warn">N+1</span>{% endif %}<span class="muted">{{ t.dur }} · {{ t.when }}</span></li>{% endfor %}</ul>{% endif %}
+  </section>
+  <section class="panel" aria-labelledby="ov-n1">
+    <header><h2 id="ov-n1">N+1 queries</h2><a href="{{ d.base }}/sql#n-plus-one">SQL</a></header>
+    {% if n_plus_one.is_empty() %}<p class="empty">None seen. A request that runs the same statement more than 5 times shows up here.</p>{% else %}
+    <ul class="sql-list" role="list">{% for n in n_plus_one %}<li><a href="{{ d.base }}/traces/{{ n.trace }}"><span class="mono">{{ n.route }}</span></a> <span class="badge tone-warn">{{ n.count }}× in one request</span><code>{{ n.sql }}</code></li>{% endfor %}</ul>{% endif %}
+  </section>
+</div>
+{% endblock %}

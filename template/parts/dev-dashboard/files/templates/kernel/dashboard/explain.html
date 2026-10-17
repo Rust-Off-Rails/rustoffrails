@@ -1,0 +1,21 @@
+{% extends "kernel/dashboard/_layout.html" %}
+{% block dash %}
+<header class="dash-head"><h1>What am I looking at?</h1><a href="{{ d.base }}">Back to the overview</a></header>
+<p class="hint">Every part of the dashboard: what it shows, what healthy looks like, what should worry you, and where to go next. No AI needed{% if d.ai_on %}; "Explain more with AI" opens the assistant with the question filled in{% endif %}.</p>
+<nav class="explain-toc" aria-label="Parts">{% for g in groups %}<a href="#group-{{ loop.index }}">{{ g.0 }}</a>{% endfor %}</nav>
+{% for g in groups %}
+<section class="panel explain-group" id="group-{{ loop.index }}" aria-labelledby="group-h-{{ loop.index }}">
+  <header><h2 id="group-h-{{ loop.index }}">{{ g.0 }}</h2></header>
+  <div class="explain-parts">
+  {% for part in g.1 %}
+    <article class="explain-part" id="part-{{ part.id }}" aria-labelledby="part-h-{{ part.id }}">
+      <h3 id="part-h-{{ part.id }}">{{ part.title }}</h3>
+      <p>{{ part.what }}</p>
+      <dl class="explain-dl"><div><dt>Healthy</dt><dd>{{ part.healthy }}</dd></div><div><dt>Worry when</dt><dd>{{ part.worry }}</dd></div></dl>
+      <p class="explain-links">{% if !part.href.is_empty() %}<a href="{{ d.base }}{{ part.href }}">Open it</a>{% endif %}{% if d.ai_on %}{% if !part.href.is_empty() %} · {% endif %}<a href="{{ d.base }}/ai?tab={{ part.tab }}&amp;q={{ part.ask|urlencode }}">Explain more with AI<span class="visually-hidden">: {{ part.title }}</span></a>{% endif %}</p>
+    </article>
+  {% endfor %}
+  </div>
+</section>
+{% endfor %}
+{% endblock %}

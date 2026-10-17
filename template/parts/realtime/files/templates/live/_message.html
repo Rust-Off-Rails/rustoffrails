@@ -1,0 +1,8 @@
+{% let color = m.color %}
+<li id="message-{{ m.id }}" data-id="{{ m.id }}" class="flex gap-3">
+  <span aria-hidden="true" data-f="avatar" class="mt-0.5 inline-flex h-8 w-8 flex-none items-center justify-center rounded-full text-xs font-semibold text-white {% include "live/_palette.html" %}">{{ m.initials }}</span>
+  <div class="min-w-0">
+    <p class="text-sm"><span data-f="author" class="font-semibold">{{ m.author }}</span> <time data-f="at" datetime="{{ m.at }}" class="ml-1 text-xs text-gray-600 dark:text-gray-400">{{ m.time }}</time></p>
+    <p data-f="body" class="whitespace-pre-wrap break-words text-sm text-gray-800 dark:text-gray-200">{{ m.body }}</p>
+  </div>
+</li>

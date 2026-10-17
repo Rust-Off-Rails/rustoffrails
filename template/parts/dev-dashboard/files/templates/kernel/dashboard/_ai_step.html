@@ -1,0 +1,4 @@
+<li class="ai-step{% if s.is_error %} is-error{% endif %}">
+  {% if !s.note.is_empty() %}<p class="ai-thought">{{ s.note }}</p>{% endif %}
+  <details><summary><span class="ai-step-title">{{ s.title }}…</span> <code class="ai-call">{{ s.call }}</code> <span class="ai-step-meta">{{ s.ms }} ms{% if s.is_error %} · error{% endif %}</span></summary><pre class="code ai-result-text" tabindex="0">{{ s.result }}</pre></details>
+</li>

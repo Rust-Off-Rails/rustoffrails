@@ -1,0 +1,43 @@
+{% extends "kernel/dashboard/_layout.html" %}
+{% block dash %}
+<header class="dash-head">
+  <h1>Insights</h1>
+  <p class="sev-summary"><span class="badge sev-high">{{ counts.0 }} high</span> <span class="badge sev-medium">{{ counts.1 }} medium</span> <span class="badge sev-low">{{ counts.2 }} low</span></p>
+  {% if hidden > 0 %}<form method="post" action="/dev/dashboard/insights/dismiss"><input type="hidden" name="restore" value="1"><button class="btn quiet">Show {{ hidden }} dismissed</button></form>{% endif %}
+</header>
+<p class="hint">What the dashboard measured, turned into things to fix, highest impact first: each with its evidence, a fix and the guide that explains it, and the page that proves it.</p>
+{% if findings.is_empty() %}
+<div class="welcome"><p><strong>Nothing to fix right now.</strong> Findings appear as the app runs: browse it, or run the <a href="/dev/dashboard/lab">load lab</a>'s scenarios.</p></div>
+{% else %}
+<ol class="findings" role="list">
+  {% for f in findings %}
+  <li class="finding sev-{{ f.severity }}" id="finding-{{ f.id }}">
+    <div class="finding-head">
+      <span class="badge sev">{{ f.severity }}</span>
+      <h2>{{ f.title }}</h2>
+      <span class="kind mono">{{ f.kind }}</span>
+    </div>
+    <p class="evidence">{{ f.evidence }}</p>
+    <p class="fix"><strong>Fix:</strong> {{ f.fix }} <a href="{{ f.guide_url }}" rel="noopener noreferrer" class="guide"><code>{{ f.guide }}</code></a></p>
+    <div class="finding-actions">
+      <a class="btn" href="{{ f.href }}">See the evidence</a>
+      {% if d.ai_on %}<a class="btn quiet" href="{{ d.ask_href("insights", &f.id) }}">Ask AI about this</a>{% endif %}
+      <form method="post" action="/dev/dashboard/insights/dismiss"><input type="hidden" name="id" value="{{ f.id }}"><button class="btn quiet">Dismiss for this session</button></form>
+    </div>
+  </li>
+  {% endfor %}
+</ol>
+{% endif %}
+{% if watching || !incidents.is_empty() %}
+<section class="panel" id="incidents" aria-labelledby="incidents-title">
+  <header><h2 id="incidents-title">Incidents</h2><span class="muted">the watcher (DASHBOARD_AI_PROACTIVE) posts one when a signal fires</span></header>
+  <div class="pad">{% if incidents.is_empty() %}<p class="empty">Watching: latency spikes, error bursts, new N+1s, memory growth, job failures, schema drift and failing tests. Nothing has fired.</p>{% else %}{% include "kernel/dashboard/_incidents.html" %}{% endif %}</div>
+</section>
+{% endif %}
+<section class="panel" id="csp" aria-labelledby="csp-title">
+  <header><h2 id="csp-title">CSP violations</h2><span class="muted">reported by the browser to <code>/dev/csp-reports</code></span></header>
+  {% if csp.is_empty() %}<p class="empty">None reported. In development the CSP carries <code>report-uri /dev/csp-reports</code>, so an inline script or a third-party file that the policy blocks shows up here.</p>{% else %}
+  <div class="scroll" tabindex="0" role="region" aria-label="Table"><table class="data-table"><thead><tr><th scope="col">Page</th><th scope="col">Directive</th><th scope="col">Blocked</th><th scope="col">Source</th><th scope="col" class="num">Count</th><th scope="col">Last</th></tr></thead>
+  <tbody>{% for r in csp %}<tr><th scope="row" class="mono">{{ r.page }}</th><td class="mono">{{ r.directive }}</td><td class="mono">{{ r.blocked }}</td><td class="mono">{{ r.source }}</td><td class="num">{{ r.count }}</td><td class="muted">{{ r.when }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+</section>
+{% endblock %}

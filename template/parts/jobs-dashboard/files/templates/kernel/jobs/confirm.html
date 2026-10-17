@@ -1,0 +1,17 @@
+{% extends "kernel/layout.html" %}
+{% block content %}
+<div class="jobs" data-page="confirm">
+<section class="panel confirm-card" aria-labelledby="confirm-title">
+  <h1 id="confirm-title">{{ title }}</h1>
+  <p>{{ body }}</p>
+  <form method="post" action="{{ action_url }}">
+    {% for (name, value) in fields %}<input type="hidden" name="{{ name }}" value="{{ value }}">
+    {% endfor %}
+    <div class="confirm-buttons">
+      <button class="btn {% if danger %}danger solid{% else %}primary{% endif %}" type="submit" autofocus>{{ button }}</button>
+      <a class="btn quiet" href="{{ cancel_href }}">Never mind</a>
+    </div>
+  </form>
+</section>
+</div>
+{% endblock %}

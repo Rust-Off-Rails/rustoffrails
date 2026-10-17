@@ -1,0 +1,26 @@
+<div id="queues" class="scroll" tabindex="0" role="region" aria-label="Queues table"{% if live %} hx-get="/admin/jobs?part=queues" hx-trigger="every 2s" hx-swap="outerHTML" hx-sync="this:drop"{% endif %}>
+  {% if queues.is_empty() %}
+  <p class="empty">No queues yet. Start a worker (<code>app worker</code>, or <code>app serve</code> with <code>APP_INLINE_WORKER=true</code>) and its queues appear here.</p>
+  {% else %}
+  <table class="data">
+    <thead><tr><th scope="col">Queue</th><th scope="col">Status</th><th scope="col" class="num">Limit</th><th scope="col">Rate</th><th scope="col" class="num">Nodes</th><th scope="col" class="num">Executing</th><th scope="col" class="num">Available</th><th scope="col" class="num">Scheduled</th><th scope="col" class="num">Retryable</th><th scope="col" class="num">Discarded</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+    <tbody>
+      {% for q in queues %}
+      <tr>
+        <th scope="row"><a class="mono" href="{{ q.href }}">{{ q.name }}</a></th>
+        <td><span class="pill {{ q.status_class }}">{{ q.status }}</span></td>
+        <td class="num">{{ q.limit }}</td>
+        <td class="mono">{% if q.rate.is_empty() %}<span class="muted">{{ crate::kernel::jobs_web::views::NO_DATA }}</span>{% else %}{{ q.rate }}{% endif %}</td>
+        <td class="num">{{ q.nodes }}</td>
+        <td class="num">{{ q.executing }}</td>
+        <td class="num">{{ q.available }}</td>
+        <td class="num">{{ q.scheduled }}</td>
+        <td class="num">{{ q.retryable }}</td>
+        <td class="num"><a href="{{ q.discarded_href }}">{{ q.discarded }}</a></td>
+        <td class="act"><form method="post" action="{{ q.toggle_url }}"><button class="btn small" type="submit" aria-label="{{ q.toggle_label }} queue {{ q.name }}">{{ q.toggle_label }}</button></form></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>

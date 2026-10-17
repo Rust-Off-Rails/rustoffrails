@@ -1,0 +1,450 @@
+# samples/auth-core/sample.toml: the format is samples/FORMAT.md.
+name = "auth-core"
+version = "0.7.0"
+summary = "Accounts and sessions every auth sample shares: users, database sessions with rotation and revocation, an account security page (devices, activity), re-auth for sensitive actions, email change, security emails with a 'this wasn't me' link, an audit trail and progressive throttling"
+# mailer: the security emails (src/mailers/auth_mailer.rs); dev-mailbox: the "check your mailbox" hint.
+depends_on = ["mailer", "dev-mailbox"]
+extracted_from = "Rust off Rails apps"
+
+# Run in the app root, one per line, never with a version (cargo add picks it; read Cargo.lock).
+crates = [
+  "hmac",
+]
+
+[[wire]]
+file = "src/kernel/mod.rs"
+anchor = "kernel mods"
+text = '''
+pub mod auth_token;
+pub mod background;
+pub mod return_to;
+pub mod session;
+pub mod user_agent;
+'''
+
+[[wire]]
+file = "src/models/mod.rs"
+anchor = "model mods"
+text = '''
+pub mod auth_event;
+pub mod auth_throttle;
+pub mod session;
+pub mod user;
+pub mod user_token;
+'''
+
+[[wire]]
+file = "src/models/mod.rs"
+anchor = "model aliases"
+text = '''
+pub type User = user::Model;
+'''
+
+[[wire]]
+file = "src/controllers/mod.rs"
+anchor = "controller mods"
+text = '''
+pub mod account;
+pub mod auth;
+pub mod security;
+pub mod sessions;
+'''
+
+[[wire]]
+file = "src/views/mod.rs"
+anchor = "view mods"
+text = '''
+pub mod auth;
+'''
+
+[[wire]]
+file = "src/views/mod.rs"
+anchor = "ctx fields"
+text = '''
+/// The signed-in person (auth-core), for the nav and pages that greet them.
+pub current_user: Option<crate::models::user::Model>,
+/// Development with the local mailer: auth screens link to the dev mailbox.
+pub dev_mailbox: bool,
+'''
+
+[[wire]]
+file = "src/controllers/application.rs"
+anchor = "ctx init"
+text = '''
+current_user: crate::controllers::auth::current_user(parts, state).await?,
+dev_mailbox: development && state.mailer.is_local(),
+'''
+
+[[wire]]
+file = "src/mailers/mod.rs"
+anchor = "mailer mods"
+text = '''
+pub mod auth_mailer;
+'''
+
+[[wire]]
+file = "src/mailers/previews.rs"
+anchor = "previews"
+text = '''
+Preview {
+    name: "auth_mailer/new_sign_in",
+    build: |s| {
+        Box::pin(async {
+            crate::mailers::auth_mailer::notice(
+                &s.config,
+                "ada@example.com",
+                &crate::mailers::auth_mailer::Notice::NewSignIn {
+                    device: "Firefox on macOS".into(),
+                    ip: Some("192.0.2.10".into()),
+                },
+                "preview-token-not-real",
+            )
+        })
+    },
+},
+Preview {
+    name: "auth_mailer/email_change",
+    build: |s| {
+        Box::pin(async {
+            crate::mailers::auth_mailer::email_change(
+                &s.config,
+                "ada.new@example.com",
+                "preview-token-not-real",
+            )
+        })
+    },
+},
+'''
+
+[[wire]]
+file = "src/state.rs"
+anchor = "state fields"
+text = '''
+/// Auth emails sent after the response (auth-core): no request waits on SMTP.
+pub background: crate::kernel::background::Background,
+'''
+
+[[wire]]
+file = "src/state.rs"
+anchor = "state init"
+text = '''
+background: crate::kernel::background::Background::default(),
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config fields"
+text = '''
+pub auth: AuthConfig,
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config debug"
+text = '''
+d.field("auth", &self.auth);
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config parse"
+text = '''
+let auth = AuthConfig::from_env(env, &mut missing, &mut invalid);
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config init"
+text = '''
+auth,
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config test"
+text = '''
+auth: AuthConfig::test(),
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config sections"
+text = '''
+/// Accounts (samples/auth-core). `APP_SECRET_KEY` keys the HMAC digests of short secrets
+/// (emailed codes, recovery codes, throttle keys), so a database leak alone can't brute-force them.
+#[derive(Clone)]
+pub struct AuthConfig {
+    pub secret_key: Vec<u8>,
+}
+
+/// Development only, never accepted in production. Codes made with it are as worthless as the
+/// development database they live in.
+const DEV_AUTH_SECRET_KEY: &str = "development-only-auth-key-not-a-secret-0001";
+
+impl AuthConfig {
+    pub fn from_env(env: AppEnv, missing: &mut Vec<String>, invalid: &mut Vec<String>) -> Self {
+        Self::from_value(env, std::env::var("APP_SECRET_KEY").ok(), missing, invalid)
+    }
+
+    pub fn from_value(
+        env: AppEnv,
+        given: Option<String>,
+        missing: &mut Vec<String>,
+        invalid: &mut Vec<String>,
+    ) -> Self {
+        match given.filter(|v| !v.trim().is_empty()) {
+            // SECURITY: at least 32 characters (`openssl rand -base64 48`); a short key is
+            // guessable (test: the_secret_key_must_be_long_enough_and_set_in_production)
+            Some(key) if key.len() >= 32 => Self {
+                secret_key: key.into_bytes(),
+            },
+            Some(_) => {
+                invalid.push("APP_SECRET_KEY (at least 32 characters: openssl rand -base64 48)".into());
+                Self::test()
+            }
+            // SECURITY: production refuses to boot without its own key
+            // (test: the_secret_key_must_be_long_enough_and_set_in_production)
+            None if env == AppEnv::Production => {
+                missing.push("APP_SECRET_KEY".into());
+                Self::test()
+            }
+            None => Self {
+                secret_key: DEV_AUTH_SECRET_KEY.as_bytes().to_vec(),
+            },
+        }
+    }
+
+    /// A fresh random key per test config: no fixed secret in the test suite.
+    pub fn test() -> Self {
+        let mut key = vec![0u8; 32];
+        rand::fill(&mut key[..]);
+        Self { secret_key: key }
+    }
+}
+
+impl std::fmt::Debug for AuthConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthConfig")
+            .field("secret_key", &"[redacted]")
+            .finish()
+    }
+}
+
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "routes"
+text = '''
+// Accounts (auth-core). Sign-in forms come from the method samples; see their routes below.
+app = app
+    .route("/session/new", get(crate::controllers::sessions::new))
+    .route("/session/delete", axum::routing::post(crate::controllers::sessions::destroy))
+    .route("/account", get(crate::controllers::account::show))
+    .route("/account/confirm", get(crate::controllers::account::confirm))
+    .route("/account/sessions/delete-others", axum::routing::post(crate::controllers::account::revoke_others))
+    .route("/account/sessions/{id}/delete", axum::routing::post(crate::controllers::account::revoke))
+    .route("/account/email/edit", get(crate::controllers::account::edit_email))
+    .route("/account/email", axum::routing::post(crate::controllers::account::update_email))
+    .route(
+        "/account/email/confirm/{token}",
+        get(crate::controllers::account::show_email_change)
+            .post(crate::controllers::account::confirm_email_change),
+    )
+    .route(
+        "/security/not-me/{token}",
+        get(crate::controllers::security::show).post(crate::controllers::security::create),
+    );
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "paths"
+text = '''
+/// After signing in, unless the person was headed somewhere (auth-core).
+// APP: your app's home for signed-in people (a dashboard, `/books`, …).
+pub fn after_sign_in() -> String {
+    "/account".into()
+}
+pub fn session_delete() -> String {
+    "/session/delete".into()
+}
+pub fn account() -> String {
+    "/account".into()
+}
+pub fn account_confirm() -> String {
+    "/account/confirm".into()
+}
+pub fn account_session_delete(id: &i64) -> String {
+    format!("/account/sessions/{id}/delete")
+}
+pub fn account_sessions_delete_others() -> String {
+    "/account/sessions/delete-others".into()
+}
+pub fn account_email_edit() -> String {
+    "/account/email/edit".into()
+}
+pub fn account_email() -> String {
+    "/account/email".into()
+}
+pub fn email_change(token: &str) -> String {
+    format!("/account/email/confirm/{token}")
+}
+pub fn not_me(token: &str) -> String {
+    format!("/security/not-me/{token}")
+}
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "routes table"
+text = '''
+("GET",  "/session/new",                       "sessions::new",                Access::Public),
+("POST", "/session/delete",                    "sessions::destroy",            Access::User),
+("GET",  "/account",                           "account::show",                Access::User),
+("GET",  "/account/confirm",                   "account::confirm",             Access::User),
+("POST", "/account/sessions/delete-others",    "account::revoke_others",       Access::User),
+("POST", "/account/sessions/{id}/delete",      "account::revoke",              Access::User),
+("GET",  "/account/email/edit",                "account::edit_email",          Access::User),
+("POST", "/account/email",                     "account::update_email",        Access::User),
+("GET",  "/account/email/confirm/{token}",     "account::show_email_change",   Access::Public),
+("POST", "/account/email/confirm/{token}",     "account::confirm_email_change", Access::Public),
+("GET",  "/security/not-me/{token}",           "security::show",               Access::Public),
+("POST", "/security/not-me/{token}",           "security::create",             Access::Public),
+'''
+
+[[wire]]
+file = "templates/shared/_nav.html"
+anchor = "nav links"
+text = '''
+{% include "shared/_auth_nav.html" %}
+'''
+
+[[wire]]
+file = "src/tasks/mod.rs"
+anchor = "task mods"
+text = '''
+pub mod auth_cleanup;
+pub mod auth_demo;
+'''
+
+[[wire]]
+file = "src/tasks/mod.rs"
+anchor = "tasks"
+text = '''
+"auth_cleanup" => auth_cleanup::run(state, args).await,
+"auth_demo" => auth_demo::run(state, args).await,
+'''
+
+[[wire]]
+file = "migration/src/lib.rs"
+anchor = "migration mods"
+text = '''
+mod m20261016_001000_create_users;
+mod m20261016_001100_create_sessions;
+mod m20261016_001200_create_user_tokens;
+mod m20261016_001300_create_auth_events_and_throttles;
+'''
+
+[[wire]]
+file = "migration/src/lib.rs"
+anchor = "migrations"
+text = '''
+Box::new(m20261016_001000_create_users::Migration),
+Box::new(m20261016_001100_create_sessions::Migration),
+Box::new(m20261016_001200_create_user_tokens::Migration),
+Box::new(m20261016_001300_create_auth_events_and_throttles::Migration),
+'''
+
+[[wire]]
+file = ".env.example"
+anchor = "env"
+text = '''
+# --- accounts (auth-core): required in production, at least 32 characters ---
+# APP_SECRET_KEY=generate-with-openssl-rand-base64-48
+'''
+
+[[wire]]
+file = "compose.yaml"
+anchor = "compose env"
+text = '''
+APP_SECRET_KEY: ${APP_SECRET_KEY:?set APP_SECRET_KEY (openssl rand -base64 48)}
+'''
+
+[[wire]]
+file = "src/kernel/redact.rs"
+anchor = "token routes"
+text = '''
+"/account/email/confirm/{token}",
+"/security/not-me/{token}",
+'''
+
+[[wire]]
+file = "tests/app/main.rs"
+anchor = "test mods"
+text = '''
+mod auth_core_test;
+'''
+
+[[wire]]
+file = "tests/app/factories.rs"
+anchor = "factories"
+text = '''
+/// A verified user (auth-core).
+pub async fn user(db: &sea_orm::DatabaseConnection, email: &str) -> offrails_host::models::user::Model {
+    let user = offrails_host::models::user::find_or_create(db, email, chrono::Utc::now())
+        .await
+        .expect("create user");
+    offrails_host::models::user::mark_verified(db, user.id, chrono::Utc::now())
+        .await
+        .expect("verify user");
+    offrails_host::models::user::find_self(db, user.id).await.expect("reload user")
+}
+'''
+
+[[wire]]
+file = "tests/app/support.rs"
+anchor = "test support"
+text = '''
+/// Waits until background auth work (emails) has finished (auth-core).
+pub async fn settle(&self) {
+    self.state.background.idle().await;
+}
+
+/// Signs in as `user` without any sign-in method: a session row and its cookie (auth-core).
+pub async fn sign_in_as(&self, user: &offrails_host::models::user::Model) -> String {
+    let (_, raw) = offrails_host::models::session::start(
+        &self.state.db,
+        user.id,
+        "test",
+        None,
+        None,
+        chrono::Utc::now(),
+    )
+    .await
+    .expect("start session");
+    self.set_cookie(
+        offrails_host::kernel::session::session_name(self.state.config.is_production()),
+        &raw,
+    );
+    raw
+}
+
+/// Every email sent to `to` (after `settle`).
+pub fn emails_to(&self, to: &str) -> Vec<offrails_host::kernel::mailer::Email> {
+    self.state.mailer.sent().into_iter().filter(|m| m.to == to).collect()
+}
+
+/// The first link in `email`'s text part whose path starts with `prefix`, as a path.
+pub fn link_in(&self, email: &offrails_host::kernel::mailer::Email, prefix: &str) -> String {
+    let base = self.state.config.app_url.trim_end_matches('/').to_owned();
+    email
+        .text
+        .split_whitespace()
+        .filter_map(|w| w.strip_prefix(&base))
+        .find(|p| p.starts_with(prefix))
+        .unwrap_or_else(|| panic!("no {prefix} link in:\n{}", email.text))
+        .to_owned()
+}
+
+'''

@@ -1,0 +1,68 @@
+{% extends "kernel/dashboard/_layout.html" %}
+{% block dash %}
+<header class="dash-head">
+  <h1>Routes <span class="muted">{{ shown }} of {{ total }}</span></h1>
+  <nav class="segmented" aria-label="Area">{% for a in areas %}<a href="{{ a.href }}"{% if a.current %} aria-current="true"{% endif %}>{{ a.label }}</a>{% endfor %}</nav>
+</header>
+<form class="filters" method="get" action="/dev/dashboard/routes" role="search">
+  {% if !area.is_empty() %}<input type="hidden" name="area" value="{{ area }}">{% endif %}
+  <label>Search <input name="q" type="search" value="{{ q }}" placeholder="method, path, handler or access" data-route-filter></label>
+  <label class="check"><input type="checkbox" name="problems" value="1"{% if problems_only %} checked{% endif %}> Only routes with problems</label>
+  <button class="btn">Filter</button>
+  {% if !q.is_empty() || problems_only %}<a class="btn quiet" href="/dev/dashboard/routes">Clear</a>{% endif %}
+</form>
+<dl class="figures wide" id="problems">
+  <div class="fig tone-{% if p.without_csrf.is_empty() %}ok{% else %}err{% endif %}"><dt>Without CSRF</dt><dd>{{ p.without_csrf.len() }}</dd></div>
+  <div class="fig tone-{% if p.ungated.is_empty() && p.open_in_production.is_empty() %}ok{% else %}err{% endif %}"><dt>Without a gate</dt><dd>{{ p.ungated.len() + p.open_in_production.len() }}</dd></div>
+  <div class="fig tone-{% if untested == 0 %}ok{% else %}warn{% endif %}"><dt>No test mentions</dt><dd>{{ untested }}</dd></div>
+  <div class="fig tone-muted"><dt>Never hit</dt><dd>{{ never_hit }}</dd></div>
+  <div class="fig tone-{% if not_found.is_empty() %}ok{% else %}warn{% endif %}"><dt>404 paths</dt><dd>{{ not_found.len() }}</dd></div>
+  <div class="fig tone-{% if p.missing_docs.is_empty() %}ok{% else %}muted{% endif %}"><dt>Missing from docs</dt><dd>{{ p.missing_docs.len() }}</dd></div>
+</dl>
+{% for g in groups %}
+<details class="route-group panel"{% if g.open %} open{% endif %}>
+  <summary><span class="badge area-{{ g.area }}">{{ g.area }}</span> <strong>{{ g.resource }}</strong> <span class="muted">{{ g.routes.len() }} route{% if g.routes.len() != 1 %}s{% endif %}</span>{% if g.problems > 0 %} <span class="badge tone-warn">{{ g.problems }} with problems</span>{% endif %}</summary>
+  <ul class="routes" role="list">
+    {% for r in g.routes %}
+    <li class="route" id="{{ r.id }}">
+      <div class="route-main">
+        <span class="method m-{{ r.method }}">{{ r.method }}</span>
+        <span class="mono path">{{ r.path }}</span>
+        <span class="badge access-{{ r.access }}">{{ r.access }}</span>
+        {% for m in r.middleware %}<span class="chip">{{ m }}</span>{% endfor %}
+        {% if let Some(h) = r.try_href %}<a class="btn quiet try" href="{{ h }}" target="_blank" rel="noopener">Try it<span class="visually-hidden"> (opens {{ h }} in a new tab)</span></a>{% endif %}
+      </div>
+      <div class="route-meta">
+        <span class="mono handler">{{ r.handler }}</span>{% if !r.source.is_empty() %} <span class="mono src">{{ r.source }}</span>{% endif %}
+      </div>
+      <div class="route-stats">
+        <span><span class="label">Hits</span> {{ r.hits }}</span>
+        <span><span class="label">Errors</span> <span class="badge tone-{{ r.error_tone }}">{{ r.errors }}</span></span>
+        <span><span class="label">p50</span> {{ r.p50 }}</span>
+        <span><span class="label">p95</span> {{ r.p95 }}</span>
+        <span><span class="label">Last</span> {{ r.last }}</span>
+        <svg class="spark small" viewBox="0 0 120 32" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path class="spark-area" d="{{ r.spark.area }}"/><path class="spark-line" d="{{ r.spark.d }}"/></svg>
+        <a href="/dev/dashboard/traces?route={{ r.path|urlencode }}">Traces</a> <a href="/dev/dashboard/sql?route={{ r.path|urlencode }}">SQL</a>
+      </div>
+      {% if !r.problems.is_empty() %}<ul class="problems" role="list">{% for (tone, text) in r.problems %}<li class="t-{{ tone }}">{{ text }}</li>{% endfor %}</ul>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</details>
+{% endfor %}
+{% if groups.is_empty() %}<p class="empty">No route matches.</p>{% endif %}
+
+<section class="panel" id="not-found" aria-labelledby="nf-title">
+  <header><h2 id="nf-title">404s seen</h2><span class="muted">paths that matched no route, with the route they probably meant</span></header>
+  {% if not_found.is_empty() %}<p class="empty">None yet. A broken link on a page shows up here with the page it was on.</p>{% else %}
+  <div class="scroll" tabindex="0" role="region" aria-label="Table"><table class="data-table"><thead><tr><th scope="col">Path</th><th scope="col" class="num">Count</th><th scope="col">Linked from</th><th scope="col">Did you mean</th><th scope="col">Last</th></tr></thead>
+  <tbody>{% for n in not_found %}<tr><th scope="row" class="mono">{{ n.method }} {{ n.path }}</th><td class="num">{{ n.count }}</td><td class="mono">{% if n.referrer.is_empty() %}<span class="muted">no referrer</span>{% else %}{{ n.referrer }}{% endif %}</td><td class="mono">{% if let Some(m) = n.nearest %}{{ m }}{% else %}<span class="muted">nothing close</span>{% endif %}</td><td class="muted">{{ n.when }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+</section>
+{% if !p.overlaps.is_empty() %}
+<section class="panel" aria-labelledby="ov-title">
+  <header><h2 id="ov-title">Overlapping patterns</h2><span class="muted">axum prefers the literal segment; make sure that's what you meant</span></header>
+  <ul class="plain">{% for (a, b) in p.overlaps %}<li class="mono">{{ a }} <span class="muted">and</span> {{ b }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+<p class="hint">The host's plain list is still at <a href="/dev/routes">/dev/routes</a>.</p>
+{% endblock %}

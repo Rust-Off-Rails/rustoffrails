@@ -1,0 +1,9 @@
+{% extends "kernel/dashboard/_layout.html" %}
+{% block dash %}
+<header class="dash-head">
+  <h1>Traces{% if !route.is_empty() %} <span class="muted mono">{{ route }}</span>{% endif %}{% if !minute.is_empty() %} <span class="muted">at {{ minute }}</span>{% endif %}</h1>
+  <nav class="segmented" aria-label="Filter">{% for f in filters %}<a href="{{ f.href }}"{% if f.current %} aria-current="true"{% endif %}>{{ f.label }}</a>{% endfor %}</nav>
+</header>
+<p class="hint">{{ kept }}. Notable: a 5xx, an N+1, or slower than half a second.{% if !route.is_empty() || !minute.is_empty() %} <a href="{{ base }}/traces">All traces</a>{% endif %}</p>
+<div data-live="traces">{% include "kernel/dashboard/_traces.html" %}</div>
+{% endblock %}

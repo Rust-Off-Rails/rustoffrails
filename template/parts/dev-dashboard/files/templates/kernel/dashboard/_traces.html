@@ -1,0 +1,19 @@
+{% if rows.is_empty() %}
+<p class="empty">No traces match. Every request the app serves is traced here (the dashboard's own pages excepted).</p>
+{% else %}
+<div class="scroll" tabindex="0" role="region" aria-label="Table"><table class="data-table">
+  <caption class="visually-hidden">Recent requests, newest first</caption>
+  <thead><tr><th scope="col">When</th><th scope="col">Request</th><th scope="col">Status</th><th scope="col">Duration</th><th scope="col" class="num">SQL</th></tr></thead>
+  <tbody>
+  {% for t in rows %}
+    <tr>
+      <td class="muted nowrap">{{ t.when }}</td>
+      <th scope="row"><span class="method m-{{ t.method }}">{{ t.method }}</span> <a class="mono" href="{{ base }}/traces/{{ t.id }}">{{ t.path }}</a>{% if t.n_plus_one %} <span class="badge tone-warn">N+1</span>{% endif %}<span class="sub mono">{{ t.route }}</span></th>
+      <td><span class="badge tone-{{ t.tone }}">{{ t.status }}</span></td>
+      <td class="barcell"><span class="num">{{ t.dur }}</span><svg class="dbar" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect width="{{ t.bar }}" height="6" rx="2"/></svg></td>
+      <td class="num">{{ t.sql }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}

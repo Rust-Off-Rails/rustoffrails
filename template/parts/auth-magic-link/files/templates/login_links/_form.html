@@ -1,0 +1,21 @@
+{# Sign in with an emailed link + code (auth-magic-link). Included in sessions/new.html. #}
+<div class="group/method">
+  <div class="relative my-6 group-first/method:hidden" aria-hidden="true">
+    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200 dark:border-gray-800"></div></div>
+    <div class="relative flex justify-center"><span class="bg-white dark:bg-gray-900 px-3 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">or</span></div>
+  </div>
+  <form method="post" action="{{ paths::login_links() }}" novalidate>
+    {% if let Some(alert) = self.alert_for("magic_link") %}
+    <div role="alert" class="mb-4 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950 px-4 py-3 text-sm text-red-800 dark:text-red-200">{{ alert }}</div>
+    {% endif %}
+    <label for="link_email" class="label">Email</label>
+    <input id="link_email" name="email" type="email" class="input" autocomplete="email" inputmode="email" autocapitalize="none" spellcheck="false" required
+           value="{% if form == "magic_link" %}{{ email }}{% endif %}"
+           aria-describedby="link_email_hint{% if !self.errors_on("magic_link", "email").is_empty() %} link_email_error{% endif %}"
+           {% if !self.errors_on("magic_link", "email").is_empty() %}aria-invalid="true"{% endif %}>
+    {% for m in self.errors_on("magic_link", "email") %}<p id="link_email_error" class="field-error">Email {{ m }}</p>{% endfor %}
+    <p id="link_email_hint" class="mt-1 text-xs text-gray-600 dark:text-gray-400">We'll email you a sign-in link and a 6-digit code. No password needed; new here? It creates your account.</p>
+    {# Secondary look under a password form, primary when it's the only method. #}
+    <button class="mt-4 inline-flex w-full items-center justify-center rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 group-first/method:border-transparent group-first/method:bg-indigo-600 dark:group-first/method:bg-indigo-600 group-first/method:text-white dark:group-first/method:text-white group-first/method:hover:bg-indigo-500 dark:group-first/method:hover:bg-indigo-500">Email me a sign-in link</button>
+  </form>
+</div>

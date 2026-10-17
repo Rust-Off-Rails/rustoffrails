@@ -1,0 +1,273 @@
+# samples/mailer/sample.toml: the format is samples/FORMAT.md.
+name = "mailer"
+version = "0.7.0"
+summary = "Mailer: templated HTML + text email, delivery adapters (SMTP, dev mailbox storage, log, memory), previews, a test email task"
+depends_on = []
+extracted_from = "Rust off Rails apps"
+
+# Run in the app root, one per line, never with a version (cargo add picks it; read Cargo.lock).
+crates = [
+  "lettre --no-default-features --features builder,smtp-transport,pool,hostname,tokio1-rustls-tls",
+]
+
+# Every file under files/ is copied to the same path in the app.
+
+[[wire]]
+file = "src/kernel/mod.rs"
+anchor = "kernel mods"
+text = '''
+pub mod mailbox;
+pub mod mailer;
+'''
+
+[[wire]]
+file = "src/lib.rs"
+anchor = "lib mods"
+text = '''
+pub mod mailers;
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config fields"
+text = '''
+pub mail: MailConfig,
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config debug"
+text = '''
+d.field("mail", &self.mail);
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config parse"
+text = '''
+let mail = MailConfig::from_env(env)?;
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config init"
+text = '''
+mail,
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config test"
+text = '''
+mail: MailConfig::test(),
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config sections"
+text = '''
+/// Email (.offrails/guides/mailers.md): which mailer delivers, and as whom.
+#[derive(Clone)]
+pub struct MailConfig {
+    /// `SMTP_URL`: `smtps://user:pass@smtp.example.com:465`. Production sends through it.
+    pub smtp_url: Option<String>,
+    /// `MAILER`: `smtp`, `local` or `log` overrides the environment's default.
+    pub mailer: Option<String>,
+    /// `MAIL_FROM`: `Name <address>`.
+    pub from: String,
+}
+
+impl MailConfig {
+    pub fn from_env(_env: AppEnv) -> anyhow::Result<Self> {
+        let mailer = std::env::var("MAILER").ok().filter(|s| !s.is_empty());
+        if let Some(m) = &mailer
+            && !matches!(m.as_str(), "smtp" | "local" | "log")
+        {
+            anyhow::bail!("MAILER must be smtp, local or log (got {m:?})");
+        }
+        Ok(Self {
+            smtp_url: std::env::var("SMTP_URL").ok().filter(|s| !s.is_empty()),
+            mailer,
+            from: std::env::var("MAIL_FROM")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| format!("{APP_NAME} <no-reply@localhost>")),
+        })
+    }
+
+    pub fn test() -> Self {
+        Self {
+            smtp_url: None,
+            mailer: None,
+            from: format!("{APP_NAME} <no-reply@localhost>"),
+        }
+    }
+}
+
+// SECURITY: SMTP_URL carries credentials; /dev/introspect.json and logs print Config's Debug (test: the_smtp_url_never_shows_in_config_debug).
+impl std::fmt::Debug for MailConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MailConfig")
+            .field("smtp_url", &self.smtp_url.as_ref().map(|_| "[redacted]"))
+            .field("mailer", &self.mailer)
+            .field("from", &self.from)
+            .finish()
+    }
+}
+
+'''
+
+[[wire]]
+file = "src/state.rs"
+anchor = "state fields"
+text = '''
+pub mailer: crate::kernel::mailer::Mailer,
+'''
+
+[[wire]]
+file = "src/state.rs"
+anchor = "state build"
+text = '''
+let mailer = select_mailer(&config, &db)?;
+'''
+
+[[wire]]
+file = "src/state.rs"
+anchor = "state init"
+text = '''
+mailer,
+'''
+
+[[wire]]
+file = "src/state.rs"
+anchor = "state fns"
+text = '''
+/// Which mailer this environment uses.
+/// GUIDE: .offrails/guides/mailers.md#kernel-spec-srckernelmailerrs
+/// INVARIANT: development is always the dev mailbox unless MAILER says otherwise, even with SMTP_URL set (test: development_always_uses_the_dev_mailbox_even_with_smtp_url_set).
+pub fn select_mailer(
+    c: &Config,
+    db: &DatabaseConnection,
+) -> anyhow::Result<crate::kernel::mailer::Mailer> {
+    use crate::config::AppEnv;
+    use crate::kernel::mailer::Mailer;
+
+    let from: lettre::message::Mailbox = c
+        .mail
+        .from
+        .parse()
+        .map_err(|_| anyhow::anyhow!("MAIL_FROM is not a valid address: {:?}", c.mail.from))?;
+    let smtp = |url: Option<&str>| match url {
+        Some(url) => Mailer::smtp(url, from.clone()),
+        None => anyhow::bail!("MAILER=smtp needs SMTP_URL"),
+    };
+    Ok(match (c.env, c.mail.mailer.as_deref()) {
+        (AppEnv::Test, _) => Mailer::memory(),
+        (_, Some("smtp")) => smtp(c.mail.smtp_url.as_deref())?,
+        (_, Some("local")) => Mailer::local(db.clone(), from),
+        (_, Some("log")) => Mailer::Log,
+        (_, Some(other)) => anyhow::bail!("MAILER must be smtp, local or log (got {other:?})"),
+        (AppEnv::Development, None) => Mailer::local(db.clone(), from),
+        (AppEnv::Production, None) => match c.mail.smtp_url.as_deref() {
+            Some(url) => smtp(Some(url))?,
+            None => {
+                tracing::warn!("SMTP_URL is not set: email is logged, not sent");
+                Mailer::Log
+            }
+        },
+    })
+}
+'''
+
+[[wire]]
+file = "migration/src/lib.rs"
+anchor = "migration mods"
+text = '''
+mod m20261016_000100_create_mailbox_messages;
+'''
+
+[[wire]]
+file = "migration/src/lib.rs"
+anchor = "migrations"
+text = '''
+Box::new(m20261016_000100_create_mailbox_messages::Migration),
+'''
+
+[[wire]]
+file = "src/tasks/mod.rs"
+anchor = "task mods"
+text = '''
+pub mod send_test_email;
+'''
+
+[[wire]]
+file = "src/tasks/mod.rs"
+anchor = "tasks"
+text = '''
+"send_test_email" => send_test_email::run(state, args).await,
+'''
+
+[[wire]]
+file = "src/controllers/dev.rs"
+anchor = "system facts"
+text = '''
+facts.push((
+    "SMTP_URL",
+    if c.mail.smtp_url.is_some() {
+        "configured".to_owned()
+    } else {
+        "not set".to_owned()
+    },
+));
+facts.push((
+    "MAILER",
+    c.mail
+        .mailer
+        .clone()
+        .unwrap_or_else(|| "default".to_owned()),
+));
+facts.push(("MAIL_FROM", c.mail.from.clone()));
+'''
+
+[[wire]]
+file = ".env.example"
+anchor = "env"
+text = '''
+# --- email: development always uses the dev mailbox; SMTP_URL is for production ---
+# SMTP_URL=smtps://user:pass@smtp.example.com:465
+# MAILER=smtp                  # smtp | local | log: only to try real delivery from development (needs SMTP_URL)
+# MAIL_FROM="My App <no-reply@example.com>"   # default: "<APP_NAME> <no-reply@localhost>"
+'''
+
+[[wire]]
+file = "compose.yaml"
+anchor = "compose env"
+text = '''
+SMTP_URL: ${SMTP_URL:-}
+'''
+
+[[wire]]
+file = "tests/app/main.rs"
+anchor = "test mods"
+text = '''
+mod mailer_test;
+'''
+
+[[wire]]
+file = "tests/app/support.rs"
+anchor = "test support"
+text = '''
+/// Emails the `Memory` mailer captured (`ActionMailer::Base.deliveries`).
+pub fn sent_emails(&self) -> Vec<offrails_host::kernel::mailer::Email> {
+    self.state.mailer.sent()
+}
+
+/// The newest email sent to `to` (case-insensitive), for assertions on one recipient's mail.
+pub fn last_email_to(&self, to: &str) -> Option<offrails_host::kernel::mailer::Email> {
+    self.sent_emails()
+        .into_iter()
+        .rev()
+        .find(|e| e.to.eq_ignore_ascii_case(to.trim()))
+}
+
+'''

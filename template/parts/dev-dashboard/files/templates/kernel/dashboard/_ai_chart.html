@@ -1,0 +1,11 @@
+{# A chart an answer cites ([chart:latency 12:00-12:10]): the Charts page's geometry, drawn small, with its summary as the text alternative. #}
+<figure class="ai-chart">
+  <figcaption><strong>{{ c.0.title }}</strong>{% if c.0.demo %} <span class="ai-badge">demo data</span>{% endif %} <span class="ai-chart-legend">{% for l in c.0.lines %}<span class="ai-key {{ l.class }}">{{ l.name }} <b>{{ l.summary }}</b></span>{% endfor %}</span></figcaption>
+  <svg class="ai-plot" viewBox="0 0 {{ c.0.w }} {{ c.0.h }}" role="img" aria-label="{{ c.0.title }}: {{ c.0.summary }}" focusable="false">
+    {% for g in c.0.grid %}<line class="ai-grid" x1="{{ c.0.x0 }}" x2="{{ c.0.x1 }}" y1="{{ g.pos }}" y2="{{ g.pos }}"/><text class="ai-ylab" x="{{ c.0.x0 }}" dx="-6" y="{{ g.pos }}" dy="4">{{ g.label }}</text>{% endfor %}
+    {% for t in c.0.xticks %}<text class="ai-xlab" x="{{ t.pos }}" y="{{ c.0.h }}" dy="-5">{{ t.label }}</text>{% endfor %}
+    {% for m in c.0.marks %}<line class="ai-mark" x1="{{ m.x }}" x2="{{ m.x }}" y1="{{ c.0.y0 }}" y2="{{ c.0.y1 }}"><title>{{ m.label }} ({{ m.when }})</title></line>{% endfor %}
+    {% for l in c.0.lines %}<path class="ai-line {{ l.class }}" d="{{ l.d }}"/>{% endfor %}
+    {% if c.0.empty %}<text class="ai-nodata" x="{{ c.0.w / 2 }}" y="{{ c.0.h / 2 }}">No samples in this window</text>{% endif %}
+  </svg>
+</figure>

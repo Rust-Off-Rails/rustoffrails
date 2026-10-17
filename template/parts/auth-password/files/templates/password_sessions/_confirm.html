@@ -1,0 +1,24 @@
+{# Re-authenticate with the password (auth-password). Included in account/confirm.html. #}
+{% if has_password && !second_factor %}
+<div class="group/method">
+  <div class="relative my-6 group-first/method:hidden" aria-hidden="true">
+    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200 dark:border-gray-800"></div></div>
+    <div class="relative flex justify-center"><span class="bg-white dark:bg-gray-900 px-3 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">or</span></div>
+  </div>
+  <form method="post" action="{{ paths::account_confirm_password() }}" novalidate>
+    {% if let Some(alert) = self.alert_for("password") %}
+    <div role="alert" class="mb-4 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950 px-4 py-3 text-sm text-red-800 dark:text-red-200">{{ alert }}</div>
+    {% endif %}
+    <input type="hidden" name="username" autocomplete="username" value="{{ user.email }}">
+    <label for="confirm_password" class="label">Your password</label>
+    <div class="relative">
+      <input id="confirm_password" name="password" type="password" class="input pr-16" autocomplete="current-password" required autofocus data-capslock="confirm_capslock"
+             {% if !self.errors_on("password", "password").is_empty() %}aria-invalid="true" aria-describedby="confirm_password_error"{% endif %}>
+      <button type="button" data-reveal="confirm_password" aria-pressed="false" aria-label="Show password" class="absolute inset-y-0 right-0 mt-1 rounded-r-md px-3 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><span data-reveal-label>Show</span></button>
+    </div>
+    {% for m in self.errors_on("password", "password") %}<p id="confirm_password_error" class="field-error">Password {{ m }}</p>{% endfor %}
+    <p id="confirm_capslock" class="hidden mt-1 text-sm text-amber-700 dark:text-amber-300" role="status">Caps Lock is on.</p>
+    <button class="btn mt-4 w-full justify-center">Confirm with password</button>
+  </form>
+</div>
+{% endif %}

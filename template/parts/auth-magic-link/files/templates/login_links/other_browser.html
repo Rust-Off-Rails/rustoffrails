@@ -1,0 +1,17 @@
+{% extends "layouts/application.html" %}
+{% block content %}
+<section class="mx-auto max-w-md">
+  <div class="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm sm:p-8">
+    <div class="flex h-12 w-12 items-center justify-center rounded-full bg-amber-50 dark:bg-amber-950 text-amber-600 dark:text-amber-300">
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="h-6 w-6"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3"/></svg>
+    </div>
+    <h1 class="mt-4 text-2xl font-semibold tracking-tight">Open this link where you asked for it</h1>
+    <p class="mt-2 text-gray-700 dark:text-gray-300">For your safety, a sign-in link only works in the browser where it was requested. Your email app may have opened it somewhere else.</p>
+    <ul class="mt-4 list-disc space-y-1 pl-5 text-sm text-gray-700 dark:text-gray-300">
+      <li>Go back to the page that says "Check your email" and <strong class="font-medium text-gray-900 dark:text-gray-100">type the 6-digit code</strong> from the email, or</li>
+      <li>copy the link into that browser.</li>
+    </ul>
+    <p class="mt-6"><a href="{{ paths::new_session() }}" class="btn-secondary">Ask for a new link here</a></p>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,17 @@
+<tbody id="rows"{% if live && first_page %} hx-get="{{ rows_url }}" hx-trigger="every 3s" hx-swap="outerHTML" hx-sync="this:drop"{% endif %}>
+  {% for row in rows %}
+  <tr class="row" data-row>
+    <td class="check"><input type="checkbox" id="sel-{{ row.id }}" name="ids" value="{{ row.id }}" hx-preserve aria-label="Select job {{ row.id }}"></td>
+    <td class="num mono"><a class="row-link" href="{{ row.href }}">{{ row.id }}</a></td>
+    <td><span class="badge st-{{ row.state }}">{{ row.state_label }}</span></td>
+    <td class="wa"><div class="mono strong">{{ row.worker }}</div><div class="mono args">{{ row.args }}</div>{% if let Some(p) = row.progress %}<progress class="mini" max="100" value="{{ p }}" aria-label="{{ p }}% done"></progress>{% endif %}</td>
+    <td class="mono">{{ row.queue }}</td>
+    <td class="num">{{ row.attempts }}</td>
+    <td class="when">{{ row.when }}</td>
+    <td class="tags">{% for tag in row.tags %}<span class="tag">{{ tag }}</span>{% endfor %}</td>
+  </tr>
+  {% endfor %}
+  {% if rows.is_empty() %}
+  <tr class="empty-row"><td colspan="8"><p class="empty">{% if filter.active %}No jobs match this filter. <a href="/admin/jobs/list">Show every job</a>.{% else %}No jobs yet. Enqueue one with <code>jobs::enqueue(&amp;txn, MyJob { … })</code>, or start the demo task.{% endif %}</p></td></tr>
+  {% endif %}
+</tbody>

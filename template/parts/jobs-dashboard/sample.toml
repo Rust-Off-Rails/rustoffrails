@@ -1,0 +1,241 @@
+# samples/jobs-dashboard/sample.toml: the format is samples/FORMAT.md.
+name = "jobs-dashboard"
+version = "0.7.0"
+summary = "/admin/jobs: live overview (state counters, throughput and queue-wait charts, now-running lane with progress, queues with pause/resume, worker success rates, nodes), job list with filters, search and bulk actions, job detail with timeline and errors per attempt, error groups, cron with run-now; admin-only, CSRF-protected, light and dark, keyboard and mobile friendly"
+depends_on = ["jobs"]
+extracted_from = "Rust off Rails apps"
+
+# Everything it needs is already in the app (axum-extra form, base64, sha2, askama, htmx).
+crates = []
+
+[[wire]]
+file = "src/kernel/mod.rs"
+anchor = "kernel mods"
+text = '''
+pub mod jobs_web;
+'''
+
+[[wire]]
+file = "src/controllers/mod.rs"
+anchor = "controller mods"
+text = '''
+pub mod admin_access;
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config fields"
+text = '''
+/// The jobs dashboard's admin gate: `APP_ADMIN_PASSWORD`.
+pub jobs_dashboard: JobsDashboardConfig,
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config debug"
+text = '''
+d.field("jobs_dashboard", &self.jobs_dashboard);
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config parse"
+text = '''
+let jobs_dashboard = JobsDashboardConfig::from_env()?;
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config init"
+text = '''
+jobs_dashboard,
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config test"
+text = '''
+jobs_dashboard: JobsDashboardConfig::default(),
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config sections"
+text = '''
+/// Access to `/admin/jobs` outside development (controllers/admin_access.rs).
+#[derive(Clone, Default)]
+pub struct JobsDashboardConfig {
+    /// `APP_ADMIN_PASSWORD`: HTTP Basic password for the dashboard when the app has no admin
+    /// accounts. Unset in production (and no accounts): the dashboard isn't mounted at all.
+    pub admin_password: Option<String>,
+}
+
+impl JobsDashboardConfig {
+    pub fn from_env() -> anyhow::Result<Self> {
+        Self::new(
+            std::env::var("APP_ADMIN_PASSWORD")
+                .ok()
+                .filter(|v| !v.is_empty()),
+        )
+    }
+
+    pub fn new(admin_password: Option<String>) -> anyhow::Result<Self> {
+        // SECURITY: a short password behind HTTP Basic is guessable even with the failed-try
+        // limit; refuse to boot with one (test: a_short_admin_password_is_refused).
+        if admin_password.as_ref().is_some_and(|p| p.chars().count() < 16) {
+            anyhow::bail!(
+                "invalid env vars: APP_ADMIN_PASSWORD (at least 16 characters; see .env.example)"
+            );
+        }
+        Ok(Self { admin_password })
+    }
+}
+
+impl std::fmt::Debug for JobsDashboardConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JobsDashboardConfig")
+            .field("admin_password", &self.admin_password.as_ref().map(|_| "[redacted]"))
+            .finish()
+    }
+}
+
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "routes"
+text = '''
+// /admin/jobs: open in development; elsewhere behind AdminAccess, or not mounted at all.
+if crate::controllers::admin_access::dashboard_enabled(&config) {
+    app = app.merge(
+        crate::kernel::jobs_web::router(crate::jobs::recurring::SCHEDULE).route_layer(
+            axum::middleware::from_extractor_with_state::<
+                crate::controllers::admin_access::AdminAccess,
+                _,
+            >(state.clone()),
+        ),
+    );
+} else {
+    tracing::warn!("jobs dashboard disabled: set APP_ADMIN_PASSWORD (or wire an admin account)");
+}
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "paths"
+text = '''
+pub fn admin_jobs() -> String {
+    "/admin/jobs".into()
+}
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "routes table"
+text = '''
+("GET",  "/admin/jobs",                         "jobs_web::overview",     Access::Admin),
+("GET",  "/admin/jobs/list",                    "jobs_web::list",         Access::Admin),
+("GET",  "/admin/jobs/errors",                  "jobs_web::errors",       Access::Admin),
+("GET",  "/admin/jobs/cron",                    "jobs_web::cron",         Access::Admin),
+("POST", "/admin/jobs/cron/{name}/run",         "jobs_web::cron_run",     Access::Admin),
+("POST", "/admin/jobs/bulk",                    "jobs_web::bulk",         Access::Admin),
+("POST", "/admin/jobs/queues/pause-all",        "jobs_web::pause_all",    Access::Admin),
+("POST", "/admin/jobs/queues/resume-all",       "jobs_web::resume_all",   Access::Admin),
+("POST", "/admin/jobs/queues/{name}/{action}",  "jobs_web::queue_action", Access::Admin),
+("GET",  "/admin/jobs/{id}",                    "jobs_web::show",         Access::Admin),
+("POST", "/admin/jobs/{id}/{action}",           "jobs_web::job_action",   Access::Admin),
+'''
+
+[[wire]]
+file = "src/kernel/ui.rs"
+anchor = "kernel tabs"
+text = '''
+Tab {
+    key: "jobs",
+    label: "Jobs",
+    href: "/admin/jobs",
+    dev_only: false,
+},
+'''
+
+[[wire]]
+file = "src/controllers/dev.rs"
+anchor = "dev tiles"
+text = '''
+Tile {
+    title: "Jobs",
+    href: "/admin/jobs",
+    description: "The job queue: live counts, queues, failures, cron. Admin-only outside development.",
+    figure: "/admin/jobs".to_owned(),
+},
+'''
+
+[[wire]]
+file = "src/tasks/mod.rs"
+anchor = "task mods"
+text = '''
+pub mod jobs_demo;
+'''
+
+[[wire]]
+file = "src/tasks/mod.rs"
+anchor = "tasks"
+text = '''
+"jobs_demo" => jobs_demo::run(state, args).await,
+'''
+
+[[wire]]
+file = "templates/layouts/application.html"
+anchor = "dev footer links"
+text = '''
+&middot; <a href="/admin/jobs" hx-boost="false" class="link">Jobs</a>
+'''
+
+[[wire]]
+file = ".env.example"
+anchor = "env"
+text = '''
+# --- jobs dashboard (/admin/jobs): open in development; elsewhere admins only ---
+# APP_ADMIN_PASSWORD=          # 16+ characters: HTTP Basic for /admin/jobs when the app has no admin accounts. Unset in production: not mounted.
+'''
+
+[[wire]]
+file = "compose.yaml"
+anchor = "compose env"
+text = '''
+APP_ADMIN_PASSWORD: ${APP_ADMIN_PASSWORD:-}
+'''
+
+[[wire]]
+file = "tests/app/main.rs"
+anchor = "test mods"
+text = '''
+mod jobs_dashboard_test;
+'''
+
+[[wire]]
+file = "tests/app/security_test.rs"
+anchor = "router sources"
+text = '''
+"src/kernel/jobs_web/mod.rs",
+'''
+
+[[wire]]
+file = "tests/app/kernel_web_test.rs"
+anchor = "no-store paths"
+text = '''
+"/admin/jobs",
+"/admin/jobs/list",
+"/admin/jobs/errors",
+"/admin/jobs/cron",
+'''
+
+[[wire]]
+file = "tests/app/theme_switch_test.rs"
+anchor = "kernel pages"
+text = '''
+"/admin/jobs",
+"/admin/jobs/list",
+"/admin/jobs/errors",
+"/admin/jobs/cron",
+'''

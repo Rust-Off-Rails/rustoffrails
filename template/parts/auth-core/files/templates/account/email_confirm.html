@@ -1,0 +1,12 @@
+{% extends "layouts/application.html" %}
+{% block content %}
+<section class="mx-auto max-w-md">
+  <div class="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm sm:p-8">
+    <h1 class="text-2xl font-semibold tracking-tight">Confirm your new email</h1>
+    <p class="mt-2 text-gray-700 dark:text-gray-300">Use <strong class="font-medium text-gray-900 dark:text-gray-100">{{ new_email }}</strong> for your account from now on?</p>
+    <form method="post" action="{{ action }}" class="mt-6">
+      <button class="btn w-full justify-center">Yes, use this address</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

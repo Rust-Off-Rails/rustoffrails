@@ -1,0 +1,9 @@
+{% extends "kernel/dashboard/_layout.html" %}
+{% block dash %}
+<header class="dash-head">
+  <h1>Requests <span class="muted">per route</span></h1>
+  <nav class="segmented" aria-label="Sort">{% for s in sorts %}<a href="{{ s.href }}"{% if s.current %} aria-current="true"{% endif %}>{{ s.label }}</a>{% endfor %}</nav>
+</header>
+<p class="hint">Grouped by the matched pattern from <code>ROUTES</code>; paths that match nothing share <code>(unmatched)</code>. Latency is time to the response headers.</p>
+<div data-live="requests">{% include "kernel/dashboard/_requests.html" %}</div>
+{% endblock %}

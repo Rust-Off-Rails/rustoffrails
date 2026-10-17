@@ -1,0 +1,46 @@
+{% extends "kernel/dashboard/_layout.html" %}
+{% block dash %}
+<header class="dash-head"><h1>Load lab</h1><span class="muted">development only · fake data · this app's own address</span></header>
+<section class="panel" aria-labelledby="lab-run">
+    <header><h2 id="lab-run">Current run</h2></header>
+    <div class="pad" data-live="lab" aria-live="polite">{% include "kernel/dashboard/_lab_status.html" %}</div>
+</section>
+<div data-live="cards">{% include "kernel/dashboard/_cards.html" %}</div>
+<div class="grid two">
+  <section class="panel" aria-labelledby="lab-scen">
+    <header><h2 id="lab-scen">Scenarios</h2><span class="muted">each lights up one panel</span></header>
+    <ul class="scenarios" role="list">
+      {% for s in scenarios %}
+      <li>
+        <form method="post" action="/dev/dashboard/lab/scenario"><input type="hidden" name="scenario" value="{{ s.key }}"><button class="btn scenario-btn">{{ s.label }}</button></form>
+        <p>{{ s.description }} <a href="{{ s.panel }}">Where to look</a></p>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  <section class="panel" aria-labelledby="lab-traffic">
+    <header><h2 id="lab-traffic">Traffic</h2><span class="muted">at most {{ max_rps }} req/s for {{ max_secs }} s, 32 in flight</span></header>
+    <form method="post" action="/dev/dashboard/lab/traffic" class="stack">
+      <label>Routes, one per line (GET routes of this app)
+        <textarea name="paths" rows="5" class="mono" required>/dev/lab/orders
+/</textarea></label>
+      <p class="muted small">Suggestions: {% for p in paths %}<code>{{ p }}</code> {% endfor %}</p>
+      <div class="row">
+        <label>Requests per second <input type="number" name="rps" min="1" max="{{ max_rps }}" value="50" required></label>
+        <label>Seconds <input type="number" name="secs" min="1" max="{{ max_secs }}" value="15" required></label>
+        <button class="btn primary">Start</button>
+      </div>
+    </form>
+  </section>
+  <section class="panel" aria-labelledby="lab-data">
+    <header><h2 id="lab-data">Fake data</h2><span class="muted">{{ records }} orders</span></header>
+    <form method="post" action="/dev/dashboard/lab/seed" class="row pad">
+      <label>Orders to add <input type="number" name="n" min="1" max="10000" value="200" required></label>
+      <button class="btn">Add</button>
+    </form>
+    <form method="post" action="/dev/dashboard/lab/clear" class="pad"><button class="btn danger">Remove all fake orders</button></form>
+    <p class="muted small pad">Written by <code>lab::seed</code>, the hook to point at your own models. The lab's pages: <a href="/dev/lab/orders">orders</a> (two queries), <a href="/dev/lab/orders/n-plus-one">orders with an N+1</a>.</p>
+  </section>
+</div>
+<p class="hint">From a terminal: <code>app bench --rps 50 --secs 10 --route /dev/lab/orders</code></p>
+{% endblock %}

@@ -1,0 +1,82 @@
+{% extends "kernel/layout.html" %}
+{% block content %}
+<div class="jobs" data-page="list">
+{% include "kernel/jobs/_nav.html" %}
+<h1 class="visually-hidden">Jobs</h1>
+
+<nav class="tabs-row" aria-label="Job states">
+  {% for t in tabs %}
+  <a class="stab{% if !t.state.is_empty() %} st-{{ t.state }}{% endif %}" href="{{ t.href }}"{% if t.active %} aria-current="page"{% endif %}>{{ t.label }} <span class="count">{{ t.count }}</span></a>
+  {% endfor %}
+</nav>
+
+<form class="filters" method="get" action="/admin/jobs/list" role="search" aria-label="Filter jobs">
+  {% if !filter.state.is_empty() %}<input type="hidden" name="state" value="{{ filter.state }}">{% endif %}
+  <label class="grow">Search
+    <input type="search" name="q" value="{{ filter.q }}" placeholder="id, worker or a value in args" data-search autocomplete="off">
+  </label>
+  <label>Queue
+    <select name="queue">
+      <option value="">Any queue</option>
+      {% for name in queue_names %}<option value="{{ name }}"{% if *name == filter.queue %} selected{% endif %}>{{ name }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Worker
+    <select name="worker">
+      <option value="">Any worker</option>
+      {% for name in worker_names %}<option value="{{ name }}"{% if *name == filter.worker %} selected{% endif %}>{{ name }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Tag <input type="text" name="tag" value="{{ filter.tag }}" placeholder="user:42" autocomplete="off"></label>
+  <label>Error <input type="text" name="error" value="{{ filter.error }}" placeholder="text in errors" autocomplete="off"></label>
+  <div class="filter-buttons">
+    <button class="btn primary" type="submit">Filter</button>
+    {% if filter.active %}<a class="btn quiet" href="/admin/jobs/list">Clear</a>{% endif %}
+  </div>
+</form>
+
+{% if !chips.is_empty() %}
+<ul class="chips" aria-label="Active filters">
+  {% for c in chips %}<li><span class="muted">{{ c.label }}:</span> <span class="mono">{{ c.value }}</span> <a href="{{ c.remove_href }}" aria-label="Remove the {{ c.label }} filter">×</a></li>{% endfor %}
+</ul>
+{% endif %}
+
+<form id="bulk" method="post" action="/admin/jobs/bulk" class="bulk">
+  {% if !filter.state.is_empty() %}<input type="hidden" name="state" value="{{ filter.state }}">{% endif %}
+  {% if !filter.queue.is_empty() %}<input type="hidden" name="queue" value="{{ filter.queue }}">{% endif %}
+  {% if !filter.worker.is_empty() %}<input type="hidden" name="worker" value="{{ filter.worker }}">{% endif %}
+  {% if !filter.tag.is_empty() %}<input type="hidden" name="tag" value="{{ filter.tag }}">{% endif %}
+  {% if !filter.q.is_empty() %}<input type="hidden" name="q" value="{{ filter.q }}">{% endif %}
+  {% if !filter.error.is_empty() %}<input type="hidden" name="error" value="{{ filter.error }}">{% endif %}
+  <input type="hidden" name="return_to" value="{{ filter.href() }}">
+  <div class="bulkbar" role="group" aria-label="Bulk actions">
+    <span class="sel muted" data-selected-count aria-live="polite">Select jobs to act on them</span>
+    <button class="btn small" type="submit" name="action" value="retry">Retry</button>
+    <button class="btn small" type="submit" name="action" value="run">Run now</button>
+    <button class="btn small" type="submit" name="action" value="cancel">Cancel</button>
+    <button class="btn small danger" type="submit" name="action" value="discard">Discard</button>
+    <button class="btn small danger" type="submit" name="action" value="delete">Delete</button>
+    {% if matching_count > 0 %}
+    <span class="spacer"></span>
+    <button class="btn small" type="submit" name="all_matching" value="1" formaction="/admin/jobs/bulk?action=retry">Retry all {{ matching }} matching</button>
+    <button class="btn small" type="submit" name="all_matching" value="1" formaction="/admin/jobs/bulk?action=cancel">Cancel all {{ matching }}</button>
+    {% if over_cap %}<span class="muted small">(the first 10,000)</span>{% endif %}
+    {% endif %}
+  </div>
+  <div class="scroll panel flush" tabindex="0" role="region" aria-label="Jobs table">
+    <table class="data jobs-table">
+      <thead><tr>
+        <th scope="col" class="check"><input type="checkbox" data-select-all aria-label="Select every job on this page"></th>
+        <th scope="col" class="num">ID</th><th scope="col">State</th><th scope="col">Worker · args</th><th scope="col">Queue</th><th scope="col" class="num">Attempt</th><th scope="col">When</th><th scope="col">Tags</th>
+      </tr></thead>
+      {% include "kernel/jobs/_rows.html" %}
+    </table>
+  </div>
+</form>
+
+<nav class="pager" aria-label="Pages">
+  {% if !first_page %}<a class="btn" href="{{ newest_href }}">← Newest</a>{% endif %}
+  {% if let Some(href) = older_href %}<a class="btn" href="{{ href }}">Older →</a>{% endif %}
+</nav>
+</div>
+{% endblock %}

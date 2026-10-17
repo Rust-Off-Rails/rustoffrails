@@ -1,0 +1,25 @@
+{% if rows.is_empty() %}
+<p class="empty">No requests yet. Browse the app, or run traffic from the <a href="/dev/dashboard/lab">load lab</a>.</p>
+{% else %}
+<div class="scroll" tabindex="0" role="region" aria-label="Table"><table class="data-table">
+  <caption class="visually-hidden">Requests per route</caption>
+  <thead><tr><th scope="col">Route</th><th scope="col" class="num">Hits</th><th scope="col" class="num">Errors</th><th scope="col">Status</th><th scope="col" class="num">p50</th><th scope="col">p95</th><th scope="col" class="num">p99</th><th scope="col" class="num">Max</th><th scope="col" class="num">Bytes</th><th scope="col">Last</th><th scope="col">Slowest</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <th scope="row"><span class="method m-{{ r.method }}">{{ r.method }}</span> <a class="mono" href="{{ base }}/traces?route={{ r.route|urlencode }}">{{ r.route }}</a>{% if r.n_plus_one > 0 %} <span class="badge tone-warn">N+1</span>{% endif %}</th>
+      <td class="num">{{ r.count }}</td>
+      <td class="num"><span class="badge tone-{{ r.error_tone }}">{{ r.errors }}</span></td>
+      <td class="statuses"><span title="2xx">{{ r.s2 }}</span> · <span title="3xx">{{ r.s3 }}</span> · <span class="t-warn" title="4xx">{{ r.s4 }}</span> · <span class="t-err" title="5xx">{{ r.s5 }}</span><span class="visually-hidden"> (2xx, 3xx, 4xx, 5xx)</span></td>
+      <td class="num">{{ r.p50 }}</td>
+      <td class="barcell"><span class="num">{{ r.p95 }}</span><svg class="dbar" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect width="{{ r.bar }}" height="6" rx="2"/></svg></td>
+      <td class="num">{{ r.p99 }}</td>
+      <td class="num">{{ r.max }}</td>
+      <td class="num">{{ r.bytes }}</td>
+      <td class="muted">{{ r.last }}</td>
+      <td>{% for (id, dur, tone) in r.slowest %}<a class="chip tone-{{ tone }}" href="{{ base }}/traces/{{ id }}">{{ dur }}</a> {% endfor %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}

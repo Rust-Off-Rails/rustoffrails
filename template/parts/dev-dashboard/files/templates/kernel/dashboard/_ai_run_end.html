@@ -1,0 +1,19 @@
+{# The end of a run: the answer (escaped blocks with citations and charts), proposed actions (buttons the human clicks), the fix prompt, usage, and the first request. #}
+{% if let Some(e) = r.error %}<p class="notice-inline" role="alert">{{ e }}</p>{% endif %}
+{% if r.status == "stopped" %}<p class="ai-stopped" role="note">{{ r.status_text }}</p>{% endif %}
+{% if !r.blocks.is_empty() %}<div class="ai-text">{% for b in r.blocks %}{% include "kernel/dashboard/_ai_block.html" %}{% endfor %}</div>{% endif %}
+{% if !r.note.is_empty() %}<p class="hint">{{ r.note }}</p>{% endif %}
+{% if !r.actions.is_empty() %}
+<div class="ai-proposed" role="group" aria-label="Proposed actions">
+  <p class="ai-proposed-head">Proposed actions <span>nothing runs until you click</span></p>
+  <ul role="list">{% for a in r.actions %}<li>{% if a.post.is_empty() %}<a class="btn" href="{{ a.href }}">{{ a.label }}</a>{% else %}<form method="post" action="{{ a.post }}"><input type="hidden" name="{{ a.field }}" value="{{ a.value }}"><button class="btn">{{ a.label }}</button></form>{% endif %}<span class="ai-reason">{{ a.reason }}</span></li>{% endfor %}</ul>
+</div>
+{% endif %}
+{% if !r.fix_prompt.is_empty() %}
+<div class="ai-fix">
+  <button type="button" class="btn" data-copy="fix-{{ r.id }}" hidden>Copy fix prompt for your coding agent</button><span class="ai-copied" data-copied role="status"></span>
+  <details><summary>Fix prompt for your coding agent</summary><pre class="code ai-fix-text" id="fix-{{ r.id }}" tabindex="0">{{ r.fix_prompt }}</pre></details>
+</div>
+{% endif %}
+{% if !r.usage.is_empty() %}<p class="ai-usage">{{ r.usage }}</p>{% endif %}
+{% if !r.sent.is_empty() %}<details class="ai-preview"><summary>What was sent first</summary><pre class="code ai-json" tabindex="0">{{ r.sent }}</pre></details>{% endif %}

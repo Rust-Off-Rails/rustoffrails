@@ -1,0 +1,52 @@
+{# The two-factor card on the account page (auth-totp). #}
+<section aria-labelledby="two-factor-heading" class="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-5 shadow-sm sm:p-6">
+  <div class="flex flex-wrap items-start justify-between gap-4">
+    <div>
+      <h2 id="two-factor-heading" class="flex items-center gap-2 text-base font-semibold">Two-factor authentication
+        {% if two_factor.enabled %}<span class="rounded-full bg-green-50 dark:bg-green-950 px-2 py-0.5 text-xs font-medium text-green-800 dark:text-green-200">On</span>
+        {% else %}<span class="rounded-full bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-xs font-medium text-gray-700 dark:text-gray-300">Off</span>{% endif %}
+      </h2>
+      {% if two_factor.enabled %}
+      <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">Signing in needs a code from your authenticator app.</p>
+      {% else %}
+      <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">Protect your account with a code from an authenticator app, even if your password leaks.</p>
+      {% endif %}
+    </div>
+    {% if two_factor.enabled %}
+    <form method="post" action="{{ paths::account_two_factor_delete() }}">
+      <button class="btn-danger" data-confirm="Turn off two-factor authentication?">Turn off</button>
+    </form>
+    {% else %}
+    <a href="{{ paths::new_account_two_factor() }}" class="btn">Turn on</a>
+    {% endif %}
+  </div>
+  {% if two_factor.enabled %}
+  <div class="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 dark:border-gray-800 pt-4">
+    <div>
+      <h3 class="text-sm font-medium">Recovery codes</h3>
+      {% if two_factor.has_recovery_codes() %}
+      <p class="mt-1 text-sm {% if two_factor.recovery_low() %}text-amber-800 dark:text-amber-300{% else %}text-gray-600 dark:text-gray-400{% endif %}">Used {{ two_factor.recovery_used() }} of {{ two_factor.recovery_total }}{% if two_factor.recovery_low() %}: generate new ones soon{% endif %}.</p>
+      {% else %}
+      <p class="mt-1 text-sm text-amber-800 dark:text-amber-300">You have no recovery codes. Generate a set so a lost phone can't lock you out.</p>
+      {% endif %}
+    </div>
+    <form method="post" action="{{ paths::account_recovery_codes() }}">
+      <button class="btn-secondary" data-confirm="Generate new recovery codes? Your old ones will stop working.">Generate new codes</button>
+    </form>
+  </div>
+  {% if !two_factor.trusted.is_empty() %}
+  <div class="mt-5 border-t border-gray-200 dark:border-gray-800 pt-4">
+    <h3 class="text-sm font-medium">Remembered devices</h3>
+    <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">These skip the code for 30 days.</p>
+    <ul role="list" class="mt-3 space-y-2">
+      {% for d in two_factor.trusted %}
+      <li class="flex flex-wrap items-center justify-between gap-3 text-sm">
+        <span><span class="font-medium">{{ d.device }}</span> <span class="text-gray-600 dark:text-gray-400">&middot; used {{ d.last_used }} &middot; until {{ d.expires }}</span></span>
+        <form method="post" action="{{ paths::trusted_device_delete(d.id) }}"><button class="btn-secondary" aria-label="Forget {{ d.device }}">Forget</button></form>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  {% endif %}
+</section>

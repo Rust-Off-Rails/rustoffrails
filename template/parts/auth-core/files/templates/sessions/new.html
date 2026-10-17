@@ -1,0 +1,20 @@
+{% extends "layouts/application.html" %}
+{% block head %}<script src="/static/auth.js" defer></script>{% endblock %}
+{% block content %}
+<section class="mx-auto max-w-md">
+  <div class="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm sm:p-8">
+    {# APP: heading and welcome copy #}
+    <h1 class="text-2xl font-semibold tracking-tight">Sign in</h1>
+    <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">Welcome back to {{ crate::config::APP_NAME }}.</p>
+    {% include "shared/_dev_mailbox_hint.html" %}
+    <div class="mt-6">
+      {# Primary methods first (password), then alternatives (magic link): the order doesn't depend on install order. #}
+      {# samples: sign in methods #}
+      {# samples: sign in alternatives #}
+    </div>
+  </div>
+  <div class="mt-6 space-y-2 text-center text-sm text-gray-600 dark:text-gray-400">
+    {# samples: sign in links #}
+  </div>
+</section>
+{% endblock %}

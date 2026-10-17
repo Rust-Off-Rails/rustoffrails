@@ -1,0 +1,9 @@
+{
+ "id": 1,
+ "full_name": "example-org/example-app",
+ "html_url": "https://github.com/example-org/example-app",
+ "description": "An example Rust off Rails app (fixture data for the dev dashboard)",
+ "default_branch": "main",
+ "stargazers_count": 128,
+ "open_issues_count": 17
+}

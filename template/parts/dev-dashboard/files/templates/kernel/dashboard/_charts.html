@@ -1,0 +1,1 @@
+<div class="charts">{% for chart in charts %}{% include "kernel/dashboard/_chart.html" %}{% if chart.key == "latency" %}{% include "kernel/dashboard/_heatmap.html" %}{% endif %}{% endfor %}</div>

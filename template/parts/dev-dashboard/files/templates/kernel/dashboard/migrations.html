@@ -1,0 +1,22 @@
+{% extends "kernel/dashboard/_layout.html" %}
+{% block dash %}
+<header class="dash-head"><h1>Migrations <span class="muted">{{ backend }} · {{ applied }} applied · {{ pending }} pending</span></h1></header>
+<nav class="segmented" aria-label="Schema views">{% for t in tabs %}<a href="{{ t.href }}"{% if t.current %} aria-current="true"{% endif %}>{{ t.label }}</a>{% endfor %}</nav>
+<p class="hint">The list, its order and which ran come from the code and <code>seaql_migrations</code>. <strong>What each one did is derived</strong> from its file in <code>migration/src/</code> (best effort: an index named from a variable isn't seen). SeaORM keeps no checksum, so the dashboard records one per applied migration the first time it sees it, and flags a later edit.</p>
+{% if pending > 0 %}<div class="callout warn" role="note"><h2>{{ pending }} pending migration{% if pending != 1 %}s{% endif %}</h2><p>The database is behind the code. In development <code>bin/dev</code> migrates on every rebuild; the button runs them now (<code>Migrator::up</code>). Rolling back stays a terminal command (<code>app db rollback</code>).</p><form method="post" action="/dev/migrations"><input type="hidden" name="return_to" value="/dev/dashboard/schema/migrations"><button class="btn primary">Run pending migrations</button></form></div>{% endif %}
+<section class="panel" id="drift" aria-labelledby="drift-title"><header><h2 id="drift-title">Drift</h2><span class="muted">{{ drift.len() }}</span></header>
+  {% if drift.is_empty() && unknown.is_empty() %}<p class="pad t-ok">None: every table and column the applied migrations create is in the database, and nothing else is.</p>{% else %}
+  <ul class="plain drift-list">{% for x in drift %}<li><strong>{{ x.title }}</strong> <span class="muted">{{ x.detail }}</span>{% if let Some(t) = x.table %} <a href="/dev/dashboard/schema/tables/{{ t }}" class="mono">{{ t }}</a>{% endif %}</li>{% endfor %}
+  {% for (n, at) in unknown %}<li><strong>{{ n }}</strong> <span class="muted">is applied ({{ at }}) but this code has no such migration: another branch's, or a deleted file.</span></li>{% endfor %}</ul>{% endif %}
+</section>
+<section class="panel" aria-labelledby="tl-title"><header><h2 id="tl-title">Timeline</h2><span class="muted">newest first</span></header>
+  <ol class="mig-timeline">{% for m in migrations %}<li class="mig {% if m.applied %}applied{% else %}pending{% endif %}">
+    <span class="mig-dot" aria-hidden="true"></span>
+    <div class="mig-body">
+      <h3 class="mono">{{ m.name }}</h3>
+      <p class="mig-meta">{% if m.applied %}<span class="badge tone-ok">applied</span> <span title="{{ m.at }}">{{ m.when }}</span>{% else %}<span class="badge tone-warn">pending</span>{% endif %} <span class="badge tone-muted">{{ m.area }}</span>{% if m.edited %} <span class="badge tone-err">edited after it was applied</span>{% endif %}{% if let Some(f) = m.file %} <code class="muted">{{ f }}</code>{% else %} <span class="muted">(no source file found)</span>{% endif %}</p>
+      {% if m.effects.is_empty() %}<p class="hint">Nothing we could derive from its source.</p>{% else %}<ul class="effects">{% for (tone, text) in m.effects %}<li class="fx-{{ tone }}">{{ text }}</li>{% endfor %}</ul>{% endif %}
+    </div>
+  </li>{% endfor %}</ol>
+</section>
+{% endblock %}

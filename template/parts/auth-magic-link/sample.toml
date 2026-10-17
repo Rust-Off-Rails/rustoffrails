@@ -1,0 +1,212 @@
+# samples/auth-magic-link/sample.toml: the format is samples/FORMAT.md.
+name = "auth-magic-link"
+version = "0.7.0"
+summary = "Passwordless sign-in: an emailed link plus a 6-digit code (for phones that open links elsewhere), single-use, hashed, 15 minutes, bound to the asking browser, race-safe, sign-up on first use, re-auth by emailed code, and the dev mailbox hint"
+depends_on = ["auth-core"]
+extracted_from = "Rust off Rails apps"
+
+crates = []
+
+[[wire]]
+file = "src/models/mod.rs"
+anchor = "model mods"
+text = '''
+pub mod login_link;
+'''
+
+[[wire]]
+file = "src/controllers/mod.rs"
+anchor = "controller mods"
+text = '''
+pub mod login_links;
+'''
+
+[[wire]]
+file = "src/views/mod.rs"
+anchor = "view mods"
+text = '''
+pub mod login_links;
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config fields"
+text = '''
+pub magic_link: MagicLinkConfig,
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config debug"
+text = '''
+d.field("magic_link", &self.magic_link);
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config parse"
+text = '''
+let magic_link = MagicLinkConfig::from_env(&mut invalid);
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config init"
+text = '''
+magic_link,
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config test"
+text = '''
+magic_link: MagicLinkConfig::default(),
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config sections"
+text = '''
+/// Magic links (samples/auth-magic-link).
+#[derive(Clone, Debug, Default)]
+pub struct MagicLinkConfig {
+    /// `APP_MAGIC_LINK_ANY_BROWSER=true` lets a link work in any browser. Off by default: a link
+    /// works only where it was requested (the emailed code covers the other-device case), which
+    /// stops login CSRF and forwarded links.
+    pub any_browser: bool,
+}
+
+impl MagicLinkConfig {
+    pub fn from_env(invalid: &mut Vec<String>) -> Self {
+        let any_browser = match std::env::var("APP_MAGIC_LINK_ANY_BROWSER").ok().as_deref() {
+            None | Some("") | Some("false") | Some("0") => false,
+            Some("true") | Some("1") => true,
+            Some(_) => {
+                invalid.push("APP_MAGIC_LINK_ANY_BROWSER (expected true or false)".into());
+                false
+            }
+        };
+        Self { any_browser }
+    }
+}
+
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "routes"
+text = '''
+// Magic links (auth-magic-link).
+app = app
+    .route("/login_links", axum::routing::post(crate::controllers::login_links::create))
+    .route("/login_links/sent", get(crate::controllers::login_links::sent))
+    .route("/login_links/code", axum::routing::post(crate::controllers::login_links::code))
+    .route(
+        "/login_links/{token}",
+        get(crate::controllers::login_links::show).post(crate::controllers::login_links::consume),
+    )
+    .route("/account/confirm/email", axum::routing::post(crate::controllers::login_links::send_reauth_code))
+    .route("/account/confirm/email/code", axum::routing::post(crate::controllers::login_links::confirm_reauth_code));
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "paths"
+text = '''
+pub fn login_links() -> String {
+    "/login_links".into()
+}
+pub fn login_links_sent() -> String {
+    "/login_links/sent".into()
+}
+pub fn login_links_code() -> String {
+    "/login_links/code".into()
+}
+pub fn login_link(token: &str) -> String {
+    format!("/login_links/{token}")
+}
+pub fn account_confirm_email() -> String {
+    "/account/confirm/email".into()
+}
+pub fn account_confirm_email_code() -> String {
+    "/account/confirm/email/code".into()
+}
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "routes table"
+text = '''
+("POST", "/login_links",                       "login_links::create",          Access::Public),
+("GET",  "/login_links/sent",                  "login_links::sent",            Access::Public),
+("POST", "/login_links/code",                  "login_links::code",            Access::Public),
+("GET",  "/login_links/{token}",               "login_links::show",            Access::Public),
+("POST", "/login_links/{token}",               "login_links::consume",         Access::Public),
+("POST", "/account/confirm/email",             "login_links::send_reauth_code", Access::User),
+("POST", "/account/confirm/email/code",        "login_links::confirm_reauth_code", Access::User),
+'''
+
+[[wire]]
+file = "templates/sessions/new.html"
+anchor = "sign in alternatives"
+text = '''
+{% include "login_links/_form.html" %}
+'''
+
+[[wire]]
+file = "templates/account/confirm.html"
+anchor = "confirm alternatives"
+text = '''
+{% include "login_links/_confirm.html" %}
+'''
+
+[[wire]]
+file = "src/tasks/auth_cleanup.rs"
+anchor = "auth cleanup"
+text = '''
+more += crate::models::login_link::delete_expired(&state.db, now).await?;
+'''
+
+[[wire]]
+file = "migration/src/lib.rs"
+anchor = "migration mods"
+text = '''
+mod m20261016_003000_create_login_links;
+'''
+
+[[wire]]
+file = "migration/src/lib.rs"
+anchor = "migrations"
+text = '''
+Box::new(m20261016_003000_create_login_links::Migration),
+'''
+
+[[wire]]
+file = ".env.example"
+anchor = "env"
+text = '''
+# --- magic links (auth-magic-link): a link works only in the browser that asked for it ---
+# APP_MAGIC_LINK_ANY_BROWSER=false
+'''
+
+[[wire]]
+file = "src/kernel/redact.rs"
+anchor = "token routes"
+text = '''
+"/login_links/{token}",
+'''
+
+[[wire]]
+file = "tests/app/main.rs"
+anchor = "test mods"
+text = '''
+mod auth_magic_link_test;
+'''
+
+[[wire]]
+file = "tests/app/main.rs"
+anchor = "test mods"
+when = "auth-password"
+text = '''
+mod auth_magic_link_password_test;
+'''

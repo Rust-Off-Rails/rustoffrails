@@ -1,0 +1,18 @@
+{% extends "kernel/dashboard/_layout.html" %}
+{% block dash %}
+<header class="dash-head"><h1>Config</h1></header>
+<div class="grid two">
+  <section class="panel" aria-labelledby="cfg-settings"><header><h2 id="cfg-settings">Settings</h2></header>
+    <dl class="kv">{% for (k, v) in settings %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl></section>
+  <section class="panel" aria-labelledby="cfg-system"><header><h2 id="cfg-system">System</h2></header>
+    <dl class="kv">{% for (k, v) in system %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl></section>
+  <section class="panel" aria-labelledby="cfg-build"><header><h2 id="cfg-build">Build</h2></header>
+    <dl class="kv">{% for (k, v) in build %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}</dl></section>
+  <section class="panel" aria-labelledby="cfg-mem"><header><h2 id="cfg-mem">Dashboard memory</h2></header>
+    <div data-live="memory">{% include "kernel/dashboard/_memory.html" %}</div></section>
+</div>
+{% if !env.is_empty() %}
+<section class="panel" aria-labelledby="cfg-env"><header><h2 id="cfg-env">Environment</h2><span class="muted">the app's own variables; secrets redacted, credentials removed from URLs</span></header>
+  <dl class="kv">{% for (k, v) in env %}<dt class="mono">{{ k }}</dt><dd class="mono">{{ v }}</dd>{% endfor %}</dl></section>
+{% endif %}
+{% endblock %}

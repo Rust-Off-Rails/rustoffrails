@@ -1,0 +1,13 @@
+{% extends "layouts/application.html" %}
+{% block content %}
+<section class="mx-auto max-w-md">
+  <div class="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 text-center shadow-sm sm:p-8">
+    <h1 class="text-2xl font-semibold tracking-tight">Sign in to {{ crate::config::APP_NAME }}</h1>
+    <p class="mt-2 text-gray-700 dark:text-gray-300">Continue as <strong class="font-medium text-gray-900 dark:text-gray-100">{{ email }}</strong>.</p>
+    <form method="post" action="{{ action }}" class="mt-6">
+      <button class="btn w-full justify-center">Sign in</button>
+    </form>
+    <p class="mt-4 text-xs text-gray-600 dark:text-gray-400">Not you? Close this page: nothing happens until you press the button.</p>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,45 @@
+{% extends "kernel/dashboard/_layout.html" %}
+{% block dash %}
+<header class="dash-head">
+  <h1>SQL{% if !route.is_empty() %} <span class="muted mono">{{ route }}</span>{% endif %}</h1>
+  <nav class="segmented" aria-label="Sort">{% for s in sorts %}<a href="{{ s.href }}"{% if s.current %} aria-current="true"{% endif %}>{{ s.label }}</a>{% endfor %}</nav>
+</header>
+<p class="hint">Every statement SeaORM ran, grouped by fingerprint (literals and parameters replaced by <code>?</code>).{% if d.ro %} Parameters are not shown in production.{% else %} Parameters show their type and length, never their value.{% endif %}</p>
+
+<section class="panel" id="n-plus-one" aria-labelledby="n1-title">
+  <header><h2 id="n1-title">N+1</h2><span class="muted">the same statement more than 5 times in one request</span></header>
+  {% if n_plus_one.is_empty() %}<p class="empty">None seen.{% if !d.ro %} The <a href="/dev/dashboard/lab">load lab</a>'s N+1 scenario shows what one looks like.{% endif %}</p>{% else %}
+  <div class="scroll" tabindex="0" role="region" aria-label="Table"><table class="data-table">
+    <thead><tr><th scope="col">Route</th><th scope="col">Statement</th><th scope="col" class="num">In one request</th><th scope="col" class="num">Requests</th><th scope="col">Last</th></tr></thead>
+    <tbody>{% for n in n_plus_one %}<tr class="flagged"><th scope="row"><a class="mono" href="{{ base }}/traces/{{ n.trace }}">{{ n.route }}</a></th><td><a href="{{ base }}/sql/{{ n.fp }}"><code>{{ n.sql }}</code></a></td><td class="num"><span class="badge tone-warn">{{ n.count }}×</span></td><td class="num">{{ n.times }}</td><td class="muted">{{ n.when }}{% if d.ai_on %} <a class="chip" href="{{ d.ask_href("sql", &n.fp) }}">Ask AI</a>{% endif %}</td></tr>{% endfor %}</tbody>
+  </table></div>{% endif %}
+</section>
+
+{% if !gets_that_write.is_empty() %}
+<section class="panel" aria-labelledby="gw-title">
+  <header><h2 id="gw-title">Writes during a GET</h2><span class="muted">safe methods should never change state</span></header>
+  <ul class="sql-list" role="list">{% for (route, sqltext, count, trace) in gets_that_write %}<li><a class="mono" href="{{ base }}/traces/{{ trace }}">GET {{ route }}</a> <span class="badge tone-warn">{{ count }}×</span><code>{{ sqltext }}</code></li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+<section class="panel" aria-labelledby="fp-title">
+  <header><h2 id="fp-title">Statements</h2><span class="muted">{{ rows.len() }} fingerprints</span></header>
+  {% if rows.is_empty() %}<p class="empty">No SQL recorded yet.</p>{% else %}
+  <div class="scroll" tabindex="0" role="region" aria-label="Table"><table class="data-table sql-table">
+    <thead><tr><th scope="col">Statement</th><th scope="col" class="num">Count</th><th scope="col">Total</th><th scope="col" class="num">Mean</th><th scope="col" class="num">p95</th><th scope="col" class="num">Max</th><th scope="col">Last</th></tr></thead>
+    <tbody>
+    {% for q in rows %}
+      <tr>
+        <th scope="row"><a href="{{ base }}/sql/{{ q.id }}"><code>{{ q.sql }}</code></a>{% if !q.params.is_empty() %}<span class="sub">params: {{ q.params }}</span>{% endif %}{% if q.failed > 0 %} <span class="badge tone-err">{{ q.failed }} failed</span>{% endif %}<span class="sub">{% for r in q.routes %}<span class="mono">{{ r }}</span> {% endfor %}</span></th>
+        <td class="num">{{ q.count }}</td>
+        <td class="barcell"><span class="num">{{ q.total }}</span><svg class="dbar" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect width="{{ q.bar }}" height="6" rx="2"/></svg></td>
+        <td class="num">{{ q.mean }}</td>
+        <td class="num">{{ q.p95 }}</td>
+        <td class="num">{{ q.max }}</td>
+        <td class="muted nowrap">{{ q.last }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>{% endif %}
+</section>
+{% endblock %}

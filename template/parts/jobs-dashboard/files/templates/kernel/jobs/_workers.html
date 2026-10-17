@@ -1,0 +1,22 @@
+<div id="workers" class="scroll" tabindex="0" role="region" aria-label="Workers table"{% if live %} hx-get="/admin/jobs?part=workers" hx-trigger="every 5s" hx-swap="outerHTML" hx-sync="this:drop"{% endif %}>
+  {% if workers.is_empty() %}
+  <p class="empty">No job finished in the last hour, so there is nothing to measure yet.</p>
+  {% else %}
+  <table class="data">
+    <thead><tr><th scope="col">Worker</th><th scope="col">Success</th><th scope="col" class="num">Completed</th><th scope="col" class="num">Failed</th><th scope="col" class="num">Run p50</th><th scope="col" class="num">Run p95</th><th scope="col" class="num">Wait p95</th></tr></thead>
+    <tbody>
+      {% for w in workers %}
+      <tr>
+        <th scope="row"><a class="mono" href="{{ w.href }}">{{ w.worker }}</a></th>
+        <td><span class="rate"><meter class="{{ w.success_class }}" min="0" max="1000" low="900" high="990" optimum="1000" value="{{ w.success_permille }}" aria-label="{{ w.worker }} success rate">{{ w.success }}</meter><span class="num">{{ w.success }}</span></span></td>
+        <td class="num">{{ w.completed }}</td>
+        <td class="num">{% if w.has_failures %}<a href="{{ w.failed_href }}">{{ w.failed }}</a>{% else %}0{% endif %}</td>
+        <td class="num">{{ w.run_p50 }}</td>
+        <td class="num">{{ w.run_p95 }}</td>
+        <td class="num">{{ w.wait_p95 }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>

@@ -1,0 +1,79 @@
+{% extends "kernel/layout.html" %}
+{% block content %}
+<div class="mbx{% if message.is_some() %} has-message{% endif %}" data-mailbox data-pane="{{ pane }}" data-since="{{ since }}" data-list-src="{{ list_src }}" data-selected="{{ selected }}">
+  <section class="mbx-side" aria-labelledby="mbx-title">
+    <header class="mbx-side-head">
+      <h1 id="mbx-title">Mailbox</h1>
+      {% if pane == "inbox" %}
+      <p class="mbx-live" data-live-status><span class="mbx-dot" aria-hidden="true"></span><span data-live-text>Live</span></p>
+      <button type="button" class="btn quiet mbx-live-toggle" data-live-toggle aria-pressed="false" hidden>Pause</button>
+      {% endif %}
+      <button type="button" class="btn quiet mbx-keys-open" data-keys-open aria-haspopup="dialog" hidden><kbd aria-hidden="true">?</kbd><span class="visually-hidden">Keyboard shortcuts</span></button>
+    </header>
+    <nav class="mbx-tabs" aria-label="Mailbox views">
+      <a href="/dev/mailbox"{% if pane == "inbox" %} aria-current="page"{% endif %}>Inbox<span class="mbx-count" data-unread-count>{% if unread > 0 %}{{ unread }}{% endif %}</span><span class="visually-hidden"> unread</span></a>
+      <a href="/dev/mailbox/previews"{% if pane == "previews" %} aria-current="page"{% endif %}>Previews<span class="mbx-count mbx-count-quiet">{{ preview_count }}</span></a>
+    </nav>
+    {% if pane == "inbox" %}
+    <form class="mbx-search" role="search" method="get" action="/dev/mailbox">
+      <label class="visually-hidden" for="mbx-q">Search mail</label>
+      <svg class="mbx-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M8.5 3a5.5 5.5 0 0 1 4.38 8.83l3.65 3.64a.75.75 0 1 1-1.06 1.06l-3.64-3.65A5.5 5.5 0 1 1 8.5 3Zm0 1.5a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/></svg>
+      <input id="mbx-q" type="search" name="q" value="{{ q }}" placeholder="Search subject, address or text" autocomplete="off" data-search>
+      <kbd aria-hidden="true">/</kbd>
+    </form>
+    <div class="mbx-bar">
+      <p class="mbx-total"><span data-total>{{ total }}</span> message{% if total != 1 %}s{% endif %}{% if !q.is_empty() %} · filtered{% endif %}</p>
+      <form method="post" action="/dev/mailbox/test"><button class="btn">Send test email</button></form>
+      {% if total > 0 %}<form method="post" action="/dev/mailbox/clear"><button class="btn danger">Clear all</button></form>{% endif %}
+    </div>
+    <div class="mbx-list" id="mbx-list" data-list>{% include "kernel/mailbox/_list.html" %}</div>
+    <p class="visually-hidden" role="status" aria-live="polite" data-announce></p>
+    {% else %}
+    <p class="mbx-hint">Every mailer action, rendered from sample data. Nothing here is sent or stored.</p>
+    <ul class="mbx-items" role="list">
+      {% for p in previews %}
+      <li class="mbx-item">
+        <a href="{{ p.href }}"{% if p.selected %} aria-current="true"{% endif %}>
+          <span class="mbx-subject mono">{{ p.name }}</span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% if previews.is_empty() %}<p class="mbx-empty">No previews yet. List each mailer action in <code>src/mailers/previews.rs</code>.</p>{% endif %}
+    {% endif %}
+  </section>
+  <section class="mbx-main" aria-label="{% if pane == "inbox" %}Message{% else %}Preview{% endif %}">
+    {% if let Some(m) = message %}
+      {% include "kernel/mailbox/_message.html" %}
+    {% else %}
+      <div class="mbx-welcome">
+        <svg class="mbx-welcome-art" viewBox="0 0 64 48" aria-hidden="true"><rect x="2" y="2" width="60" height="44" rx="6"/><path d="M4 6l28 22L60 6"/></svg>
+        {% if pane == "inbox" %}
+        <h2>No mail yet</h2>
+        <p>In development every email the app sends lands here instead of a real inbox: from a request, a job or a task, within a second, live.</p>
+        <p>Trigger a flow that sends mail, open <a href="/dev/mailbox/previews">Previews</a>, or send a test email.</p>
+        <form method="post" action="/dev/mailbox/test"><button class="btn primary">Send a test email</button></form>
+        <p class="muted">Agents: <code>curl -s {{ "/dev/mailbox/latest.json" }}</code> returns the newest message with its links and codes.</p>
+        {% else %}
+        <h2>No previews</h2>
+        <p>Add one per mailer action in <code>src/mailers/previews.rs</code>.</p>
+        {% endif %}
+      </div>
+    {% endif %}
+  </section>
+</div>
+<dialog class="mbx-keys" data-keys aria-labelledby="mbx-keys-title">
+  <h2 id="mbx-keys-title">Keyboard shortcuts</h2>
+  <dl>
+    <dt><kbd>j</kbd> <kbd>k</kbd></dt><dd>Next and previous message</dd>
+    <dt><kbd>/</kbd></dt><dd>Search</dd>
+    <dt><kbd>c</kbd></dt><dd>Copy the first code</dd>
+    <dt><kbd>o</kbd></dt><dd>Open the first link</dd>
+    <dt><kbd>e</kbd></dt><dd>Download the .eml</dd>
+    <dt><kbd>d</kbd></dt><dd>Delete the message</dd>
+    <dt><kbd>1</kbd>–<kbd>4</kbd></dt><dd>HTML, Text, Raw, Headers</dd>
+    <dt><kbd>?</kbd></dt><dd>This list</dd>
+  </dl>
+  <form method="dialog"><button class="btn">Close</button></form>
+</dialog>
+{% endblock %}

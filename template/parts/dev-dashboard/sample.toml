@@ -1,0 +1,745 @@
+# samples/dev-dashboard/sample.toml: the format is samples/FORMAT.md.
+name = "dev-dashboard"
+version = "0.7.0"
+summary = "/dev/dashboard, an in-process LiveDashboard: live charts (memory, CPU, req/s, p50/p95/p99, errors, DB pool, Tokio), requests per route, traces as waterfalls, SQL fingerprints with N+1 and EXPLAIN, a live log tail, insights, a routes explorer, an interactive schema diagram (ERD) with a migrations timeline and drift checks, an optional bring-your-own-key AI assistant, test runs and CI, and a load lab. Development only; a read-only subset for admins in production."
+depends_on = []
+extracted_from = "Rust off Rails apps"
+
+# `cargo add` arguments, never with a version.
+crates = [
+  "sysinfo --no-default-features --features system",
+  "quick-xml",
+  "reqwest --no-default-features --features rustls,json,http2",
+  "tower --features util",
+]
+
+[[wire]]
+file = "src/kernel/mod.rs"
+anchor = "kernel mods"
+text = '''
+pub mod dashboard;
+'''
+
+[[wire]]
+file = "migration/src/lib.rs"
+anchor = "migration mods"
+text = '''
+mod m20261016_000600_create_lab_orders;
+'''
+
+[[wire]]
+file = "migration/src/lib.rs"
+anchor = "migrations"
+text = '''
+Box::new(m20261016_000600_create_lab_orders::Migration),
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config fields"
+text = '''
+/// The dev dashboard: production mode, its admin gate, GitHub, the test runner.
+pub dashboard: DashboardConfig,
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config debug"
+text = '''
+d.field("dashboard", &self.dashboard);
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config parse"
+text = '''
+let dashboard = DashboardConfig::from_env(env)?;
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config init"
+text = '''
+dashboard,
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config test"
+text = '''
+dashboard: DashboardConfig::default(),
+'''
+
+[[wire]]
+file = "src/config.rs"
+anchor = "config sections"
+text = '''
+/// The dev dashboard (`kernel/dashboard`).
+#[derive(Clone)]
+pub struct DashboardConfig {
+    /// `DASHBOARD_IN_PRODUCTION=true`: mount the read-only `/admin/dashboard` in production
+    /// (it also needs an admin gate: `APP_ADMIN_PASSWORD` or admin accounts).
+    pub in_production: bool,
+    /// `APP_ADMIN_PASSWORD`: HTTP Basic password for `/admin/dashboard` without admin accounts.
+    pub admin_password: Option<String>,
+    /// `GITHUB_REPO=owner/name`: the repo the GitHub page shows.
+    pub github_repo: Option<String>,
+    /// `GITHUB_TOKEN`: optional, read-only. Never shown or logged.
+    pub github_token: Option<String>,
+    /// `GITHUB_API_URL` (GitHub Enterprise); `https://api.github.com` by default.
+    pub github_api: String,
+    /// `DASHBOARD_GITHUB_FIXTURE=dir`: recorded API answers instead of the network (development
+    /// only: the demo and its screenshots).
+    pub github_fixture: Option<String>,
+    /// `TEST_DATABASE_URL`: where the Run tests button runs the Postgres suite.
+    pub test_database_url: Option<String>,
+    /// `CARGO_TARGET_DIR`: where nextest writes its JUnit report.
+    pub cargo_target_dir: Option<String>,
+    /// `DASHBOARD_DEMO_HISTORY=true` (development only): fill the last hour with synthetic,
+    /// clearly marked history at boot (the demo and its screenshots).
+    pub demo_history: bool,
+    /// The optional "Ask AI" assistant (`DASHBOARD_AI_*`).
+    pub ai: DashboardAi,
+}
+
+impl Default for DashboardConfig {
+    fn default() -> Self {
+        Self {
+            in_production: false,
+            admin_password: None,
+            github_repo: None,
+            github_token: None,
+            github_api: "https://api.github.com".to_owned(),
+            github_fixture: None,
+            test_database_url: None,
+            cargo_target_dir: None,
+            demo_history: false,
+            ai: DashboardAi::default(),
+        }
+    }
+}
+
+impl DashboardConfig {
+    pub fn from_env(env: AppEnv) -> anyhow::Result<Self> {
+        let get = |name: &str| std::env::var(name).ok().filter(|v| !v.trim().is_empty());
+        let mut invalid = Vec::new();
+        let in_production = match get("DASHBOARD_IN_PRODUCTION").as_deref() {
+            None | Some("false") | Some("0") => false,
+            Some("true") | Some("1") => true,
+            Some(_) => {
+                invalid.push("DASHBOARD_IN_PRODUCTION (expected true or false)");
+                false
+            }
+        };
+        let admin_password = get("APP_ADMIN_PASSWORD");
+        if !admin_password_ok(admin_password.as_deref()) {
+            invalid.push("APP_ADMIN_PASSWORD (at least 16 characters)");
+        }
+        let github_repo = get("GITHUB_REPO");
+        if github_repo.as_deref().is_some_and(|r| !valid_repo(r)) {
+            invalid.push("GITHUB_REPO (expected owner/name)");
+        }
+        let github_api = get("GITHUB_API_URL").unwrap_or_else(|| "https://api.github.com".to_owned());
+        if !github_api.starts_with("https://") {
+            invalid.push("GITHUB_API_URL (expected https://)");
+        }
+        let ai = DashboardAi::from_env(&get, &mut invalid);
+        if !invalid.is_empty() {
+            anyhow::bail!("invalid env vars: {} (see .env.example)", invalid.join(", "));
+        }
+        Ok(Self {
+            in_production,
+            admin_password,
+            github_repo,
+            github_token: get("GITHUB_TOKEN"),
+            github_api,
+            github_fixture: get("DASHBOARD_GITHUB_FIXTURE").filter(|_| env == AppEnv::Development),
+            test_database_url: get("TEST_DATABASE_URL"),
+            cargo_target_dir: get("CARGO_TARGET_DIR"),
+            demo_history: env == AppEnv::Development
+                && matches!(get("DASHBOARD_DEMO_HISTORY").as_deref(), Some("true" | "1")),
+            ai,
+        })
+    }
+}
+
+/// Which API shape the dashboard's assistant speaks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AiProvider {
+    /// Anthropic's Messages API (`POST /v1/messages`).
+    Anthropic,
+    /// Any OpenAI-compatible chat completions API: OpenAI, Ollama, LM Studio, a gateway.
+    OpenAiCompatible,
+}
+
+/// The dashboard's optional "Ask AI" assistant: env only, never stored, never shown back.
+#[derive(Clone, Default)]
+pub struct DashboardAi {
+    /// `DASHBOARD_AI_PROVIDER=anthropic|openai-compatible`; unset: no assistant.
+    pub provider: Option<AiProvider>,
+    /// `DASHBOARD_AI_API_KEY`: required for Anthropic, optional for a local model. Never
+    /// shown, logged or recorded.
+    pub api_key: Option<String>,
+    /// `DASHBOARD_AI_BASE_URL`: https, or http to a loopback address (a local model).
+    pub base_url: String,
+    /// `DASHBOARD_AI_MODEL`: `claude-sonnet-5-5` by default for Anthropic.
+    pub model: String,
+    /// `DASHBOARD_AI_IN_PRODUCTION=true`: also in the read-only `/admin/dashboard`, behind its gate.
+    pub in_production: bool,
+    /// `DASHBOARD_AI_PROACTIVE=true` (development only): the watcher posts incident cards and, with
+    /// a provider, investigates each signal once (debounced, budgeted).
+    pub proactive: bool,
+    /// `DASHBOARD_AI_TOOLS=core`: offer the agent its small-model tool set (`ai_tools` `core`).
+    pub tools_core: bool,
+    /// `DASHBOARD_AI_REFERER`, `DASHBOARD_AI_TITLE`: OpenRouter's optional app attribution
+    /// headers (`HTTP-Referer`, `X-Title`), sent to OpenAI-compatible providers.
+    pub referer: Option<String>,
+    pub title: Option<String>,
+}
+
+impl DashboardAi {
+    fn from_env(get: &dyn Fn(&str) -> Option<String>, invalid: &mut Vec<&'static str>) -> Self {
+        let provider = match get("DASHBOARD_AI_PROVIDER").as_deref() {
+            None => None,
+            Some("anthropic") => Some(AiProvider::Anthropic),
+            Some("openai-compatible" | "openai") => Some(AiProvider::OpenAiCompatible),
+            Some(_) => {
+                invalid.push("DASHBOARD_AI_PROVIDER (expected anthropic or openai-compatible)");
+                None
+            }
+        };
+        let base_url = get("DASHBOARD_AI_BASE_URL").unwrap_or_else(|| match provider {
+            Some(AiProvider::OpenAiCompatible) => "https://api.openai.com/v1".into(),
+            _ => "https://api.anthropic.com".into(),
+        });
+        let api_key = get("DASHBOARD_AI_API_KEY");
+        let model = get("DASHBOARD_AI_MODEL").unwrap_or_else(|| match provider {
+            Some(AiProvider::Anthropic) => "claude-sonnet-5-5".into(),
+            _ => String::new(),
+        });
+        if provider.is_some() {
+            if !ai_base_url_ok(&base_url) {
+                invalid.push(
+                    "DASHBOARD_AI_BASE_URL (https://, or http:// to localhost/127.0.0.1/[::1]; no credentials, query or fragment)",
+                );
+            }
+            if model.is_empty() {
+                invalid.push("DASHBOARD_AI_MODEL (required for openai-compatible)");
+            }
+            if provider == Some(AiProvider::Anthropic) && api_key.is_none() {
+                invalid.push("DASHBOARD_AI_API_KEY (required for anthropic)");
+            }
+        }
+        let flag = |name: &str, invalid: &mut Vec<&'static str>, why: &'static str| match get(name)
+            .as_deref()
+        {
+            None | Some("false") | Some("0") => false,
+            Some("true") | Some("1") => true,
+            Some(_) => {
+                invalid.push(why);
+                false
+            }
+        };
+        let in_production = flag(
+            "DASHBOARD_AI_IN_PRODUCTION",
+            invalid,
+            "DASHBOARD_AI_IN_PRODUCTION (expected true or false)",
+        );
+        let proactive = flag(
+            "DASHBOARD_AI_PROACTIVE",
+            invalid,
+            "DASHBOARD_AI_PROACTIVE (expected true or false)",
+        );
+        let tools_core = match get("DASHBOARD_AI_TOOLS").as_deref() {
+            None | Some("all") => false,
+            Some("core") => true,
+            Some(_) => {
+                invalid.push("DASHBOARD_AI_TOOLS (expected all or core)");
+                false
+            }
+        };
+        let referer = get("DASHBOARD_AI_REFERER");
+        if referer.as_deref().is_some_and(|r| !ai_referer_ok(r)) {
+            invalid.push("DASHBOARD_AI_REFERER (an http(s) URL without credentials)");
+        }
+        let title = get("DASHBOARD_AI_TITLE");
+        if title.as_deref().is_some_and(|t| !ai_title_ok(t)) {
+            invalid.push("DASHBOARD_AI_TITLE (1 to 64 printable ASCII characters)");
+        }
+        Self {
+            provider,
+            api_key,
+            base_url,
+            model,
+            in_production,
+            proactive,
+            tools_core,
+            referer,
+            title,
+        }
+    }
+}
+
+/// `DASHBOARD_AI_REFERER`: a plain http(s) URL (it only names the app to OpenRouter).
+pub fn ai_referer_ok(raw: &str) -> bool {
+    reqwest::Url::parse(raw).is_ok_and(|u| {
+        matches!(u.scheme(), "http" | "https")
+            && u.username().is_empty()
+            && u.password().is_none()
+            && raw.len() <= 200
+    })
+}
+
+/// `DASHBOARD_AI_TITLE`: a short header value.
+pub fn ai_title_ok(raw: &str) -> bool {
+    !raw.is_empty() && raw.len() <= 64 && raw.bytes().all(|b| (0x20..0x7f).contains(&b))
+}
+
+/// SECURITY: the assistant's address comes from the environment only, and is https unless it is
+/// this machine (a local model): the dashboard's context never crosses a network in clear text,
+/// and no URL carries credentials (test: the_ai_base_url_is_https_or_loopback).
+pub fn ai_base_url_ok(raw: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(raw) else {
+        return false;
+    };
+    if !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return false;
+    }
+    let host = url.host_str().unwrap_or_default();
+    let loopback = host.eq_ignore_ascii_case("localhost")
+        || host
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback());
+    match url.scheme() {
+        "https" => !host.is_empty(),
+        "http" => loopback,
+        _ => false,
+    }
+}
+
+impl fmt::Debug for DashboardAi {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DashboardAi")
+            .field("provider", &self.provider)
+            .field("api_key", &self.api_key.as_ref().map(|_| "[redacted]"))
+            .field("base_url", &self.base_url)
+            .field("model", &self.model)
+            .field("in_production", &self.in_production)
+            .field("proactive", &self.proactive)
+            .field("tools_core", &self.tools_core)
+            .field("referer", &self.referer)
+            .field("title", &self.title)
+            .finish()
+    }
+}
+
+/// SECURITY: a short password behind HTTP Basic is guessable; the app refuses to boot with one
+/// (test: the_production_dashboard_needs_the_admin_password).
+pub fn admin_password_ok(password: Option<&str>) -> bool {
+    password.is_none_or(|p| p.chars().count() >= 16)
+}
+
+/// `owner/name` with GitHub's characters only (it becomes part of an API path).
+pub fn valid_repo(repo: &str) -> bool {
+    let ok = |s: &str| {
+        !s.is_empty()
+            && s.len() <= 100
+            && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+            && s != "."
+            && s != ".."
+    };
+    matches!(repo.split_once('/'), Some((owner, name)) if ok(owner) && ok(name))
+}
+
+impl fmt::Debug for DashboardConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let set = |v: &Option<String>| v.as_ref().map(|_| "[redacted]");
+        f.debug_struct("DashboardConfig")
+            .field("in_production", &self.in_production)
+            .field("admin_password", &set(&self.admin_password))
+            .field("github_repo", &self.github_repo)
+            .field("github_token", &set(&self.github_token))
+            .field("github_api", &self.github_api)
+            .field("github_fixture", &self.github_fixture.is_some())
+            .field("test_database_url", &set(&self.test_database_url))
+            .field("demo_history", &self.demo_history)
+            .field("ai", &self.ai)
+            .finish()
+    }
+}
+
+/// The env vars whose names start with one of `prefixes`, for the dashboard's Config page (which
+/// redacts them). This module is the only one that reads the environment.
+pub fn shown_env(prefixes: &[&str]) -> Vec<(String, String)> {
+    std::env::vars()
+        .filter(|(k, _)| prefixes.iter().any(|p| k.starts_with(p)))
+        .collect()
+}
+
+'''
+
+[[wire]]
+file = "src/state.rs"
+anchor = "state build"
+text = '''
+// The dashboard's SQL callback, before the connection is cloned into the state.
+let db = crate::kernel::dashboard::instrument(db, &config);
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "routes"
+text = '''
+// /admin/dashboard: the read-only dashboard. Open in development; in production only with
+// DASHBOARD_IN_PRODUCTION=true and an admin gate; otherwise not mounted (404).
+if crate::kernel::dashboard::access::admin_mounted(&config) {
+    app = app.merge(
+        crate::kernel::dashboard::web::admin_router().route_layer(
+            axum::middleware::from_extractor_with_state::<
+                crate::kernel::dashboard::access::DashboardAccess,
+                _,
+            >(state.clone()),
+        ),
+    );
+}
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "dev routers"
+text = '''
+// SECURITY: development only; in production these routes don't exist (test: the_dashboard_is_404_in_production_by_default).
+app = app.merge(crate::kernel::dashboard::web::dev_router());
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "outer layers"
+text = '''
+.layer(from_fn(crate::kernel::dashboard::http::middleware))
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "paths"
+text = '''
+/// The dev dashboard. Links into it carry `hx-boost="false"` (a kernel page has its own <head>).
+pub fn dev_dashboard() -> String {
+    "/dev/dashboard".into()
+}
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "routes table"
+text = '''
+("GET",  "/dev/dashboard",                        "web::overview",     Access::Dev),
+("GET",  "/dev/dashboard.json",                   "web::json",         Access::Dev),
+("GET",  "/dev/dashboard/insights",               "web::insights_page", Access::Dev),
+("POST", "/dev/dashboard/insights/dismiss",       "web::dismiss",      Access::Dev),
+("GET",  "/dev/dashboard/charts",                 "web::charts_page",  Access::Dev),
+("GET",  "/dev/dashboard/requests",               "web::requests_page", Access::Dev),
+("GET",  "/dev/dashboard/routes",                 "web::routes_page",  Access::Dev),
+("GET",  "/dev/dashboard/traces",                 "web::traces_page",  Access::Dev),
+("GET",  "/dev/dashboard/traces/{id}",            "web::trace_page",   Access::Dev),
+("GET",  "/dev/dashboard/sql",                    "web::sql_page",     Access::Dev),
+("GET",  "/dev/dashboard/sql/{id}",               "web::sql_show",     Access::Dev),
+("POST", "/dev/dashboard/sql/{id}/explain",       "web::explain",      Access::Dev),
+("GET",  "/dev/dashboard/logs",                   "web::logs_page",    Access::Dev),
+("GET",  "/dev/dashboard/logs/stream",            "web::logs_stream",  Access::Dev),
+("GET",  "/dev/dashboard/schema",                 "web::schema_page",  Access::Dev),
+("GET",  "/dev/dashboard/schema/erd.svg",         "web::erd_svg",      Access::Dev),
+("GET",  "/dev/dashboard/schema/erd.mmd",         "web::erd_mermaid",  Access::Dev),
+("GET",  "/dev/dashboard/schema/tables/{name}",   "web::schema_table", Access::Dev),
+("GET",  "/dev/dashboard/schema/migrations",      "web::migrations_page", Access::Dev),
+("GET",  "/dev/dashboard/ai",                     "ai_web::ai_page",   Access::Dev),
+("GET",  "/dev/dashboard/ai/panel",               "ai_web::ai_panel",  Access::Dev),
+("POST", "/dev/dashboard/ai/ask",                 "ai_web::ai_ask",    Access::Dev),
+("POST", "/dev/dashboard/ai/runs",                "ai_web::ai_runs",   Access::Dev),
+("GET",  "/dev/dashboard/ai/runs/{id}",           "ai_web::run_page",  Access::Dev),
+("GET",  "/dev/dashboard/ai/runs/{id}/stream",    "ai_web::run_stream", Access::Dev),
+("GET",  "/dev/dashboard/ai/history",             "ai_web::history_page", Access::Dev),
+("GET",  "/dev/dashboard/explain",                "ai_web::explain_page", Access::Dev),
+("GET",  "/dev/dashboard/tests",                  "web::tests_page",   Access::Dev),
+("POST", "/dev/dashboard/tests/run",              "web::tests_run",    Access::Dev),
+("GET",  "/dev/dashboard/github",                 "web::github_page",  Access::Dev),
+("GET",  "/dev/dashboard/lab",                    "web::lab_page",     Access::Dev),
+("POST", "/dev/dashboard/lab/seed",               "web::lab_seed",     Access::Dev),
+("POST", "/dev/dashboard/lab/clear",              "web::lab_clear",    Access::Dev),
+("POST", "/dev/dashboard/lab/traffic",            "web::lab_traffic",  Access::Dev),
+("POST", "/dev/dashboard/lab/stop",               "web::lab_stop",     Access::Dev),
+("POST", "/dev/dashboard/lab/scenario",           "web::lab_scenario", Access::Dev),
+("GET",  "/dev/dashboard/config",                 "web::config_page",  Access::Dev),
+("GET",  "/dev/dashboard/stream",                 "web::stream",       Access::Dev),
+("POST", "/dev/dashboard/reset",                  "web::reset",        Access::Dev),
+("POST", "/dev/csp-reports",                      "web::csp_report",   Access::Dev),
+("GET",  "/dev/lab/orders",                       "lab::orders",       Access::Dev),
+("GET",  "/dev/lab/orders/n-plus-one",            "lab::orders_n_plus_one", Access::Dev),
+("GET",  "/dev/lab/slow-query",                   "lab::slow_query",   Access::Dev),
+("GET",  "/dev/lab/slow",                         "lab::slow",         Access::Dev),
+("GET",  "/dev/lab/panic",                        "lab::panic",        Access::Dev),
+("GET",  "/dev/lab/error",                        "lab::error",        Access::Dev),
+("GET",  "/admin/dashboard",                      "web::overview",     Access::Admin),
+("GET",  "/admin/dashboard/charts",               "web::charts_page",  Access::Admin),
+("GET",  "/admin/dashboard/requests",             "web::requests_page", Access::Admin),
+("GET",  "/admin/dashboard/traces",               "web::traces_page",  Access::Admin),
+("GET",  "/admin/dashboard/traces/{id}",          "web::trace_page",   Access::Admin),
+("GET",  "/admin/dashboard/sql",                  "web::sql_page",     Access::Admin),
+("GET",  "/admin/dashboard/sql/{id}",             "web::sql_show",     Access::Admin),
+("GET",  "/admin/dashboard/config",               "web::config_page",  Access::Admin),
+("GET",  "/admin/dashboard/stream",               "web::stream",       Access::Admin),
+("GET",  "/admin/dashboard/explain",              "ai_web::explain_page", Access::Admin),
+("GET",  "/admin/dashboard/ai",                   "ai_web::ai_page",   Access::Admin),
+("GET",  "/admin/dashboard/ai/panel",             "ai_web::ai_panel",  Access::Admin),
+("POST", "/admin/dashboard/ai/ask",               "ai_web::ai_ask",    Access::Admin),
+("POST", "/admin/dashboard/ai/runs",              "ai_web::ai_runs",   Access::Admin),
+("GET",  "/admin/dashboard/ai/runs/{id}",         "ai_web::run_page",  Access::Admin),
+("GET",  "/admin/dashboard/ai/runs/{id}/stream",  "ai_web::run_stream", Access::Admin),
+("GET",  "/admin/dashboard/ai/history",           "ai_web::history_page", Access::Admin),
+'''
+
+[[wire]]
+file = "src/kernel/ui.rs"
+anchor = "kernel tabs"
+text = '''
+Tab {
+    key: "dashboard",
+    label: "Dashboard",
+    href: "/dev/dashboard",
+    dev_only: true,
+},
+Tab {
+    key: "dashboard-routes",
+    label: "Routes",
+    href: "/dev/dashboard/routes",
+    dev_only: true,
+},
+'''
+
+[[wire]]
+file = "src/kernel/ui.rs"
+anchor = "hidden tabs"
+text = '''
+"system",
+"routes",
+'''
+
+[[wire]]
+file = "src/kernel/security.rs"
+anchor = "dev csp"
+text = '''
+"report-uri /dev/csp-reports",
+'''
+
+[[wire]]
+file = "src/controllers/dev.rs"
+anchor = "dev tiles"
+text = '''
+Tile {
+    title: "Dashboard",
+    href: "/dev/dashboard",
+    description: "Live charts, requests, traces, SQL with N+1 and EXPLAIN, logs, insights and a load lab.",
+    figure: crate::kernel::dashboard::web::tile_figure(),
+},
+'''
+
+[[wire]]
+file = "src/kernel/introspect.rs"
+anchor = "introspect sections"
+text = '''
+out["dashboard"] = crate::kernel::dashboard::snapshot();
+'''
+
+[[wire]]
+file = "src/main.rs"
+anchor = "tracing layers"
+text = '''
+Box::new(kernel::dashboard::trace::DashboardLayer),
+'''
+
+[[wire]]
+file = "src/main.rs"
+anchor = "serve start"
+text = '''
+kernel::dashboard::serve_started(&state);
+'''
+
+[[wire]]
+file = "src/main.rs"
+anchor = "cli commands"
+text = '''
+/// The load lab's traffic generator against a running server.
+Bench(offrails_host::kernel::dashboard::cli::BenchArgs),
+/// Run the tests (nextest) on SQLite and Postgres, saved for the dashboard.
+Test(offrails_host::kernel::dashboard::cli::TestArgs),
+/// The dev dashboard: demo data, warmup traffic.
+Dashboard {
+    #[command(subcommand)]
+    command: offrails_host::kernel::dashboard::cli::DashboardCommand,
+},
+'''
+
+[[wire]]
+file = "src/main.rs"
+anchor = "cli dispatch"
+text = '''
+Command::Bench(args) => kernel::dashboard::cli::bench(&config, args).await,
+Command::Test(args) => kernel::dashboard::cli::test(&config, args).await,
+Command::Dashboard { command } => {
+    let db = kernel::db::connect(&config.database_url, config.database_pool).await?;
+    kernel::dashboard::cli::run(&config, &db, command).await
+}
+'''
+
+[[wire]]
+file = "templates/layouts/application.html"
+anchor = "dev footer links"
+text = '''
+&middot; <a href="{{ paths::dev_dashboard() }}" hx-boost="false" class="link">Dashboard</a>
+'''
+
+[[wire]]
+file = "templates/kernel/layout.html"
+anchor = "kernel head"
+text = '''
+{# The dev dashboard's Ask AI bar (development only; ai_web::bar decides which pages). #}
+{% if let Some(bar) = crate::kernel::dashboard::ai_web::bar(chrome.theme.return_to.as_str()) %}<link rel="stylesheet" href="{{ bar.css }}"><script src="{{ bar.js }}" defer></script>{% endif %}
+'''
+
+[[wire]]
+file = "templates/kernel/layout.html"
+anchor = "kernel main"
+text = '''
+{% if let Some(bar) = crate::kernel::dashboard::ai_web::bar(chrome.theme.return_to.as_str()) %}{% include "kernel/dashboard/_ai_bar.html" %}{% endif %}
+'''
+
+[[wire]]
+file = ".env.example"
+anchor = "env"
+text = '''
+# The dev dashboard (/dev/dashboard). GitHub page: the app's repo, and an optional read-only token.
+GITHUB_REPO=
+GITHUB_TOKEN=
+# GITHUB_API_URL=https://api.github.com     # GitHub Enterprise
+# Production: mount the read-only /admin/dashboard (needs APP_ADMIN_PASSWORD or admin accounts).
+DASHBOARD_IN_PRODUCTION=false
+# APP_ADMIN_PASSWORD=                      # 16+ characters; HTTP Basic for /admin/dashboard
+# Tests page (app test, Run tests): the Postgres server for the Postgres suite, nextest's target dir.
+# TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres
+# CARGO_TARGET_DIR=target
+# DASHBOARD_GITHUB_FIXTURE=tests/fixtures/github   # development only: recorded GitHub answers (the demo)
+# DASHBOARD_DEMO_HISTORY=false             # development only: an hour of synthetic, marked history (the demo)
+# "Ask AI" on the dashboard (optional, your own key; development only unless DASHBOARD_AI_IN_PRODUCTION).
+# DASHBOARD_AI_PROVIDER=anthropic          # or openai-compatible (OpenAI, Ollama, LM Studio, a gateway)
+# DASHBOARD_AI_API_KEY=                    # never shown, logged or stored; optional for a local model
+# DASHBOARD_AI_MODEL=claude-sonnet-5-5     # Anthropic default; claude-opus-5-5 (deeper), claude-haiku-5-5 (cheaper)
+# DASHBOARD_AI_BASE_URL=https://api.anthropic.com   # https, or http://localhost:11434/v1 (Ollama)
+# DASHBOARD_AI_IN_PRODUCTION=false         # also in the read-only /admin/dashboard, behind its gate
+# DASHBOARD_AI_PROACTIVE=false             # development: a watcher posts incident cards and investigates them
+# DASHBOARD_AI_TOOLS=all                   # or core: fewer tools, for small models
+# OpenRouter (OpenAI-compatible, tool calling): e.g. Meta's Muse models
+# DASHBOARD_AI_PROVIDER=openai-compatible
+# DASHBOARD_AI_BASE_URL=https://openrouter.ai/api/v1
+# DASHBOARD_AI_MODEL=meta/muse-spark-1.3   # or meta/muse-wonder (deeper), meta/muse-glimmer-30b (open weights)
+# DASHBOARD_AI_REFERER=http://localhost:3000   # optional: OpenRouter's HTTP-Referer
+# DASHBOARD_AI_TITLE="My app dev dashboard"    # optional: OpenRouter's X-Title (quote values with spaces)
+'''
+
+[[wire]]
+file = "tests/app/main.rs"
+anchor = "test mods"
+text = '''
+mod dev_dashboard_test;
+'''
+
+[[wire]]
+file = "tests/app/security_test.rs"
+anchor = "router sources"
+text = '''
+"src/kernel/dashboard/web.rs",
+"src/kernel/dashboard/ai_web.rs",
+"src/kernel/dashboard/lab.rs",
+'''
+
+[[wire]]
+file = "tests/app/kernel_web_test.rs"
+anchor = "no-store paths"
+text = '''
+"/dev/dashboard",
+"/dev/dashboard/sql",
+"/dev/dashboard.json",
+'''
+
+[[wire]]
+file = "tests/app/theme_switch_test.rs"
+anchor = "kernel pages"
+text = '''
+"/dev/dashboard",
+"/dev/dashboard/insights",
+"/dev/dashboard/charts",
+"/dev/dashboard/requests",
+"/dev/dashboard/routes",
+"/dev/dashboard/traces",
+"/dev/dashboard/sql",
+"/dev/dashboard/logs",
+"/dev/dashboard/schema",
+"/dev/dashboard/schema/migrations",
+"/dev/dashboard/ai?tab=overview",
+"/dev/dashboard/ai/history",
+"/dev/dashboard/explain",
+"/dev/dashboard/tests",
+"/dev/dashboard/github",
+"/dev/dashboard/lab",
+"/dev/dashboard/config",
+"/admin/dashboard",
+"/dev/lab/orders",
+'''
+
+# With auth-core: the read-only production view's admins are accounts (accounts.rs).
+[[wire]]
+file = "src/kernel/dashboard/mod.rs"
+anchor = "dashboard mods"
+when = "auth-core"
+text = '''
+pub mod accounts;
+'''
+
+[[wire]]
+file = "src/kernel/dashboard/access.rs"
+anchor = "dashboard accounts"
+when = "auth-core"
+text = '''
+pub use crate::kernel::dashboard::accounts::{HAS_ACCOUNTS, admin_from_session};
+'''
+
+[[wire]]
+file = "tests/app/main.rs"
+anchor = "test mods"
+when = "auth-core"
+text = '''
+mod dev_dashboard_accounts_test;
+'''
+
+# With realtime: /dev/sockets' Ask AI context and the agent's app_snapshot tool read the hub
+# (ai_realtime.rs: counts and topic names, never people's names or frames).
+[[wire]]
+file = "src/kernel/dashboard/mod.rs"
+anchor = "dashboard mods"
+when = "realtime"
+text = '''
+pub mod ai_realtime;
+'''
+
+[[wire]]
+file = "src/kernel/dashboard/ai_context.rs"
+anchor = "dashboard ai sources"
+when = "realtime"
+text = '''
+Box::new(crate::kernel::dashboard::ai_realtime::Realtime),
+'''

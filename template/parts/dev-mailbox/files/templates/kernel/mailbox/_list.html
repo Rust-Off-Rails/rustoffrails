@@ -1,0 +1,17 @@
+{% if rows.is_empty() %}
+  <p class="mbx-empty">{% if q.is_empty() %}No mail yet. It appears here the moment the app sends it.{% else %}No mail matches “{{ q }}”. <a href="/dev/mailbox">Show all</a>{% endif %}</p>
+{% else %}
+<ul class="mbx-items" role="list">
+  {% for r in rows %}
+  <li class="mbx-item{% if r.unread %} unread{% endif %}" data-id="{{ r.id }}">
+    <a href="{{ r.href }}"{% if r.selected %} aria-current="true"{% endif %}>
+      <span class="mbx-who">{{ r.to }}</span>
+      <time class="mbx-when" datetime="{{ r.at }}">{{ r.when }}</time>
+      <span class="mbx-subject">{% if r.unread %}<span class="mbx-unread-dot" aria-hidden="true"></span><span class="visually-hidden">Unread: </span>{% endif %}{{ r.subject }}</span>
+      <span class="mbx-snippet">{{ r.snippet }}</span>
+      {% if r.attachments > 0 %}<span class="mbx-clip"><svg class="mbx-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M13.6 3.3a3.3 3.3 0 0 1 4.7 4.7l-7.6 7.6a5 5 0 0 1-7.1-7.1l6.5-6.5a.75.75 0 0 1 1.06 1.06L4.66 9.56a3.5 3.5 0 0 0 4.95 4.95l7.6-7.6a1.8 1.8 0 0 0-2.55-2.55l-7.25 7.25a.25.25 0 0 0 .35.35l6.2-6.2a.75.75 0 1 1 1.06 1.06l-6.2 6.2a1.75 1.75 0 0 1-2.47-2.47Z"/></svg>{{ r.attachments }}<span class="visually-hidden"> attachment{% if r.attachments != 1 %}s{% endif %}</span></span>{% endif %}
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}

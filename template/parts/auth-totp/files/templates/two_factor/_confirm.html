@@ -1,0 +1,21 @@
+{# Re-authenticate with an authenticator or recovery code (auth-totp). In account/confirm.html. #}
+{% if second_factor %}
+<div class="group/method">
+  <div class="relative my-6 group-first/method:hidden" aria-hidden="true">
+    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200 dark:border-gray-800"></div></div>
+    <div class="relative flex justify-center"><span class="bg-white dark:bg-gray-900 px-3 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">or</span></div>
+  </div>
+  {% if let Some(alert) = self.alert_for("two_factor") %}
+  <div role="alert" class="mb-4 rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950 px-4 py-3 text-sm text-red-800 dark:text-red-200">{{ alert }}</div>
+  {% endif %}
+  <form method="post" action="{{ paths::account_confirm_two_factor() }}" novalidate>
+    <label for="confirm_code" class="label">Code from your authenticator app</label>
+    <input id="confirm_code" name="code" type="text" class="input text-center font-mono text-xl tracking-[0.4em]" inputmode="numeric" autocomplete="one-time-code" maxlength="11" required autofocus data-otp
+           aria-describedby="confirm_code_hint{% if !self.errors_on("two_factor", "code").is_empty() %} confirm_code_error{% endif %}"
+           {% if !self.errors_on("two_factor", "code").is_empty() %}aria-invalid="true"{% endif %}>
+    {% for m in self.errors_on("two_factor", "code") %}<p id="confirm_code_error" class="field-error">Code {{ m }}</p>{% endfor %}
+    <p id="confirm_code_hint" class="mt-1 text-xs text-gray-600 dark:text-gray-400">Lost your phone? A recovery code works here too.</p>
+    <button class="btn mt-4 w-full justify-center">Confirm with code</button>
+  </form>
+</div>
+{% endif %}

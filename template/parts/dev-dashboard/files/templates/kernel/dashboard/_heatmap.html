@@ -1,0 +1,20 @@
+<figure class="chart heat" id="chart-heatmap">
+  <figcaption>
+    <h2>Latency heatmap{% if heat.demo %} <span class="badge tone-info demo-badge">demo data</span>{% endif %}</h2>
+    <span class="legend"><span>share of each moment's requests</span><span class="heat-scale" aria-hidden="true"><i class="h1"></i><i class="h2"></i><i class="h3"></i><i class="h4"></i><i class="h5"></i><i class="h6"></i></span></span>
+  </figcaption>
+  <svg class="plot" viewBox="0 0 640 170" role="img" aria-label="Latency heatmap: how requests spread across latency buckets over time; the data table below has the counts" focusable="false">
+    {% for c in heat.cells %}<rect class="h{{ c.level }}" x="{{ c.x }}" y="{{ c.y }}" width="{{ c.w }}" height="{{ c.h }}" rx="1.5"><title>{{ c.title }}</title></rect>{% endfor %}
+    {% for r in heat.rows %}<text class="ylab" x="52" dx="-6" y="{{ r.pos }}">{{ r.label }}</text>{% endfor %}
+    {% for t in heat.xticks %}<text class="xlab" x="{{ t.pos }}" y="170" dy="-5">{{ t.label }}</text>{% endfor %}
+    {% if heat.empty %}<text class="nodata" x="320" y="80">No requests in this window</text>{% endif %}
+  </svg>
+  <details class="data">
+    <summary>Data table</summary>
+    <div class="scroll" tabindex="0" role="region" aria-label="Latency heatmap data"><table>
+      <caption class="visually-hidden">Requests per latency bucket, newest first</caption>
+      <thead><tr>{% for h in heat.table_head %}<th scope="col">{{ h }}</th>{% endfor %}</tr></thead>
+      <tbody>{% for row in heat.table %}<tr>{% for v in row %}<td>{{ v }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+    </table></div>
+  </details>
+</figure>

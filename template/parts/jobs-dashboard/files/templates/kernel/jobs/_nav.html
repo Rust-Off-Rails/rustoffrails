@@ -1,0 +1,39 @@
+{#- The dashboard's own header, on every page: sections, live toggle, the pause-all switch. -#}
+<header class="jh">
+  <nav class="jtabs" aria-label="Jobs dashboard">
+    <a href="/admin/jobs"{% if nav.active == "overview" %} aria-current="page"{% endif %}>Overview</a>
+    <a href="/admin/jobs/list"{% if nav.active == "list" %} aria-current="page"{% endif %}>Jobs</a>
+    <a href="/admin/jobs/errors"{% if nav.active == "errors" %} aria-current="page"{% endif %}>Errors{% if nav.has_failing %} <span class="pill err" title="retryable + discarded">{{ nav.failing }}</span>{% endif %}</a>
+    <a href="/admin/jobs/cron"{% if nav.active == "cron" %} aria-current="page"{% endif %}>Cron</a>
+  </nav>
+  <div class="jtools">
+    {% if nav.live %}
+    <a class="live on" href="{{ nav.live_href }}" title="Live updates are on: click to freeze the page"><span class="dot" aria-hidden="true"></span>Live</a>
+    {% else %}
+    <a class="live" href="{{ nav.live_href }}" title="Live updates are off: click to turn them on"><span class="dot" aria-hidden="true"></span>Paused</a>
+    {% endif %}
+    {% if nav.all_paused %}
+    <form method="post" action="/admin/jobs/queues/resume-all"><input type="hidden" name="return_to" value="{{ nav.return_to }}"><button class="btn primary" type="submit">Resume all queues</button></form>
+    {% else if nav.any_queue %}
+    <form method="post" action="/admin/jobs/queues/pause-all"><input type="hidden" name="return_to" value="{{ nav.return_to }}"><button class="btn" type="submit" title="Stop every node from starting new jobs (asks first)">Pause all</button></form>
+    {% endif %}
+    <button class="btn quiet kbd" type="button" data-open-help aria-haspopup="dialog" aria-controls="kbd-help" title="Keyboard shortcuts">?</button>
+  </div>
+</header>
+{% if nav.all_paused %}<p class="banner warn" role="status"><strong>All queues are paused.</strong> No node starts new jobs until you resume them; inserts still work.</p>{% endif %}
+<dialog id="kbd-help" class="help" aria-labelledby="kbd-help-title">
+  <h2 id="kbd-help-title">Keyboard shortcuts</h2>
+  <dl class="keys">
+    <dt><kbd>g</kbd> <kbd>o</kbd></dt><dd>Overview</dd>
+    <dt><kbd>g</kbd> <kbd>j</kbd></dt><dd>Jobs</dd>
+    <dt><kbd>g</kbd> <kbd>e</kbd></dt><dd>Errors</dd>
+    <dt><kbd>g</kbd> <kbd>c</kbd></dt><dd>Cron</dd>
+    <dt><kbd>/</kbd></dt><dd>Search jobs</dd>
+    <dt><kbd>j</kbd> <kbd>k</kbd></dt><dd>Next / previous job in a list</dd>
+    <dt><kbd>x</kbd></dt><dd>Select the focused job</dd>
+    <dt><kbd>Enter</kbd></dt><dd>Open the focused job</dd>
+    <dt><kbd>l</kbd></dt><dd>Live updates on / off</dd>
+    <dt><kbd>?</kbd></dt><dd>This help</dd>
+  </dl>
+  <form method="dialog"><button class="btn" type="submit">Close</button></form>
+</dialog>

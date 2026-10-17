@@ -1,0 +1,21 @@
+/* /dev/sockets: counters, the transport badges and the frame log. Plain CSS on the kernel stylesheet's
+   variables; light and dark; no inline styles (CSP). */
+.stats { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin: 0 0 1rem; }
+.stat { display: flex; flex-direction: column; gap: .1rem; padding: .75rem 1rem; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
+.stat strong { font-size: 1.15rem; overflow-wrap: anywhere; }
+.stat.stat-alert { border-color: var(--err); }
+.stat.stat-alert strong { color: var(--err); }
+.transport-websocket { --tone: var(--ok); }
+.transport-sse { --tone: var(--info); }
+.transport-longpoll { --tone: var(--warn); }
+tr.selected { background: var(--accent-bg); }
+.frames { list-style: none; margin: 0; padding: .5rem 1rem; max-height: 28rem; overflow-y: auto; }
+.frame { display: grid; grid-template-columns: 1.25rem 7.5rem minmax(0, 1fr); gap: .5rem; align-items: baseline; padding: .2rem 0; border-bottom: 1px solid var(--border); }
+.frame code { overflow-wrap: anywhere; white-space: pre-wrap; }
+.frame .dir { font-weight: 700; }
+.frame-in .dir { color: var(--info); }
+.frame-out .dir { color: var(--ok); }
+@media (max-width: 600px) {
+  .frame { grid-template-columns: 1.25rem minmax(0, 1fr); }
+  .frame time { display: none; }
+}
