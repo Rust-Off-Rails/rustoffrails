@@ -281,8 +281,10 @@ The component layer in `assets/app.css` (forms and buttons; the templates use th
 
 When the spec asks for a **manual toggle**, avoid the flash of the wrong theme without an inline script (the CSP forbids those):
 
-- Store the choice in a `theme` cookie (`light` | `dark`; absent = system), set by a tiny `POST /theme` form (an `Access::Public` route) or from `static/app.js`.
-- The `Ctx` extractor reads the cookie, and the layout renders `<html data-theme="dark">` (or `light`) on the server, so the first paint is already right.
+- Store the choice in the **`offrails_theme`** cookie: `system` | `light` | `dark` (an unknown or missing value means `system`), `Path=/; SameSite=Lax; Max-Age=31536000`, **not** `HttpOnly`, because `static/app.js` writes it to switch instantly. The name is namespaced so it never collides with an app's own `theme` setting, and it's the cookie the [samples](samples.md)' kernel pages read, so app and kernel pages share one switch.
+- Without JS, the switch is a `POST /theme` form (`Access::Public`, CSRF-checked like every POST) that sets the cookie and redirects to a **same-site** `return_to` only (a relative path; never `//host` or `/\host`, per [auth](auth.md#return-to-kernelreturn_tors)). With JS, `app.js` writes the same cookie and sets `data-theme` on `<html>` at once.
+- The production cookie hardening in `kernel/security.rs` adds `HttpOnly` to every `Set-Cookie`; exempt `offrails_theme` **by exact name** (a `SCRIPT_WRITABLE_COOKIES` list), or the script can't overwrite it and the switch sticks. Test: in production, the `/theme` response's cookie has `Secure` and `SameSite` but no `HttpOnly`, and every other cookie still has `HttpOnly`.
+- The `Ctx` extractor reads the cookie, and the layout renders `<html data-theme="system|light|dark">` and `<meta name="color-scheme" content="light dark|light|dark">` on the server, so the first paint is already right with no inline script. The standalone error pages do the same.
 - In `assets/app.css`, one `dark:` variant covers the cookie and the OS fallback (verified with Tailwind 4.3.3):
   ```css
   @custom-variant dark {

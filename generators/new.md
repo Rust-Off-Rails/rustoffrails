@@ -25,7 +25,7 @@ The cost is generation time, not runtime: an idle queue polls once a second, and
 - [ ] [`interview.md`](../interview.md) Rounds 1–2 are done (or the human said "you decide"), and the plan is confirmed.
 - [ ] You know: the crate name (snake_case; make it distinctive, since other apps on the machine may be stopped by binary name) and the product name (`config::APP_NAME`, human-readable), `FRONTEND_MODE`, `UI_LIBRARY`, `ISLANDS`, `API`, `PROD_DATABASE`, `DEPLOY_TARGET`, `ACCOUNTS`, `EMAIL`.
 - [ ] Tools: `rustc`/`cargo` stable, `sea-orm-cli` (its major must match `sea-orm`'s), `cargo-nextest` and `cargo-watch`. Install any that are missing with `cargo install --locked <name>`. `sqlite3` is used by `app db console`.
-- [ ] TS modes (`inertia`/`spa`, or `ISLANDS: yes`): **Node 24 LTS** (22.22 is the hard floor) and pnpm via `corepack enable pnpm` ([stack](../stack.md#blessed-js-packages-inertia-spa-islands)).
+- [ ] TS modes (`inertia`/`spa`, or `ISLANDS: yes`): **Node 24 LTS** (22.22 is the hard floor; Vite's `^20.19.0 || >=22.12.0` is Vite alone, not the stack) and pnpm via `corepack enable pnpm` ([stack](../stack.md#blessed-js-packages-inertia-spa-islands)). Any mode, for the optional browser smokes: Node ≥ 22.12.
 - [ ] Docker is optional. It's only needed to test Postgres locally and to check the image builds.
 
 ## 1. Create the project
@@ -362,7 +362,7 @@ The layout is one binary, `tests/app/` ([testing](../guides/testing.md)):
 
 `security_test.rs` covers:
 
-- every `ROUTES` entry is routable in development, parameterized paths included (`{id}` → `1`). A handler's own 404 (no such record) is fine; the router fallback marks its response with `x-route-fallback: 1` ([errors-and-logging](../guides/errors-and-logging.md)), so "not routed" is exact;
+- every `ROUTES` entry is routable in development, parameterized paths included (`{id}` → `1`). Streaming (SSE) routes are requested with `request_head`, never `get`, or the sweep waits forever on a body that never ends ([test-standards §3](../guides/test-standards.md#3-security-tests-every-app)). A handler's own 404 (no such record) is fine; the router fallback marks its response with `x-route-fallback: 1` ([errors-and-logging](../guides/errors-and-logging.md)), so "not routed" is exact;
 - non-public routes never return 2xx anonymously (production config with an admin password);
 - `Dev` routes return 404 with production config;
 - `/admin/jobs` returns 404 in production with no access method, accepts the admin password, and rejects a wrong one;

@@ -111,7 +111,7 @@ Last verified 2026-10-12 (versions are for orientation only; always `pnpm add` w
 
 | Job              | Package | Verified at |
 |------------------|---------|-------------|
-| Runtime          | **Node 24 LTS** (≥ 22.22 is the hard floor: React Router 8, jsdom and Vitest 5 refuse older; Node 20 fails) | 24.21 |
+| Runtime          | **Node 24 LTS** (≥ 22.22 is the hard floor: React Router 8, jsdom and Vitest 5 refuse older; Node 20 fails). Vite 8's own `engines` says `^20.19.0 \|\| >=22.12.0` (checked in 8.2.2): that's Vite alone, not this stack, so ignore it. The browser smokes need ≥ 22.12 (puppeteer-core 25), which any TS app's Node already meets | 24.21 |
 | Package manager  | **pnpm**, pinned per app via `"packageManager"` in `web/package.json` | 12.x |
 | Scaffold         | `pnpm create vite web --template react-ts`, then convert per [frontend-inertia](guides/frontend-inertia.md) "Vite wiring" (delete demo files, swap the template's oxlint for Biome) | create-vite 9 |
 | Build/dev server | **Vite** + `@vitejs/plugin-react` (entry via `build.rolldownOptions.input`; `rollupOptions` is deprecated) | 8.3 / 6.1 |

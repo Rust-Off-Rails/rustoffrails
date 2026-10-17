@@ -67,6 +67,7 @@ impl TestApp {
                                 files: &[(&str, &str, &str, &[u8])]) -> TestResponse;   // (field, filename, content type, bytes)
     pub async fn get_htmx(&self, path: &str) -> TestResponse;   // HX-Request: true
     pub async fn open_stream(&self, path: &str) -> (StatusCode, Body);   // SSE: unread body for support::next_event
+    pub async fn request_head(&self, path: &str, headers: &[(&str, &str)]) -> (StatusCode, HeaderMap);   // GET, status + headers, body never read: SSE and other endless responses
     pub fn without_fetch_metadata(&self) -> &Self;       // later posts omit Sec-Fetch-Site (CSRF falls back to Origin)
     pub fn with_origin(&self, origin: &str) -> &Self;    // later posts send this Origin
     pub fn cookie(&self, name: &str) -> Option<String>;

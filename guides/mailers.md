@@ -17,6 +17,8 @@
 | `.deliver_later` for time-limited mail without secrets | `mailers::deliver_later_until(&txn, email, expires_at).await?` (5 attempts, discarded once expired) |
 | Password reset / magic link / invitation mail | A dedicated job with **only ids** in its args; the worker mints the token and delivers ([auth](auth.md)) |
 | `.deliver_now` | `state.mailer.deliver(email).await?` (only inside jobs and tasks) |
+
+This guide assumes the job queue, which `new` builds into every app ([jobs](jobs.md)). Without it (an app that removed it, or the `mailer` sample installed without `jobs`), there's no `deliver_later`: add the queue before the first email a request sends, and until then deliver only from tasks.
 | `app/views/user_mailer/welcome.html.erb` + `.text.erb` | `templates/mailers/user_mailer/welcome.html` + `.txt` |
 | `app/views/layouts/mailer.html.erb` | `templates/mailers/layout.html` |
 | `default from:` | `MAIL_FROM` env var |
