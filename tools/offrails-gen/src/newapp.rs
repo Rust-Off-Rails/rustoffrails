@@ -138,7 +138,13 @@ pub fn vendor(fw: &Path, app: &Path) -> Result<()> {
     if dest.exists() {
         util::ctx(fs::remove_dir_all(&dest), "removing", &dest)?;
     }
-    for f in util::files_under(fw)? {
+    let skip_dir = |d: &str| {
+        VENDOR_EXCLUDES.contains(&d)
+            || d.ends_with("/target")
+            || d.ends_with("/node_modules")
+            || d == "target"
+    };
+    for f in util::files_under_except(fw, &skip_dir)? {
         let first = f.split('/').next().unwrap_or("");
         if VENDOR_EXCLUDES.contains(&first)
             || f.split('/').any(|s| s == ".DS_Store")
@@ -202,7 +208,9 @@ pub fn run(fw: &Path, o: &NewOptions) -> Result<()> {
         app.display()
     );
     let mut count = 0;
-    for f in util::files_under(&template)? {
+    for f in util::files_under_except(&template, &|d: &str| {
+        d == "target" || d.ends_with("/node_modules")
+    })? {
         if skip_template_path(&f) {
             continue;
         }
@@ -346,9 +354,7 @@ pub fn run(fw: &Path, o: &NewOptions) -> Result<()> {
             o.mode
         );
     }
-    println!(
-        "  then write only the app's own code: product/ specs first, cargo offrails add-part"
-    );
+    println!("  then write only the app's own code: product/ specs first, cargo offrails add-part");
     Ok(())
 }
 

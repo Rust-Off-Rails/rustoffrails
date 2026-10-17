@@ -101,15 +101,26 @@ pub fn rel(base: &Path, slash_path: &str) -> PathBuf {
 
 /// Every file under `dir`, as `/`-separated relative paths, sorted (stable on every OS).
 pub fn files_under(dir: &Path) -> Result<Vec<String>> {
+    files_under_except(dir, &|_| false)
+}
+
+/// Like `files_under`, never descending into a directory `skip` names (by its relative path),
+/// so `.git` and build output aren't even walked.
+pub fn files_under_except(dir: &Path, skip: &dyn Fn(&str) -> bool) -> Result<Vec<String>> {
     let mut out = Vec::new();
     if dir.is_dir() {
-        walk(dir, "", &mut out)?;
+        walk(dir, "", skip, &mut out)?;
     }
     out.sort();
     Ok(out)
 }
 
-fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) -> Result<()> {
+fn walk(
+    dir: &Path,
+    prefix: &str,
+    skip: &dyn Fn(&str) -> bool,
+    out: &mut Vec<String>,
+) -> Result<()> {
     for entry in ctx(fs::read_dir(dir), "reading", dir)? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
@@ -120,7 +131,9 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) -> Result<()> {
         };
         let ty = entry.file_type()?;
         if ty.is_dir() {
-            walk(&entry.path(), &rel, out)?;
+            if !skip(&rel) {
+                walk(&entry.path(), &rel, skip, out)?;
+            }
         } else if ty.is_file() {
             out.push(rel);
         }
