@@ -4,6 +4,8 @@ Each entry lists convention changes and what an existing app must do about them.
 
 ## Unreleased
 
+## 0.7.0 (2026-10-16)
+
 - **Security fix (P0): development was reachable from the LAN and through DNS rebinding.** An independent review of generated apps found that `serve` bound `0.0.0.0` in every environment ([cli](cli.md) said so) and nothing checked `Host`. `/dev` has no login: the mailbox shows every magic link and reset link, introspection shows the app's state, and `/admin/jobs` is open in development. So anyone on the same Wi-Fi could open `http://<your-ip>:3000/dev/mailbox` and sign in as you. A page on `evil.example` that re-points its own name at `127.0.0.1` (DNS rebinding) reached it too: the browser sends `Host: evil.example` **same-origin**, so CORS doesn't apply, and Fetch Metadata says `same-origin`, so the `CsrfLayer` lets its POSTs through. Now, in development only ([security](guides/security.md#development-is-this-machine-only), new non-negotiable 13):
   - `serve` binds `config.bind`: `APP_BIND`, default **`127.0.0.1` in development** and `0.0.0.0` in production. A dev container sets `APP_BIND=0.0.0.0` ([config](guides/config.md#where-serve-listens-app_bind-app_allowed_hosts-and-the-unset-app_env-warning), [deployment](guides/deployment.md#docker-compose-the-whole-app-locally)).
   - `kernel/hosts.rs` (whole file in the guide, like Rails' `HostAuthorization`) answers only `localhost`, `127.0.0.1`, `[::1]`, `*.localhost`, `APP_URL`'s host and `APP_ALLOWED_HOSTS` (a leading `.` allows subdomains). Any other `Host` gets a 403 page that says how to allow it. It's mounted right inside the security middleware ([routing](guides/routing.md#middleware)).
