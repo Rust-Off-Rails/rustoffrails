@@ -207,3 +207,35 @@ async fn concurrent_read_then_write_transactions_do_not_fail_with_database_is_lo
         .unwrap();
     assert_eq!(row.try_get::<i32>("", "n").unwrap(), 8, "no lost updates");
 }
+
+/// Postgres test slots (testing.md#postgres-test-databases): the reset empties what a test
+/// wrote, and refuses once a test changed the schema (the harness then clones a fresh slot).
+#[tokio::test]
+async fn the_postgres_test_reset_empties_tables_and_refuses_a_changed_schema() {
+    let app = TestApp::new().await;
+    if app.on_sqlite() {
+        return;
+    }
+    let db = app.db();
+    let cache = Cache::new(db.clone());
+    cache
+        .write("left-over", &1u32, Duration::from_secs(60))
+        .await
+        .unwrap();
+    kernel::db::reset_test_database(db).await.unwrap();
+    let rows = db
+        .query_one_raw(sea_orm::Statement::from_string(
+            db.get_database_backend(),
+            "SELECT count(*) AS n FROM cache_entries",
+        ))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(rows.try_get::<i64>("", "n").unwrap(), 0);
+
+    db.execute_unprepared("CREATE TABLE planted (id BIGSERIAL PRIMARY KEY)")
+        .await
+        .unwrap();
+    let refused = kernel::db::reset_test_database(db).await.unwrap_err();
+    assert!(refused.to_string().contains("schema changed"), "{refused}");
+}

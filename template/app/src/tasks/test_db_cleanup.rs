@@ -1,4 +1,5 @@
-//! Drops leftover `test_<crate>_<hex>` Postgres databases that a killed test run leaked.
+//! Drops idle `test_<crate>_*` Postgres databases: the test template and slots (rebuilt on the
+//! next run), and any `test_<crate>_<hex>` database an older harness leaked.
 //!
 //! Usage: `app task test_db_cleanup postgres://postgres:postgres@localhost:5432/postgres`
 //!
