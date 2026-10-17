@@ -32,7 +32,9 @@ pub enum AppEnv { Development, Test, Production }
 pub struct Config {
     pub env: AppEnv,
     pub database_url: String,
-    pub database_pool: u32,           // DATABASE_POOL, default 10
+    pub database_pool: u32,           // DATABASE_POOL, default 4 on SQLite, 10 on Postgres
+    pub worker_threads: usize,        // APP_WORKER_THREADS, default 2: Tokio workers (main builds the runtime from it)
+    pub blocking_threads: usize,      // APP_BLOCKING_THREADS, default 16: cap on Tokio's blocking pool (Tokio's own: 512)
     pub app_url: String,              // APP_URL, absolute, no trailing slash: used in emails and the origin check
     pub port: u16,                    // PORT, default 3000
     pub inline_worker: bool,          // APP_INLINE_WORKER: default true in dev, and in prod on SQLite
@@ -173,6 +175,10 @@ fn development_binds_loopback_unless_told_otherwise() {
   - `APP_URL=http://localhost:{PORT}`: it follows `PORT` (`config::dev_app_url(port)`), so emailed links and the CSRF origin check still work when you run on another port. Parse `PORT` before `APP_URL`.
 - `APP_ENV` unset means `development`, **and says so at every boot** (`boot_warnings`, above): on a server an unset `APP_ENV` is a missing setting that mounts `/dev`. The Dockerfile sets `APP_ENV=production`, and so must every deploy config. `TestApp` builds `Config` directly (`Config::test()`) and never reads the environment.
 - `serve` listens on `APP_BIND`: **127.0.0.1 in development**, 0.0.0.0 in production (the container's interface, behind the platform's proxy). A dev container, or a phone on your LAN, needs `APP_BIND=0.0.0.0` **and** its host name in `APP_ALLOWED_HOSTS` ([security](security.md#development-is-this-machine-only)).
+
+### Runtime threads (`APP_WORKER_THREADS`, `APP_BLOCKING_THREADS`)
+
+`main` parses `Config` first, then builds the Tokio runtime from it (no `#[tokio::main]`): 2 worker threads and at most 16 blocking threads by default, instead of one worker per core and 512 blocking threads. Each idle thread holds a stack and an allocator arena, so a small app on a many-core box stays small. Raise `APP_WORKER_THREADS` when request handlers do real CPU work (rendering big pages, image processing) on a box with cores to spare, and `APP_BLOCKING_THREADS` when `spawn_blocking` work (password hashing, file I/O) queues under load. I/O-bound apps rarely gain past 2–4 workers. The file is [`template/app/src/main.rs`](../template/app/src/main.rs); [database](database.md#sqlite-memory) has the SQLite side and the measured numbers.
 
 ## Per-environment behavior
 

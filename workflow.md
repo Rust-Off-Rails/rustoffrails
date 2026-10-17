@@ -11,7 +11,8 @@ Before building anything new, run the relevant part of [`interview.md`](intervie
 ```
 0. ASK      interview.md: new app → full interview; new feature → feature-level checklist
 1. READ     spec → resources, fields, rules, side effects, acceptance criteria
-2. PLAN     list files to create/change (use generators/ recipes); show the plan for new apps/big features
+2. PLAN     list files to create/change (use generators/ recipes); a kernel need → a part (cargo offrails list-parts);
+            show the plan for new apps/big features
 3. MIGRATE  migration + entity together; `cargo run -- db migrate`; prove rollback
 4. MODEL    entity, params, validate(), queries
             (inertia/spa: derive TS on Params + view props; tests export them)
@@ -30,10 +31,21 @@ Work in **vertical slices**: one resource or behavior end-to-end, green, then th
 
 One Rust crate is one compile unit: an error in any file blocks `cargo check` for every file. So parallel helpers only pay off when the tree already compiles **and** each helper owns separate files.
 
-- **Never run parallel helpers before the skeleton compiles** (`generators/new.md` steps 1–7). Build the skeleton yourself, in order. Run one `cargo check`, then make the baseline commit.
+- **Never run parallel helpers before the skeleton compiles.** Generate it from the template yourself (`generators/new.md`), run one `cargo check`, then make the baseline commit.
 - **After that, at most one helper per vertical slice.** Each helper's prompt lists the exact files it owns and says "touch nothing else". Shared files (`src/routes.rs`, `src/kernel/mod.rs`, `src/models/mod.rs`, `migration/src/lib.rs`, `Cargo.toml`) are edited by you, the coordinator, after the helpers report.
 - **A helper whose `cargo check` fails because of another helper's file stops and reports.** It doesn't edit that file, stub it out, or build a scratch crate in `/tmp` to type-check its own part. Those workarounds hide integration errors and burn tokens.
 - Read-only helpers are always fine: exploring a reference app, mapping routes, drafting specs in `product/`.
+
+## When the product grows a need, add the part
+
+Before you hand-write kernel code (a mailer, a job queue, sessions and sign-in, a socket layer, a dashboard), check whether a part does it: `cargo offrails list-parts`. If one does, add it, and build the feature on top:
+
+```sh
+cargo offrails add-part mailer        # e.g. the spec now says "email the owner when…"; dependencies come first
+cargo run -q -- db migrate && cargo run -q -- routes
+```
+
+Typical moments: the first email (`mailer`, `dev-mailbox`), the first slow, retried or scheduled work (`jobs`, `jobs-dashboard`), the first sign-in (`auth-core` + a method), the first push to other users (`realtime`). The [decision table](template/README.md#choosing-parts) maps spec signals to parts. Tell the human in one line what the part adds (link: <https://github.com/Rust-Off-Rails/samples>, screenshots of every screen), log it (`add-part` writes the `docs/decisions.md` line), then the Definition of Done on both databases. Hand-write it only when no part fits, or the human declined the part (recorded in `docs/decisions.md`).
 
 ## Definition of Done
 

@@ -8,7 +8,7 @@
 >
 > Read the rest when adding a worker, a recurring job, a queue, or touching the kernel queue.
 
-**Reference implementation (optional).** The `jobs` [samples](samples.md#the-samples) are this guide built, tested on SQLite and Postgres and security-reviewed, with more on top: batches, rate-limited queues, priorities, timeouts, and args and errors redacted wherever they're shown or searched. They're never required and never vendored automatically. Offer them to the human; if they want one, adopt it or borrow from it per [samples](samples.md#using-one), keeping its `// SECURITY:` markers and the tests its CHECKS.md cites. This guide stays the spec.
+**Use the part.** The `jobs` [parts](samples.md#the-samples) are this guide built, tested on SQLite and Postgres and security-reviewed, with more on top: batches, rate-limited queues, priorities, timeouts, and args and errors redacted wherever they're shown or searched. When the product needs this, add the part rather than writing it from this guide: `cargo offrails add-part jobs` (dependencies come first; [workflow](../workflow.md#when-the-product-grows-a-need-add-the-part)). Keep its `// SECURITY:` markers and the tests its CHECKS.md cites. This guide stays the spec: hand-write from it only when no part fits, or the human declined the part.
 
 Background work runs from a persistent, database-backed queue that you generate into `src/kernel/jobs/`. It's modeled on Elixir's **Oban**:
 

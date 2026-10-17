@@ -24,35 +24,13 @@
 
 ## `kernel/db.rs` spec
 
-`pub async fn connect(url: &str, max_connections: u32) -> Result<DatabaseConnection, DbErr>`. One path for both backends: `sea_orm::Database::connect(ConnectOptions)`. Verified with SeaORM 2.0.4 / sqlx 0.9:
+`pub async fn connect(url: &str, max_connections: u32) -> Result<DatabaseConnection, DbErr>`. One path for both backends: `sea_orm::Database::connect(ConnectOptions)`. **The file is [`template/app/src/kernel/db.rs`](../template/app/src/kernel/db.rs)** (in an app: `src/kernel/db.rs`, from `.offrails/template/app/`), verified with SeaORM 2.0.4 / sqlx 0.9. What it does and why:
+
+- SQLite: `create_if_missing`, `foreign_keys(true)` (critical: SQLite ignores FKs otherwise), `busy_timeout(5 s)`, `synchronous(Normal)`, WAL for file databases, a 1 MiB `cache_size` per connection, idle connections closed after 60 s, and a single connection for in-memory databases (each connection to `:memory:` is a different, empty database).
+- `sea_orm::sqlx` is the re-export; never a separate sqlx dependency.
+- `begin` is the only way a transaction starts:
 
 ```rust
-use std::time::Duration;
-use sea_orm::sqlx::sqlite::{SqliteJournalMode, SqliteSynchronous};   // the re-export; never a separate sqlx dependency
-use sea_orm::{ConnectOptions, Database, DatabaseConnection, DbErr};
-
-pub async fn connect(url: &str, max_connections: u32) -> Result<DatabaseConnection, DbErr> {
-    let mut opts = ConnectOptions::new(url.to_owned());
-    opts.sqlx_logging(false);
-    if url.starts_with("sqlite:") {
-        // Every connection to an in-memory database is a different, empty database.
-        let in_memory = url.contains(":memory:") || url.contains("mode=memory");
-        opts.max_connections(if in_memory { 1 } else { max_connections })
-            .min_connections(if in_memory { 1 } else { 0 });
-        opts.map_sqlx_sqlite_opts(move |o| {
-            let o = o
-                .create_if_missing(true)
-                .foreign_keys(true)                       // critical: SQLite ignores FKs otherwise
-                .busy_timeout(Duration::from_secs(5))
-                .synchronous(SqliteSynchronous::Normal);
-            if in_memory { o } else { o.journal_mode(SqliteJournalMode::Wal) }
-        });
-    } else {
-        opts.max_connections(max_connections);
-    }
-    Database::connect(opts).await
-}
-
 /// Every transaction starts here, never with `db.begin()`.
 pub async fn begin<C: TransactionTrait + ?Sized>(db: &C) -> Result<C::Transaction, DbErr> {
     db.begin_with_options(TransactionOptions {
@@ -65,11 +43,20 @@ pub async fn begin<C: TransactionTrait + ?Sized>(db: &C) -> Result<C::Transactio
 
 - **Transactions are `BEGIN IMMEDIATE` on SQLite** (`kernel::db::begin`; Postgres ignores the mode, and on a transaction it nests as a savepoint). A plain `db.begin()` is deferred: it reads first, and when it then writes after another connection wrote in between (the job worker's heartbeat writes every few seconds), SQLite fails it with `SQLITE_BUSY_SNAPSHOT` ("database is locked", code 517). `busy_timeout` can't retry that. Rails 8 makes the same choice. The in-memory test database has a single connection and can't show the bug, so a kernel test opens a **file** database with a pool of 4, reads in a transaction, writes from another connection, then writes in the transaction. It fails with `db.begin()` and passes with `kernel::db::begin`.
 
-- `max_connections` comes from `DATABASE_POOL` (default 10). **Always set it:** SeaORM defaults SQLite pools to 1 connection.
+- `max_connections` comes from `DATABASE_POOL` (default 4 on SQLite, 10 on Postgres). **Always set it:** SeaORM defaults SQLite pools to 1 connection.
 - **`opts.acquire_timeout(Duration::from_secs(5))`** (sea-orm 2.0.4 `ConnectOptions::acquire_timeout`; sqlx's default is 30 s). A request that can't get a connection in 5 s fails with `DbErr::ConnectionAcquire(ConnAcquireErr::Timeout)`, which `AppError` maps to **503 + `Retry-After`** ([errors](errors-and-logging.md#response-mapping)), instead of hanging until the request timeout. Live re-fetches are additionally capped to a third of the pool ([realtime](realtime.md#keep-re-fetches-from-starving-user-requests)).
 - The pragmas are applied to every pooled connection (`map_sqlx_sqlite_opts`), not once per pool.
 - `TestApp` calls `connect` and then `db.set_metric_callback(...)` to count queries. The callback needs `&mut`, so set it before the connection is cloned into `AppState`.
 - A test asserts `PRAGMA foreign_keys` returns 1 (`query_one_raw(Statement::from_string(DbBackend::Sqlite, "PRAGMA foreign_keys"))`).
+
+## SQLite memory
+
+Small apps are lean by default ([template](../template/README.md#layout), memory):
+
+- **`cache_size` is 1 MiB per connection** (`PRAGMA cache_size = -1024`; SQLite's default is 2 MiB). Each pooled connection keeps its own page cache, so the pool size multiplies it. The OS page cache still holds the database file, so a small app loses little. Raise it (e.g. `-8192` for 8 MiB) when a read-heavy app's database outgrows the cache and `/dev/dashboard` or `EXPLAIN` shows the same pages read again and again.
+- **The pool is 4 connections on SQLite** (`DATABASE_POOL`; 10 on Postgres). SQLite has one writer at a time, and WAL readers rarely need more. Idle connections close after 60 s, so a burst's extra caches don't stay.
+- Postgres is unaffected: its memory is the server's, and `DATABASE_POOL` sizes the client pool.
+- Measured on the bare template (release, macOS, 1000 requests): 15 MiB RSS ([`tools/ci/memory-budget.sh`](../tools/ci/memory-budget.sh)). Runtime threads are the other lever: `APP_WORKER_THREADS` and `APP_BLOCKING_THREADS` ([config](config.md#srcconfigrs)).
 
 ## Portability rules
 

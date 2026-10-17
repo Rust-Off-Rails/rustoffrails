@@ -8,7 +8,7 @@
 >
 > Read the rest when changing the dashboard, its access rules, or the `app jobs` CLI.
 
-**Reference implementation (optional).** The `jobs-dashboard` [samples](samples.md#the-samples) are this guide built, tested on SQLite and Postgres and security-reviewed, with more on top: live throughput and queue-wait charts, a now-running lane with progress, errors grouped by root cause, per-worker success rates and cron with run-now. They're never required and never vendored automatically. Offer them to the human; if they want one, adopt it or borrow from it per [samples](samples.md#using-one), keeping its `// SECURITY:` markers and the tests its CHECKS.md cites. This guide stays the spec.
+**Use the part.** The `jobs-dashboard` [parts](samples.md#the-samples) are this guide built, tested on SQLite and Postgres and security-reviewed, with more on top: live throughput and queue-wait charts, a now-running lane with progress, errors grouped by root cause, per-worker success rates and cron with run-now. When the product needs this, add the part rather than writing it from this guide: `cargo offrails add-part jobs-dashboard` (dependencies come first; [workflow](../workflow.md#when-the-product-grows-a-need-add-the-part)). Keep its `// SECURITY:` markers and the tests its CHECKS.md cites. This guide stays the spec: hand-write from it only when no part fits, or the human declined the part.
 
 Every app gets a live jobs dashboard at `/admin/jobs` and the same operations from the CLI. Both are thin layers over one kernel module, `kernel::jobs::admin`, so the browser and the terminal can't disagree.
 

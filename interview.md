@@ -73,11 +73,17 @@ Jobs:    email book owner on new review
 Assumed: reviews editable by author only; deleting a book deletes its reviews
 ```
 
-**Head start (optional), asked with the plan.** Tested, security-reviewed code exists for the parts most apps need ([samples](guides/samples.md)): the mailer and dev mailbox, the job queue and its dashboard, accounts (password, magic link + code, TOTP two-factor, an account security page), realtime channels with presence, and a LiveDashboard-style dev dashboard. Offer it in one line, naming only the samples this plan would use, and say what each adds over building from the guides:
+**Parts, proposed with the plan (the default path).** Every app starts from the tested template, plus the parts its product needs: tested, security-reviewed code for the mailer and dev mailbox, the job queue and its dashboard, accounts (password, magic link + code, TOTP two-factor, an account security page), realtime channels with presence, and a LiveDashboard-style dev dashboard ([template → choosing parts](template/README.md#choosing-parts)). **You decide which ones from what the human said**, using that table: `dev-dashboard` for every app; `mailer` + `dev-mailbox` when anything sends email (sign-in links count); `jobs` + `jobs-dashboard` when anything is slow, retried or scheduled; `auth-core` + the method matching `ACCOUNTS`; `realtime` for chat, presence or pushed updates. Nothing the spec doesn't imply. Put the list in the plan, one line of reason each, with the link, and let the human confirm or adjust in the same yes:
 
-> **Head start?** a) Build everything from the framework's guides (Recommended: the default; nothing extra to own) b) Start from the tested samples for the mailer, dev mailbox, jobs and jobs dashboard (plus accounts / realtime / dev dashboard when we build those), adapted to this app
+```
+Parts:   dev-dashboard      (every app: traces, SQL, logs in development)
+         mailer, dev-mailbox (magic-link sign-in sends email; /dev/mailbox shows it)
+         auth-core, auth-magic-link (ACCOUNTS: magic-link)
+         jobs, jobs-dashboard (the weekly digest is scheduled)
+         See every screen first: https://github.com/Rust-Off-Rails/samples
+```
 
-Record the answer in `product/README.md` → Decisions. It changes where the code comes from, never what the app must do: the guides' rules and tests apply either way ([new](generators/new.md#generator-new-rails-new), "Head start").
+The recommended answer is yes. A human who wants a part built from the guides instead, or no part at all, says so; record that answer in `product/README.md` → Decisions, and `generators/new.md` takes `--parts` accordingly. Parts left out now can be added any time with one command (`cargo offrails add-part <name>`), and the agent proposes them again when a feature needs one ([workflow](workflow.md#when-the-product-grows-a-need-add-the-part)).
 
 ## Feature-level questions (existing app)
 

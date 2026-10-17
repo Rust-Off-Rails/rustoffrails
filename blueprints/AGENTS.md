@@ -54,13 +54,17 @@ docker compose up -d db && TEST_DATABASE_URL=postgres://postgres:postgres@localh
 cargo run -- db migrate        # migrate (any DATABASE_URL)
 cargo run -q -- introspect     # the app's state as JSON (development; live parts: $URL/dev/introspect.json)
 cargo run -- routes            # list routes (with access levels); rewrites docs/routes.md
-cargo run -- jobs stats        # job counts per state (dashboard: /admin/jobs; dev tools: /dev)
+cargo offrails list-parts      # parts (mailer, jobs, auth, realtime, dev dashboard): installed or available
+cargo offrails add-part <name> # add one when the product needs it (dependencies first; re-running is a no-op)
+cargo run -- jobs stats        # with the jobs part: job counts per state (dashboard: /admin/jobs; dev tools: /dev)
 cargo llvm-cov nextest --summary-only --ignore-filename-regex 'src/main\.rs$'   # coverage (gate: 80%)
 ```
 
 ## App-specific notes
 
 <!-- Agents: add durable, app-specific guidance here (domain vocabulary, tricky invariants). Keep it short and link to product/ specs. -->
+
+This app started from the Rust off Rails template (`.offrails/template/`). Shared files carry one-line `samples: <anchor>` comments (`// samples: config fields`, `{# samples: nav links #}`) where `cargo offrails add-part` inserts a part's wiring. Keep them; they are inert comments.
 
 ### Post-upgrade checks
 

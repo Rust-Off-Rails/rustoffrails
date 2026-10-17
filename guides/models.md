@@ -148,6 +148,7 @@ pub async fn destroy(db: &impl ConnectionTrait, id: i64) -> Result<(), AppError>
 6. **No raw SQL in models.** SeaORM's query builder emits correct SQL per backend. If you truly need SQL, see `database.md#escape-hatch`.
 7. **Lookups by id are scoped to the actor** when the app has accounts (`TENANCY` isn't `none`). See the next section.
 8. **Inserts that may hit a unique index use `ON CONFLICT DO NOTHING`, never insert-then-catch.** On Postgres the failed insert aborts the whole transaction ("current transaction is aborted"), so a caught duplicate breaks every statement after it; SQLite doesn't, so only the Postgres run shows it. Get-or-create, dedupe, "join if not a member", first login: `Entity::insert(am).on_conflict_do_nothing_on([Column::Email]).exec_without_returning(&txn).await?` returns `TryInsertResult::{Inserted, Conflicted}` (SeaORM 2.0.4), then select the row. A form whose duplicate is a user error (`has already been taken`) may still map the violation with `sql_err()` **outside** a larger transaction ([validations](#validations)).
+9. **Public model fns that do I/O are `#[tracing::instrument(skip_all)]`** (add `fields(id)` for an id at most); never secrets or personal data in span fields ([spans](errors-and-logging.md#spans)).
 
 ## Scoped lookups (tenancy)
 

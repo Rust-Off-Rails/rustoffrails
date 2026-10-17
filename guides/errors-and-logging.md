@@ -8,7 +8,7 @@
 >
 > Read the rest when adding an error variant, changing error pages, or wiring logging.
 
-**Reference implementation (optional).** The `dev-dashboard` [samples](samples.md#the-samples) are this guide built, tested on SQLite and Postgres and security-reviewed, with more on top: traces as waterfalls, a live log tail and insights that rank what's failing, in development; and the `jobs-dashboard` sample groups job errors by root cause. They're never required and never vendored automatically. Offer them to the human; if they want one, adopt it or borrow from it per [samples](samples.md#using-one), keeping its `// SECURITY:` markers and the tests its CHECKS.md cites. This guide stays the spec.
+**Use the part.** The `dev-dashboard` [parts](samples.md#the-samples) are this guide built, tested on SQLite and Postgres and security-reviewed, with more on top: traces as waterfalls, a live log tail and insights that rank what's failing, in development; and the `jobs-dashboard` sample groups job errors by root cause. When the product needs this, add the part rather than writing it from this guide: `cargo offrails add-part dev-dashboard` (dependencies come first; [workflow](../workflow.md#when-the-product-grows-a-need-add-the-part)). Keep its `// SECURITY:` markers and the tests its CHECKS.md cites. This guide stays the spec: hand-write from it only when no part fits, or the human declined the part.
 
 | Rails | Off Rails |
 |-------|-----------|
@@ -298,6 +298,10 @@ mod tests {
 ```
 
 It's for text, after the fact. It never replaces the rules above: secrets stay out of job args, logs and error pages to begin with.
+
+## Spans
+
+Controller actions and model or service functions carry `#[tracing::instrument(skip_all)]`, so each request's traces (the `dev-dashboard` part's waterfalls, any OpenTelemetry layer) name the work it did. The template's actions do; so does generated code. Add a field only when it's safe and useful, e.g. `#[tracing::instrument(skip_all, fields(id))]` for a record id. **Never put secrets or personal data in span fields** (passwords, tokens, emails, names, request bodies): `skip_all` is the default for that reason, and span fields reach logs and dashboards.
 
 ## Health check
 

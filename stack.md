@@ -12,7 +12,7 @@ One crate per job. Add each one with `cargo add` (and JS packages with `pnpm add
 
 ## Blessed crates
 
-"Added by" says when a crate enters the app: `new` adds the first group (exact commands in [`generators/new.md`](generators/new.md#3-workspace--dependencies)); the rest arrive with the generator or first feature that needs them. Adding everything up front costs compile time, and `object_store` brings a second TLS crypto provider (below).
+"Added by" says when a crate enters the app: `new` adds the first group (exact commands in [`generators/new.md`](generators/new.md#workspace--dependencies)); the rest arrive with the generator or first feature that needs them. Adding everything up front costs compile time, and `object_store` brings a second TLS crypto provider (below).
 
 | Job | Crate(s) and features | Added by | Notes |
 |-----|-----------------------|----------|-------|
@@ -73,7 +73,7 @@ Exercised by the reference app's `auth` branch (2026-10-12): `argon2` 0.6.0, `ob
 
 ### Version gotchas found while verifying
 
-- **MSRV-aware resolver.** Edition 2024 resolves dependencies to versions compatible with the workspace's `rust-version`. `sea-orm-cli migrate init` writes `rust-version = "1.85.0"` into `migration/Cargo.toml`, which silently downgrades crates (e.g. `uuid`). Delete that line ([new.md step 3](generators/new.md#3-workspace--dependencies)).
+- **MSRV-aware resolver.** Edition 2024 resolves dependencies to versions compatible with the workspace's `rust-version`. `sea-orm-cli migrate init` writes `rust-version = "1.85.0"` into `migration/Cargo.toml`, which silently downgrades crates (e.g. `uuid`). Delete that line ([new.md step 3](generators/new.md#workspace--dependencies)).
 - **sea-query 1.0 (SeaORM 2):** expression methods (`.add()`, `.eq()` on `Expr`) live on the `ExprTrait` trait. Importing it at module level makes `i32::max`/`min` ambiguous, so import it inside the function that needs it. `LIKE … ESCAPE` is `Column::X.like(LikeExpr::new(pattern).escape('\\'))`.
 - **SeaORM 2 raw statements:** `ConnectionTrait::execute`/`query_one`/`query_all` now take a query *builder*. For a `Statement`, use `execute_raw` / `query_one_raw` / `query_all_raw` (`execute_unprepared(&str)` is unchanged).
 - **SeaORM SQLite pool:** if `max_connections` isn't set, SeaORM uses **1** for SQLite. `kernel/db.rs` always sets it.

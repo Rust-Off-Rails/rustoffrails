@@ -5,7 +5,7 @@
 > - Detect drift by content fingerprint; start from a clean git tree; read the CHANGELOG's App migration steps between versions.
 > - Reconcile, don't re-create: classify each change (new / conforming / divergent / conflicting); never edit applied migrations; show the plan and wait for a yes.
 > - Re-vendor, apply in green vertical slices, verify nothing shows a stale version, and log the upgrade in `docs/decisions.md`.
-> - From 0.7.0: **offer the samples** (optional reference code) for the areas the app has; the human picks adopt, borrow or skip, and nothing is installed without their yes.
+> - From 0.7.1: **compare the app with `.offrails/template/app/`** (the tested kernel of the new release) as a reference for kernel changes, never a blind overwrite; and **offer the parts** for areas the app built by hand (adopt with `cargo offrails add-part`, borrow, or skip; nothing without the human's yes).
 >
 > Read it all whenever you upgrade an app (`offrails upgrade` launches this recipe).
 
@@ -42,6 +42,15 @@ Require a clean git tree. If it isn't clean, ask the human to commit first, or c
 
 Read `$FW/CHANGELOG.md` from the app's version up to the new one. Each release lists **App migration** steps written for an agent, in reconcile style (detect → final shape → converge). Then diff the docs (`diff -ru .offrails "$FW" -x .git -x .claude-plugin -x skills -x hooks -x evals -x brand -x .in_use`) to catch anything the changelog doesn't mention.
 
+**Compare with the template (0.7.1 and later).** `$FW/template/app/` is the new release's kernel, built and tested. Two diffs show what changed and where the app stands:
+
+```sh
+diff -ru .offrails/template/app "$FW/template/app"     # what the release changed in the kernel (old template → new); empty before 0.7.1
+diff -ru -x target -x .git -x .offrails -x storage "$FW/template/app" .   # the app against the new template: long, the app has grown
+```
+
+Read the first one change by change: each is a candidate slice for step 7 (a fixed header, a new test, a hardened default). Use the second only to locate the app's version of each changed file. **It's a reference, never an overwrite:** the app's files have diverged on purpose (its routes, models, layout, copy, renamed crate), so never copy a template file over an app file. Port each change into the app's code, with its test, and classify it like any other change (step 4). Template tokens (`offrails_app`, `Offrails App`) are the app's crate and product name in the app.
+
 ## 4. Reconcile, don't re-create
 
 For every change, first look for an equivalent the app already has, often built early from older docs or by hand: a table, migration, kernel module, route, template or test. Classify each change:
@@ -53,13 +62,19 @@ For every change, first look for an equivalent the app already has, often built 
 
 ## 5. Show the plan, wait for a yes
 
-List each change with its classification and what it means for this app: files affected, migrations, risk. Upgrading to 0.7.0 or later, add the samples offer from [step 7b](#7b-offer-the-samples) to the same message, so the human answers once. Wait for the human's yes.
+List each change with its classification and what it means for this app: files affected, migrations, risk. Upgrading to 0.7.0 or later, add the parts offer from [step 7b](#7b-offer-the-parts) to the same message, so the human answers once. Wait for the human's yes.
 
 Non-interactive runs (a headless agent, or a request relayed by another agent): proceed only if the human's request explicitly asked for the upgrade and nothing in the plan is outward-facing (no deploys, no production data). Write the plan to `docs/decisions.md` first, so the human can review what was decided.
 
 ## 6. Re-vendor the framework
 
-Replace `.offrails/` with the release, using the same anchored `rsync` as [`new.md` step 1](new.md#1-create-the-project) (with `--delete`), and write `.offrails/VERSION` (framework version, then `vendored <date>`).
+Replace `.offrails/` with the release, with the same exclusions as [`new.md` step 1](new.md#1-generate), and write `.offrails/VERSION` (framework version, then `vendored <date>`). On any OS:
+
+```sh
+cargo run -q --manifest-path "$FW/tools/offrails-gen/Cargo.toml" --target-dir target/offrails-gen -- vendor --framework "$FW"
+```
+
+(Or `rsync -a --delete --exclude /.git --exclude /.claude-plugin --exclude /skills --exclude /hooks --exclude /evals --exclude /brand --exclude /.in_use --exclude /media "$FW"/ .offrails/` then `date -u +"vendored %F" >> .offrails/VERSION`.) An app from before 0.7.1 also gets the `cargo offrails` alias: copy `.offrails/template/app/.cargo/config.toml`'s `[alias]` into the app's `.cargo/config.toml`, and `.gitattributes` from the same place.
 
 ## 7. Apply in vertical slices
 
@@ -67,11 +82,11 @@ Each slice must be green under the [Definition of Done](../workflow.md#definitio
 
 **A step applies only where its *Detect* matches.** Many steps are for one kind of app: accounts, live regions, a development pending-migrations page, a CSS banner, channels. Run the detect first; a step for a feature the app doesn't have is **n/a**, listed as such in the plan with the reason, not built "to match". Where a step's proof needs something the app lacks, use the alternative it names (no accounts: `run.sh a11y` instead of `run.sh login`; its preflight still fails on an untrusted certificate). A detect that would match every app for a change that only some need is a changelog bug: apply what clearly applies, and say so in your report. Log `YYYY-MM-DD: upgraded Off Rails <old> → <new>` and each deviation in `docs/decisions.md`.
 
-## 7b. Offer the samples
+## 7b. Offer the parts
 
-From 0.7.0, the parts most apps have (mailer, dev mailbox, jobs, jobs dashboard, accounts, realtime, a dev dashboard) exist as **samples**: code that was built, tested on both databases and reviewed for security, in a separate repo ([samples](../guides/samples.md)). They're often better than what an app grew from the guides, and sometimes they aren't. This step offers them and **never installs anything on its own**: the human decides, per area.
+From 0.7.0, the parts most apps have (mailer, dev mailbox, jobs, jobs dashboard, accounts, realtime, a dev dashboard) exist as tested, security-reviewed code: the samples, shipped in every release as parts in `.offrails/template/parts/` ([samples](../guides/samples.md)). For an app that built these from the guides, they're often better than what it grew, and sometimes they aren't. **Recommend the parts that fit**, show the human what they get (<https://github.com/Rust-Off-Rails/samples> has screenshots of every screen), and install only what they say yes to.
 
-Skip the step when `docs/decisions.md` records an earlier samples answer (unless the samples gained something since; then offer only that). In a non-interactive run, install nothing: put the offer in the report so the human can answer later.
+Skip the step when `docs/decisions.md` records an earlier answer (unless the parts gained something since; then offer only that). In a non-interactive run, install nothing: put the offer in the report so the human can answer later.
 
 1. **Find the areas the app has.** Run each detect:
 
@@ -83,12 +98,12 @@ Skip the step when `docs/decisions.md` records an earlier samples answer (unless
    | Jobs dashboard | `grep -rln '"/admin/jobs' src` | `jobs-dashboard` |
    | Accounts | the `ACCOUNTS:` header line isn't `none`; passwords: `grep -rln password_digest src/models`; magic links: `ls src/models/login_link.rs`; two-factor: `grep -rli totp src` | `auth-core` + `auth-password` / `auth-magic-link`, `auth-totp` |
    | Realtime | `ls -d src/channels src/kernel/channels.rs src/kernel/pubsub.rs` | `realtime` |
-   | Dev dashboard | `grep -rn '"/dev/dashboard' src` (usually nothing: it's new) | `dev-dashboard` |
+   | Dev dashboard | `grep -rn '"/dev/dashboard' src` (usually nothing: it's new; recommend it for every app) | `dev-dashboard` |
 
 2. **Compare honestly.** For each area found, read the sample's README (first section and *Adapting it*) and look at what the app's version already does. Write one or two sentences per area: what the sample would add **to this app**, and what adopting costs (the files it replaces, tables to reconcile, new routes, more code to own). Where the app already does it, say so, and don't offer what it doesn't need. The [samples table](../guides/samples.md#the-samples) has the headline features: a mailbox with HTML, text and source views and a 320 px phone lint; jobs on the database with a dashboard that groups errors by root cause; accounts with TOTP, recovery codes, magic link + code and an account security page; channels with presence and authorization on every join; a LiveDashboard-style dev dashboard with traces, SQL with N+1 detection, a log tail and a routes explorer.
 3. **Ask once**, with the plan (step 5), as one question per area: **adopt** (install the sample in place of the app's version), **borrow** (port named ideas into the app's own code) or **skip**. Be enthusiastic about what's genuinely better and plain about the cost. For example:
 
-   > 0.7.0 also brings optional samples: tested, security-reviewed code for parts this app already has. Nothing changes unless you say so.
+   > This release brings parts: tested, security-reviewed code for things this app has or should have. See every screen first: https://github.com/Rust-Off-Rails/samples. I recommend these; nothing changes unless you say yes.
    > - **Dev mailbox:** ours shows each email's HTML and text. The sample adds a live inbox, phone-width (320 px) and dark previews that flag mail that breaks in real inboxes, one-key copy of sign-in links and codes, search and a CLI. It replaces `kernel/mailbox.rs` and its templates; stored mail stays.
    > - **Jobs dashboard:** ours lists jobs and retries them. The sample groups failures by root cause, charts throughput and queue wait, and shows what's running now. It replaces `kernel/jobs/web.rs` and its templates; no schema change.
    > - **Dev dashboard (new):** charts, request traces, every SQL query with N+1 warnings and EXPLAIN, a live log, and a routes explorer at `/dev/dashboard`, in development only. It's new code with no change to existing pages.
@@ -96,11 +111,11 @@ Skip the step when `docs/decisions.md` records an earlier samples answer (unless
    > For each: adopt it, borrow specific ideas into our code, or skip?
 
 4. **Do what they chose**, after the convergence slices of step 7, one slice per sample:
-   - **Adopt:** fetch the samples tag matching the new `.offrails/VERSION` and follow [samples → Using one](../guides/samples.md#using-one). Install a sample's dependencies first (its `sample.toml`). Never copy a migration for a table the app already has: reconcile it with a new migration. Keep the app's working code until the sample's tests **and** the app's are green with the sample in place; then delete what it replaced. Port the sample's tests, and add its CHECKS.md rows to the relevant feature spec's `## Security` table. `tools/install.sh` needs the anchors from [new step 13](new.md#4-rust-skeleton): add them, or apply the wiring by hand from each README. Then the Definition of Done on SQLite and Postgres.
+   - **Adopt:** `cargo offrails add-part <name>` (dependencies come first), per [samples → Using one](../guides/samples.md#using-one). It refuses, changing nothing, when an anchor is missing or a file it brings exists and differs: add the anchors from [new → anchors](new.md#anchors) and port the template pieces it names (an app built from the guides before 0.7.1 often needs this), or apply the wiring by hand from the part's README. Never copy a migration for a table the app already has: reconcile it with a new migration. Keep the app's working code until the part's tests **and** the app's are green with the part in place; then delete what it replaced. Add its CHECKS.md rows to the relevant feature spec's `## Security` table. Then the Definition of Done on SQLite and Postgres.
    - **Borrow:** port each named idea into the app's own code, with a test, as an ordinary change.
    - **Skip:** nothing to build.
    - Never replace working code without that yes, and never adopt a sample for an area the human didn't pick.
-5. **Record** each answer: `YYYY-MM-DD: samples offered on upgrade to <version>: dev-mailbox adopted (v<x>), jobs-dashboard borrowed (error groups), dev-dashboard skipped`.
+5. **Record** each answer: `YYYY-MM-DD: parts offered on upgrade to <version>: dev-mailbox adopted (v<x>), jobs-dashboard borrowed (error groups), dev-dashboard skipped` (`add-part` also logs each install).
 
 ## 8. Verify nothing is stale
 

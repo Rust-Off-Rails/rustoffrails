@@ -4,9 +4,9 @@
 
 > The opinionated web stack for the AI era.
 
-**Rust off Rails** is a web framework that ships **zero lines of framework code**. It's a set of Markdown files that tell AI coding agents how to build a full-stack Rust web app: one blessed stack, one directory layout, one way to do each thing.
+**Rust off Rails** is a web framework for AI coding agents. It ships no library you depend on: it's a set of Markdown files that tell agents how to build a full-stack Rust web app (one blessed stack, one directory layout, one way to do each thing), plus the **app template** those files describe, as real, tested files the agent copies instead of retyping ([template/](template/README.md)).
 
-The convention lives in the prose, and the agent generates the code.
+The convention lives in the prose; the code is copied from the template and its parts, then written by the agent for everything app-specific. Humans still write none of it.
 
 ## Standing on giants
 
@@ -36,7 +36,7 @@ We take the best ideas of two great ecosystems and bring them together in one st
 
 | Rails gave you…                     | Rust off Rails gives your agent…                     |
 |------------------------------------|------------------------------------------------------|
-| A gem with 300k lines of Ruby      | ~50 Markdown files                                   |
+| A gem with 300k lines of Ruby      | ~50 Markdown files and an app template the agent copies and owns |
 | `rails generate scaffold`          | `generators/scaffold.md`: a recipe the agent runs    |
 | Convention over configuration      | Convention over *deliberation*: the agent never debates which crate to use |
 | "Optimized for programmer happiness" | Optimized for agent correctness: compiler-checked everything |
@@ -116,9 +116,11 @@ Scaffold Book with title:string, author:string, published_on:date, rating:intege
 Users must be logged in to create books. Send the owner an email when a book gets a review.
 ```
 
-### Optional: start from the samples
+### The template and its parts
 
-Tested, security-reviewed reference code for the parts most apps need (mailer and dev mailbox, jobs and their dashboard, accounts with TOTP, realtime with presence, a dev dashboard) lives in a separate repo, [Rust-Off-Rails/samples](https://github.com/Rust-Off-Rails/samples). Agents offer it during the interview and on upgrade; you decide. Nothing is installed without a yes, and once copied the app owns the code ([guides/samples.md](guides/samples.md)).
+A new app is a copy of [`template/app/`](template/README.md): a complete, compiling app (htmx) with the kernel, security headers, CSRF, sessions, Host allowlist, rate limiting, log redaction, SQLite and Postgres, `/dev` tools, Tailwind, CI, Docker and the kernel tests, renamed and green in minutes instead of an hour of generated Markdown. On top of it go the **parts** the product needs: the mailer and dev mailbox, jobs and their dashboard, accounts (password, magic link, TOTP), realtime with presence, and a LiveDashboard-style dev dashboard. They're the tested samples from [Rust-Off-Rails/samples](https://github.com/Rust-Off-Rails/samples) (screenshots of every screen there). Your agent proposes the ones your app needs, you confirm, and later needs are one command: `cargo offrails add-part <name>`. Once copied, the app owns the code ([guides/samples.md](guides/samples.md)).
+
+The generators (`offrails-gen`: `new`, `add-part`, `list-parts`) are a small standard-library Rust tool, so they work the same on Linux, macOS and Windows.
 
 ## Repository layout
 

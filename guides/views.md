@@ -214,7 +214,7 @@ Handlers set them per page: `ctx.titled(&book.title).described(&book.blurb)`. Pa
 - `og:image` and `og:url` must be **absolute** (scrapers don't resolve relative URLs), so production needs a real `APP_URL`.
 - `/favicon.ico` is routed to `static/favicon.ico` (browsers request it at the root whatever the `<link>` says). Without the file, every first visit logs a 404.
 - **`/robots.txt`** (allow all, `Sitemap:` line) and **`/sitemap.xml`** (public pages from `paths::` helpers, absolute URLs) are routes with tests, `Access::Public`.
-- The smoke test asserts every tag above on the home page, and that `/favicon.ico`, `/static/og.png`, `/robots.txt` and `/sitemap.xml` answer 200 ([new](../generators/new.md#7-tests)).
+- The smoke test asserts every tag above on the home page, and that `/favicon.ico`, `/static/og.png`, `/robots.txt` and `/sitemap.xml` answer 200 ([new](../generators/new.md#tests)).
 
 Content and marketing sites also need:
 

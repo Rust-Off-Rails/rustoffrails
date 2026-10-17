@@ -15,7 +15,7 @@ Migrations are Rust, written with `sea-orm-migration`'s schema DSL, which emits 
 
 | Task | Command |
 |------|---------|
-| New migration | `sea-orm-cli migrate generate create_posts` creates `migration/src/m<timestamp>_create_posts.rs` (its body is `todo!()`; replace it) and registers it in `migration/src/lib.rs`. Registration needs the multi-line `vec![` … `]` shape in `lib.rs`: after a generate, check that a `Box::new(m…::Migration),` line was added ([new.md step 3](../generators/new.md#3-workspace--dependencies)) |
+| New migration | `sea-orm-cli migrate generate create_posts` creates `migration/src/m<timestamp>_create_posts.rs` (its body is `todo!()`; replace it) and registers it in `migration/src/lib.rs`. Registration needs the multi-line `vec![` … `]` shape in `lib.rs`: after a generate, check that a `Box::new(m…::Migration),` line was added ([new.md step 3](../generators/new.md#workspace--dependencies)) |
 | Apply (any env) | `cargo run -- db migrate` (dev) / `app db migrate` (prod; also runs in the Docker entrypoint) |
 | Status | `app db status` |
 | Roll back last | `app db rollback` (`--steps N`) |

@@ -88,6 +88,7 @@ pub async fn edit(State(s): State<AppState>, ctx: Ctx, RequireUser(user): Requir
 6. **Scope by owner in the query** when a resource is private: `post::find_for_user(&db, user.id, id)` returns `NotFound` for other users' rows. That beats find-then-check because it never leaks existence.
 7. **No DB calls in views.** Load everything the view needs in the handler and pass it in.
 8. **Side effects belong in the model fn** (enqueue jobs there, in the transaction), not in the handler.
+9. **Every action is `#[tracing::instrument(skip_all)]`**, so traces name it; never put secrets or personal data in span fields ([spans](errors-and-logging.md#spans)).
 
 ## Rails → Off Rails
 

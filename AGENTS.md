@@ -11,6 +11,7 @@ You are building (or maintaining) a **Rust off Rails** application. This file is
 5. **Explicit beats magic.** You don't pay for boilerplate, so write it. No proc-macro frameworks, no reflection, no hidden callbacks.
 6. **Green or it didn't happen.** A task is done only when the [Definition of Done](workflow.md#definition-of-done) passes, starting with `sh .offrails/tools/offrails-check`. Every item has a command; run it, don't eyeball it.
 7. **Leave a trail.** Every non-obvious decision goes in `docs/decisions.md` in the app (one dated line each). The next agent has no memory but yours.
+8. **Copy what's built; write what's yours.** New apps start from the tested [template](template/README.md) (`offrails-gen new`), and kernel needs are met by its parts (`cargo offrails add-part <name>`), never retyped from a guide. Once copied, the code is the app's: you adapt it and own it. You write the app-specific code (models, controllers, views, jobs) from the guides.
 
 ## Check the frontend mode first
 
@@ -56,12 +57,12 @@ Read on demand:
 | Shipping it, `docker compose`, direct TLS  | [`guides/deployment.md`](guides/deployment.md) |
 | Running a `rails generate` equivalent      | [`generators/`](generators/)            |
 | Upgrading the app to a newer framework release | [`generators/upgrade.md`](generators/upgrade.md) |
-| Optional reference code (samples): offering, adopting, anchors | [`guides/samples.md`](guides/samples.md) |
+| Starting an app from the template; parts (mailer, jobs, auth, realtime, dev dashboard): proposing, adding, anchors | [`template/README.md`](template/README.md), [`guides/samples.md`](guides/samples.md) |
 | Commands (`rails s`, `db:migrate`, …)      | [`cli.md`](cli.md)                      |
 
 ## Where the framework lives inside an app
 
-`generators/new.md` (after the interview) vendors this directory into each app at `.offrails/`. The app's root `AGENTS.md` (from `blueprints/AGENTS.md`) points here. Treat `.offrails/` as read-only. To deviate from it, record the deviation in `docs/decisions.md` and say so in your final message to the human.
+`generators/new.md` (after the interview) copies `template/app/` into the new app and vendors this directory into it at `.offrails/` (so `.offrails/template/` holds the template and parts the app came from, for `add-part` and upgrades). The app's root `AGENTS.md` (from `blueprints/AGENTS.md`) points here. Treat `.offrails/` as read-only. To deviate from it, record the deviation in `docs/decisions.md` and say so in your final message to the human.
 
 ## When the docs are silent
 

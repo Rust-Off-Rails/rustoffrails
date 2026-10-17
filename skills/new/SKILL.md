@@ -13,7 +13,7 @@ Request: $ARGUMENTS
 1. **Preflight.** The current directory must be empty or a fresh git repo. If it already contains `.offrails/`, stop: this is an existing app, so use `/offrails:feature` or `/offrails:scaffold` instead.
 2. **Load the framework:** read `$FW/AGENTS.md`, then its load order (`interview.md`, `doctrine.md`, `structure.md`, `stack.md`, `workflow.md`). Those docs win over your habits.
 3. **Interview** per `$FW/interview.md`, using `AskUserQuestion`. Skip any question the request already answers. "You decide" means take the defaults. Max 3 rounds.
-4. **Confirm the plan** (the compact block in `interview.md`) and wait for a yes.
-5. **Generate** by executing `$FW/generators/new.md` step by step. In step 1, vendor from `$FW`: copy it into `.offrails/`, using the rsync exclusions in that step.
+4. **Confirm the plan** (the compact block in `interview.md`), **including the parts** you propose from the plan (`$FW/template/README.md#choosing-parts`, with the link https://github.com/Rust-Off-Rails/samples), and wait for a yes.
+5. **Generate** by executing `$FW/generators/new.md` step by step: step 1 runs the template generator (`cargo run -q --manifest-path "$FW/tools/offrails-gen/Cargo.toml" --target-dir <dir>/target/offrails-gen -- new <dir> <crate> "<Name>" --pitch … --parts …`), which copies the template, vendors `$FW` into `.offrails/` and adds the parts. Never retype the skeleton.
 6. **Build the plan's features** one vertical slice at a time (`$FW/generators/scaffold.md`, `authentication.md`, …), each finishing on a green Definition of Done.
 7. **Report** in product terms: what exists, `bin/setup && bin/dev`, what's next. Mention `/offrails:feature`, `/offrails:deploy` and `/offrails:doctor`.

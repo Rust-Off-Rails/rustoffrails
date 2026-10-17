@@ -7,6 +7,7 @@ myapp/
 ├── AGENTS.md                  # from blueprints/AGENTS.md: mode header + pointer to .offrails/
 ├── CLAUDE.md                  # one line: "@AGENTS.md"
 ├── .cursor/rules/offrails.mdc # Cursor: always-applied pointer to AGENTS.md
+├── .gitattributes            # * text=auto eol=lf (from the template): LF on every OS
 ├── .github/copilot-instructions.md  # Copilot: pointer to AGENTS.md
 ├── .offrails/                 # this framework, vendored, read-only
 ├── product/                   # HUMAN-OWNED. Specs in Markdown. The only thing humans edit
@@ -97,7 +98,7 @@ myapp/
 │       ├── api/               # spa:     client.ts (the ONLY fetch caller) + <resource>.ts hooks (Svelte: src/lib/api/)
 │       ├── components/        # shared UI (Layout, Flash…); inertia forms: components/<resource>/<Model>Form.tsx (+ .test.tsx; Svelte: .svelte + .svelte.test.ts)
 │       └── islands/           # islands: one file per island
-├── .cargo/config.toml         # inertia/spa: [env] TS_RS_EXPORT_DIR = { value = "web/src/types", relative = true }, TS_RS_LARGE_INT = "number"
+├── .cargo/config.toml         # [alias] offrails (cargo offrails add-part / list-parts, from the template); inertia/spa also: [env] TS_RS_EXPORT_DIR = { value = "web/src/types", relative = true }, TS_RS_LARGE_INT = "number"
 ├── .cargo/mutants.toml        # cargo-mutants: equivalent-mutant exclusions, each with its reason (test-standards §5)
 ├── tests/app/                 # ONE integration test binary (fast linking)
 │   ├── main.rs                # mod declarations only (`#[allow(dead_code)] mod support;`)

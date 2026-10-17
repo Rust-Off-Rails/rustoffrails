@@ -1,405 +1,196 @@
 # Generator: `new` (`rails new`)
 
 > **TL;DR**
-> - Run only after the interview and a confirmed plan; it builds about 60 files and the full kernel (jobs + dashboard, mailer + dev mailbox, cache, `/dev`, security headers) for every app, never stubbed.
-> - Vendor a **release** into `.offrails/` with the anchored `rsync` excludes; write `.offrails/VERSION`; add every crate with `cargo add`, one per line.
-> - Generate in the listed order so the tree compiles at every step; the first full build takes about 10 minutes.
-> - Finish with the smoke tests, the Definition of Done on both databases, a running app (`/up`, `/`), and the one baseline commit.
+> - Run only after the interview and a confirmed plan (which includes the parts: the template plus the samples that fit, proposed by you, confirmed by the human).
+> - **Generate from the template, never retype it:** `cargo run -q --manifest-path "$FW/tools/offrails-gen/Cargo.toml" --target-dir <dir>/target/offrails-gen -- new <dir> <crate_name> "<Display Name>" --pitch "<one line>" --parts <a,b>`. It copies [`template/app`](../template/README.md), renames it, vendors `.offrails/`, adds the parts and `git init`s, in seconds, on Linux, macOS and Windows.
+> - Then fill the `AGENTS.md` header and `product/` from the interview, prove it green on SQLite and Postgres, run it, and make the one baseline commit. Write only the app's own code after that.
 >
-> Read it all, in order, whenever you create an app; skipping steps is how stubs ship.
+> Read it all, in order, whenever you create an app.
 
-Creates a complete, deployable, empty app: about 60 files. It's the longest recipe and sets every later convention, so run it top to bottom without skipping. Every command below was executed on 2026-10-12 to generate the `bookshelf` reference app (htmx, SQLite + Postgres), which compiled, passed clippy and passed its tests on both databases. When something here disagrees with a resolved crate's docs, the docs for the version in `Cargo.lock` win. Fix the code, then log it in `docs/decisions.md`.
+The framework ships the app skeleton as real files: [`template/app/`](../template/README.md) is a complete, compiling app (htmx) whose kernel, layout, error pages, assets, scripts, CI, Docker setup and tests were built from these guides and proven on SQLite and Postgres. Retyping it from Markdown cost an agent 50+ minutes and still drifted, so you copy it. From the moment it's copied, the code is the app's: you read it, adapt it and own it like code you wrote; humans still write none of it ([doctrine §7](../doctrine.md#7-markdown-is-the-spec-the-template-is-its-rendering)).
 
-**One profile, every app.** `new` builds the same kernel for every app: the job queue and its dashboard, the mailer and dev mailbox, cache, `/dev` tools. That includes a content site that sends no email today. This is deliberate, as in Rails, where every app gets Active Job and Action Mailer:
-
-- The second feature of almost every app needs one of them (a contact form, a digest, a cleanup).
-- Generating them later means migrations and wiring in an app that's already live.
-- A single profile is what makes upgrades, the reference app and these docs line up.
-
-The cost is generation time, not runtime: an idle queue polls once a second, and the kernel's tests come with it. Don't trim it. If the interview says "no email", the mailer still exists and `EMAIL` records `prod: not yet (logged only)`.
-
-**Head start (optional): the kernel from the samples.** If the human took the head start in the interview ([interview](../interview.md#then-confirm-the-plan-once-before-generating)), the mailer, dev mailbox, job queue and jobs dashboard come from the tested [samples](../guides/samples.md) instead of being written from the guides. The profile is the same, and so are the guides' rules, but the code is already proven. Then: in step 3 skip the `create_jobs` and `create_mailbox_messages` migrations (the samples ship theirs); in step 4 skip `mailer.rs`, `mailbox.rs`, `jobs/`, `src/jobs/` and `src/mailers/`, and add the pieces the samples build on, from the samples repo's `host/` (the theme switch, `kernel/cookie.rs`, `kernel/redact.rs`, `Chrome::stylesheet`; [samples](../guides/samples.md#using-one), step 2); after step 4's first green `cargo check`, install `mailer`, `dev-mailbox`, `jobs` and `jobs-dashboard` (`tools/install.sh <name> .` for each, from the samples tag matching `.offrails/VERSION`); the samples' own tests then stand in for step 7's mailbox and jobs suites (`kernel_jobs_test.rs`, the mailbox and dashboard parts of `kernel_web_test.rs`). Log it: `YYYY-MM-DD: head start: kernel from samples v<version> (mailer, dev-mailbox, jobs, jobs-dashboard)`. Feature samples (`auth-*`, `realtime`, `dev-dashboard`) are offered again when their feature is built. No samples tag for this release, or no network: say so and generate from the guides.
+**Lean base, parts on demand.** The base has no job queue, mailer, accounts or realtime. Those are [parts](../template/README.md#choosing-parts), the tested [samples](../guides/samples.md), and the app gets the ones its product needs: at generation with `--parts`, or any time later with `cargo offrails add-part <name>`, by the same code path. A blog without background jobs doesn't carry a job queue. `dev-dashboard` fits every app.
 
 ## 0. Preconditions
 
-- [ ] [`interview.md`](../interview.md) Rounds 1–2 are done (or the human said "you decide"), and the plan is confirmed.
-- [ ] You know: the crate name (snake_case; make it distinctive, since other apps on the machine may be stopped by binary name) and the product name (`config::APP_NAME`, human-readable), `FRONTEND_MODE`, `UI_LIBRARY`, `ISLANDS`, `API`, `PROD_DATABASE`, `DEPLOY_TARGET`, `ACCOUNTS`, `EMAIL`.
-- [ ] Tools: `rustc`/`cargo` stable, `sea-orm-cli` (its major must match `sea-orm`'s), `cargo-nextest` and `cargo-watch`. Install any that are missing with `cargo install --locked <name>`. `sqlite3` is used by `app db console`.
-- [ ] TS modes (`inertia`/`spa`, or `ISLANDS: yes`): **Node 24 LTS** (22.22 is the hard floor; Vite's `^20.19.0 || >=22.12.0` is Vite alone, not the stack) and pnpm via `corepack enable pnpm` ([stack](../stack.md#blessed-js-packages-inertia-spa-islands)). Any mode, for the optional browser smokes: Node ≥ 22.12.
+- [ ] [`interview.md`](../interview.md) Rounds 1–2 are done (or the human said "you decide"), and the plan is confirmed, **including the parts** ([interview](../interview.md#then-confirm-the-plan-once-before-generating)).
+- [ ] You know: the crate name (snake_case; make it distinctive, since other apps on the machine may be stopped by binary name), the product name (`config::APP_NAME`, human-readable), a one-line pitch, `FRONTEND_MODE`, `UI_LIBRARY`, `ISLANDS`, `API`, `PROD_DATABASE`, `DEPLOY_TARGET`, `ACCOUNTS`, `EMAIL`, and the parts.
+- [ ] Tools: `rustc`/`cargo` stable, `cargo-nextest` and `cargo-watch` (`cargo install --locked <name>` for any that are missing), `sea-orm-cli` (its major must match `sea-orm`'s) for later migrations. `sqlite3` is used by `app db console`.
+- [ ] TS modes (`inertia`/`spa`, or `ISLANDS: yes`): **Node 24 LTS** (22.22 is the hard floor) and pnpm via `corepack enable pnpm` ([stack](../stack.md#blessed-js-packages-inertia-spa-islands)). Any mode, for the optional browser smokes: Node ≥ 22.12.
 - [ ] Docker is optional. It's only needed to test Postgres locally and to check the image builds.
 
-## 1. Create the project
+## 1. Generate
 
-`$FW` is the framework you're reading: the plugin root when run through `/offrails:new`, `~/.offrails/current` after the one-line install, or the path the human gave you. **Vendor a release, never a moving working tree:** if `$FW` is a git checkout, export the tag matching its `VERSION` (`git -C "$FW" archive v$(head -n1 "$FW/VERSION") | tar -x -C <tmp>`, then use `<tmp>` as `$FW`). The excludes are anchored with `/`, because unanchored names also drop nested paths such as `tools/brand/`.
+`$FW` is the framework you're reading: the plugin root when run through `/offrails:new`, `~/.offrails/current` after the one-line install, or the path the human gave you. **Vendor a release, never a moving working tree:** if `$FW` is a git checkout, export the tag matching its `VERSION` (`git -C "$FW" archive v$(head -n1 "$FW/VERSION") | tar -x -C <tmp>`, then use `<tmp>` as `$FW`).
 
 ```sh
-cargo new <dir> --name <crate_name> && cd <dir>   # also runs git init (edition 2024); --name only if the dir differs
-rsync -a --delete --exclude /.git --exclude /.claude-plugin --exclude /skills --exclude /hooks --exclude /evals --exclude /brand --exclude /.in_use "$FW"/ .offrails/
-date -u +"vendored %F" >> .offrails/VERSION    # first line stays the framework version; dates are UTC everywhere (VERSION, docs/decisions.md, CHANGELOG)
+cargo run -q --manifest-path "$FW/tools/offrails-gen/Cargo.toml" --target-dir <dir>/target/offrails-gen -- \
+  new <dir> <crate_name> "<Display Name>" --pitch "<one-line pitch>" --parts <comma-separated parts, or none>
+# options: --prod-db postgres|sqlite (default postgres), --mode htmx|inertia|spa|api (§4), --no-git, --offline
 ```
 
-The plugin's `skills/` and `hooks/` stay out of the app. They're loaded from the installed plugin, which works for every app at once. Keep exactly these exclusions: `hooks/fingerprint.sh` compares `.offrails/` with the plugin by content using the same list, so excluding anything else (the framework's `.gitignore`, the README's "Developing the framework" section) would report permanent drift. Those files are harmless in `.offrails/`.
+`--target-dir` keeps the generator's build out of `$FW` (the plugin's files are compared by content, and a build there reads as drift). On Linux, macOS or Git Bash, `sh "$FW/tools/new-app.sh" <dir> <crate_name> "<Display Name>" …` is the same command.
+
+What it does, so you can check it: copies `template/app/` into `<dir>` (refusing a non-empty directory), replaces the template's tokens (`offrails_app`, `offrails-app`, `Offrails App`, the pitch), vendors `$FW` into `<dir>/.offrails/` without `/.git`, `/.claude-plugin`, `/skills`, `/hooks`, `/evals`, `/brand`, `/.in_use` and `/media`, writes `.offrails/VERSION` (version, then `vendored <UTC date>`), writes `AGENTS.md` and `product/README.md` from the blueprints, logs `app generated from the … template` in `docs/decisions.md`, adds each part with its dependencies (`cargo add` per part's crate; that needs the crates.io index), runs `cargo fmt --all`, and `git init`s without committing. It prints the next commands.
+
+The plugin's `skills/` and `hooks/` stay out of the app: they're loaded from the installed plugin, which works for every app at once. `hooks/fingerprint.sh` compares `.offrails/` with the plugin by content using the same exclusions.
 
 ## 2. Agent & product files
 
-| File | Source |
-|------|--------|
-| `AGENTS.md` | [`blueprints/AGENTS.md`](../blueprints/AGENTS.md), with every `{{…}}` in the header filled in from the interview |
-| `CLAUDE.md` | a single line: `@AGENTS.md` |
-| `.cursor/rules/offrails.mdc` | Cursor already reads `AGENTS.md`; this pins it in every chat. Frontmatter `alwaysApply: true`, body: `Follow AGENTS.md and .offrails/AGENTS.md. All code is written by AI; humans edit product/.` (`.mdc`, not `.md`: Cursor ignores `.md` files in `.cursor/rules/`) |
-| `.github/copilot-instructions.md` | GitHub Copilot: the same body as the Cursor rule (`Follow AGENTS.md and .offrails/AGENTS.md. All code is written by AI; humans edit product/.`), in plain Markdown with no frontmatter |
-| `product/README.md` | [`blueprints/product-README.md`](../blueprints/product-README.md), filled in from the interview |
-| `product/features/` | one spec per feature from the confirmed plan ([`blueprints/feature-spec.md`](../blueprints/feature-spec.md)). They're built after step 9 |
-| `docs/decisions.md` | [`blueprints/decisions.md`](../blueprints/decisions.md) |
+The template already has `CLAUDE.md` (`@AGENTS.md`), `.cursor/rules/offrails.mdc`, `.github/copilot-instructions.md` and `docs/decisions.md` (the template's own decisions, which the app inherits). Fill in:
 
-## 3. Workspace & dependencies
+| File | From |
+|------|------|
+| `AGENTS.md` | Written from [`blueprints/AGENTS.md`](../blueprints/AGENTS.md) with the template's defaults (`htmx`, `API: none`, `ACCOUNTS: none`, `TENANCY: none`, and `EMAIL`/`ACCOUNTS` set by the parts). Set every header line from the interview; never one the code doesn't match yet (`TENANCY` changes when [`authentication.md`](authentication.md) builds the tenancy suites) |
+| `product/README.md` | Written from [`blueprints/product-README.md`](../blueprints/product-README.md) with the name filled; write the rest from the interview |
+| `product/features/` | one spec per feature from the confirmed plan ([`blueprints/feature-spec.md`](../blueprints/feature-spec.md)). They're built after step 5 |
+| `static/` brand assets | `bash .offrails/tools/brand/render.sh "<APP_NAME>" "<accent>" "<one-line pitch>" static` (headless Chrome; without it, `rsvg-convert`; with neither it keeps the template's neutral set: log that in `docs/decisions.md`) |
 
-**Migration crate.**
+Design: follow any references from the interview. Otherwise keep the template's clean, neutral Tailwind design.
 
-```sh
-sea-orm-cli migrate init                        # creates ./migration with an example migration
-```
+## 3. Parts
 
-Then fix what it generated:
-
-1. `migration/Cargo.toml`:
-   - **delete the `rust-version` line.** Edition 2024's MSRV-aware resolver would otherwise downgrade dependencies to match it;
-   - set `sea-orm-migration` to `default-features = false` with features `["runtime-tokio-rustls", "sqlx-sqlite", "sqlx-postgres"]`. The default `cli` feature pulls clap and sea-orm-cli's runner into the app's tree, and the app binary already has `db migrate|rollback|status`.
-2. Delete `migration/src/main.rs` (it needs the `cli` feature; `sea-orm-cli migrate generate` only writes files and doesn't use it), and delete `migration/src/m20220101_000001_create_table.rs` with its `mod` line in `migration/src/lib.rs`. Also delete `migration/README.md` (it documents `cargo run -- generate`, which no longer exists) and the migration crate's `tokio` dependency (only `main.rs` used it).
-3. Leave the migrations list as an **empty multi-line** `vec!`, with the opening `vec![` and the closing `]` on separate lines. `sea-orm-cli migrate generate` only registers new migrations in that shape. A one-line `vec![]` makes it silently skip registration, which leaves `mod` lines but no `Box::new(...)`.
-
-```rust
-pub use sea_orm_migration::prelude::*;
-
-pub struct Migrator;
-
-#[async_trait::async_trait]
-impl MigratorTrait for Migrator {
-    fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![
-        ]
-    }
-}
-```
-
-**Workspace.** Append this to the root `Cargo.toml`, then add the migration crate as a dependency:
-
-```toml
-[workspace]
-members = [".", "migration"]
-
-[profile.dev.package."*"]
-opt-level = 1          # faster tests, still-fast builds
-
-[profile.dev]
-debug = "line-tables-only"   # faster rebuilds (a peer: template edit 16–23 s → 3.6–5.9 s); lldb shows no locals:
-split-debuginfo = "unpacked" # CARGO_PROFILE_DEV_DEBUG=true for a debugging session
-```
+The parts were chosen in the plan ([template](../template/README.md#choosing-parts)). If you generated with `--parts`, they're in. Otherwise, or for one the plan added later:
 
 ```sh
-cargo add --path migration
+cargo offrails list-parts                  # installed vs available, what each adds
+cargo offrails add-part <name> [<name>…]   # dependencies first; prints what it changed and what to run next
 ```
 
-**Crates.** Run them one per line as written. Don't loop over a quoted list in zsh: it doesn't word-split `$var`, so `for c in $crates` passes the whole list as one argument (use bash, or one `cargo add` per line). These are the commands verified for `htmx` mode. The rest of [`stack.md`](../stack.md#blessed-crates) arrives later, with the feature that needs it.
+Then `cargo run -q -- db migrate` (parts with tables), `cargo run -q -- routes`, and read each part's `README.md` ("After installing", "Adapting it") and `CHECKS.md` in `.offrails/template/parts/<name>/`. Adapt the `// APP:` lines (names, copy, limits) to this app; keep every `// SECURITY:` and `// INVARIANT:` line and the tests they name ([samples](../guides/samples.md#rules)).
 
-```sh
-cargo add tokio --features full
-cargo add tokio-stream --features sync
-cargo add futures
-cargo add axum --features multipart
-cargo add axum-extra --features cookie,typed-header,form
-cargo add tower
-cargo add tower-http --features fs,trace,compression-gzip,set-header,timeout,request-id,catch-panic,csrf
-cargo add axum-server --features tls-rustls          # direct TLS: HTTP/2 for realtime, in dev and on proxy-less boxes
-cargo add rustls --no-default-features --features aws_lc_rs,std
-cargo add sea-orm --features sqlx-sqlite,sqlx-postgres,runtime-tokio-rustls,macros,with-chrono,with-json,with-uuid
-cargo add askama serde_json thiserror anyhow tracing dotenvy rand base64 sha2 croner serde_html_form
-cargo add serde --features derive
-cargo add chrono --features serde
-cargo add uuid --features v4,serde
-cargo add tracing-subscriber --features env-filter,json
-cargo add clap --features derive,env
-cargo add moka --features future
-cargo add lettre --no-default-features --features builder,smtp-transport,pool,hostname,tokio1-rustls-tls
-cargo add --dev tempfile http-body-util
-cargo add --dev tower --features util
-cargo add --dev insta --features json,redactions
-# TS modes (inertia / spa / ISLANDS: yes) only:
-cargo add ts-rs --features chrono-impl,serde-json-impl
-# API: rest | both (guides/api.md), and CORS for any API:
-cargo add utoipa --features axum_extras,chrono
-cargo add tower-http --features cors
-# API: graphql | both (guides/graphql.md):
-cargo add async-graphql --features chrono,dataloader
-cargo add async-graphql-axum
-```
+`ACCOUNTS` isn't `none`: after the auth parts are in, run [`authentication.md`](authentication.md) for what is app-specific (roles, tenancy, the guard and tenancy suites).
 
-`serde_html_form` is a kernel dependency (the jobs dashboard's filter links), so every app gets it in `new`, whatever the mode.
+## 4. Frontend mode
 
-`cargo add` accepts several crates in one call only when no `--features` flag is given. Mixing them fails with "feature `x` must be qualified".
+- **`htmx`** (default): nothing to do; the template is htmx.
+- **`api`**, **`inertia`**, **`spa`**: `new --mode <mode>` generated the htmx template (the kernel, `/dev`, tests and CI every mode shares) and logged the requested mode. Convert it per [template → other modes](../template/README.md#other-modes) and the reference below ([other modes](#other-modes)), and set the header once the code matches.
 
-**Framework migrations.** Generate them, then replace each generated body; it contains `todo!()`:
+## 5. Verify & report
 
-```sh
-sea-orm-cli migrate generate create_jobs                # jobs, job_queues, job_nodes, recurring_executions (guides/jobs.md)
-sea-orm-cli migrate generate create_mailbox_messages    # guides/mailers.md
-sea-orm-cli migrate generate create_cache_entries       # guides/caching.md (the cache kernel is generated in step 4)
-```
-
-The tables other kernels need (`sessions`, `blobs`, `broadcasts`) come with the generator that adds those kernels.
-
-`cargo check` now. The crate graph builds once, which takes a few minutes the first time.
-
-## 4. Rust skeleton
-
-Generate these in order, **yourself, with no parallel helpers** until step 7's first green `cargo check` ([workflow](../workflow.md#parallel-helpers-subagents)). Each module compiles against the ones before it. The order is: config → kernel → error/models → state → jobs → views → controllers → routes → tasks → main.
-
-1. `src/config.rs`: `Config`, `AppEnv`, `LogFormat`, `parse_queues`, `bind_address`, `parse_allowed_hosts`, `boot_warnings`, `Config::test()` ([config](../guides/config.md); `APP_BIND` defaults to 127.0.0.1 in development: [where `serve` listens](../guides/config.md#where-serve-listens-app_bind-app_allowed_hosts-and-the-unset-app_env-warning))
-2. `src/kernel/mod.rs`, `kernel/db.rs` ([database](../guides/database.md#kerneldbrs-spec)) with `acquire_timeout(5 s)`
-3. `src/error.rs`: `AppError` (including `Unavailable` → 503 + `Retry-After`), `ResponseFlavor`, the `shape_errors` middleware and `retry_after` (a `map_response` adding `Retry-After: 1` to any 503 without one) ([errors-and-logging](../guides/errors-and-logging.md#response-mapping))
-4. `src/models/mod.rs`: `Errors`, `Page` and the model aliases ([models](../guides/models.md))
-5. The kernel, now. Each item's spec is in the linked guide:
-   - `security.rs`: **the header matrix middleware** (CSP, HSTS and `upgrade-insecure-requests` only with an https `APP_URL`, nosniff, Referrer-Policy, Permissions-Policy, COOP, CORP, X-Frame-Options, `no-store` for authenticated responses, production cookie hardening), mounted outside the panic and timeout layers ([security](../guides/security.md#the-header-matrix));
-   - `hosts.rs`: **development-only Host authorization** (DNS rebinding), the whole file in [security](../guides/security.md#development-is-this-machine-only), mounted just inside the security middleware;
-   - `flash.rs` and `rate_limit.rs`;
-   - `assets.rs`, and `css.rs` (UI modes): `class_lists`, `missing_classes` (template classes with no rule in `static/app.css`), `css_escape`, `has_selector`, used by the theme guard tests, the development CSS banner and introspection ([views](../guides/views.md#dark-mode), [test-standards §11](../guides/test-standards.md#11-theme-and-css-guards));
-   - `tls.rs`: the `HttpToHttps` inner acceptor (plain HTTP on the TLS port → 307 to `https://`) ([deployment](../guides/deployment.md#direct-tls-optional));
-   - `introspect.rs`: `BOOT_ID`, `reload_version()`, `snapshot(state, frontend_mode, live)` for `/dev/introspect.json`, `/dev/reload` and `app introspect` ([dev-tools](../guides/dev-tools.md#introspection));
-   - `mailer.rs` (constructors only; selection lives in `state.rs`) and `mailbox.rs`: **the full dev mailbox** ([mailers](../guides/mailers.md#the-dev-mailbox-kernelmailboxrs-swooshs-local-mailbox)): storage, the two-pane inbox, Previews tab, message view (headers, HTML/Text/Raw, Desktop/Mobile, attachments, links), `/message.eml`, test-email button, JSON endpoints;
-   - `cache.rs`;
-   - `redact.rs`: `redact::text` for error text that is stored or shown later (job errors), whole in [errors-and-logging](../guides/errors-and-logging.md#redacting-stored-error-text);
-   - `ui.rs`: the shared chrome for kernel pages (`Chrome`, `KernelFlash`, `no_store()`, `page()`, time and number helpers);
-   - `jobs/` (`mod.rs`, `executor.rs`, `plugins.rs`, `admin.rs`, `web.rs`): **the full Oban-style queue and the `/admin/jobs` dashboard** ([jobs](../guides/jobs.md), [jobs-dashboard](../guides/jobs-dashboard.md));
-   - `inertia.rs`, only if `FRONTEND_MODE: inertia`. Generate it together with its pieces in other files: the `Vite` manifest/preamble half of `assets.rs`; `StashedErrors` and the `_errors` cookie in `flash.rs`; `Errors` deriving `Deserialize` + `TS`, and `Flash`/`FlashKind` deriving `TS`; the redirect-back and `errors/Show` branches in `shape_errors`; the `version` layer outside the flash layer ([frontend-inertia](../guides/frontend-inertia.md#the-adapters-rust-surface)).
-
-   CSRF is **not** generated. It's tower-http's `CsrfLayer`, configured in `routes.rs` ([security](../guides/security.md#csrf)).
-
-   Later, on first use: `pubsub` (channel generator), `storage` (first attachment field), `session` (authentication generator; its cookie is `__Host-session_token` in production, [auth](../guides/auth.md#sessions)).
-
-   None of these is a stub or "later": the mailbox, the jobs dashboard and `/dev` are part of every app from day one, and their tests (step 7) prove it.
-
-   The kernel owns `Outcome`, `JobInfo`, `JobDefaults`, `JobBuilder`, `Unique`, `WorkerConfig`, `DispatchFn` and `Recurring`, because it records results without knowing `AppState`. The app re-exports what it needs from `src/jobs/mod.rs`.
-6. `src/state.rs`: `AppState { config: Arc<Config>, db, mailer, cache, assets, rate_limit }` (plus `vite: Vite` in TS modes; with live regions also `fragments: moka::future::Cache<(String, u64), Arc<String>>` and `refresh_permits: Arc<tokio::sync::Semaphore>` sized `(DATABASE_POOL / 3).max(1)` ([realtime](../guides/realtime.md#render-once-per-version-the-thundering-herd)); `Config.refresh_wait` (5 s, 100 ms in `Config::test()`)) with `AppState::new(config, db) -> anyhow::Result<Self>`, and `select_mailer(&Config, &db)`: development is **always** `Mailer::Local` unless `MAILER` says otherwise ([mailers](../guides/mailers.md#kernel-spec-srckernelmailerrs)). Tests build state the same way.
-7. `src/jobs/mod.rs`: the `Worker` trait, `enqueue`, `dispatch`, `worker_config` and `dispatch_fn`. Then `jobs/deliver_email.rs` (`DeliverEmailJob`), `jobs/cleanup.rs` (`CleanupJob`) and `jobs/recurring.rs`. Also `src/mailers/mod.rs` with `deliver_later` and `deliver_later_until`, `src/mailers/previews.rs` (`PREVIEWS`, empty), and the mail layout `templates/mailers/layout.html` ([mailers](../guides/mailers.md)).
-8. `src/views/mod.rs` with `render` and `Ctx`, the layout context struct, **including the page meta** (`title`, `description`, `path`, `app_url`; `page_title()`, `canonical()`, `absolute()`, `titled()`, `described()`: [views](../guides/views.md#meta-favicon-and-social-cards-every-app-with-pages)). Then `views/helpers.rs` and `views/home.rs`. `Ctx` has no `current_user` until the authentication generator adds it.
-   `FRONTEND_MODE: api`: `views/` holds JSON bodies instead (`#[derive(Serialize, ToSchema)]`, a `PageInfo` envelope); no `Ctx`, no `render` ([api](../guides/api.md)).
-9. `src/controllers/`, each with its spec:
-   - `mod.rs`;
-   - `application.rs`: the `Ctx` extractor, `HxRequest` and `AdminAccess`;
-   - `home.rs`: index (`api` mode: `root.rs` with `GET /` as a JSON index of the API, and `GET /robots.txt` → `Disallow: /`);
-   - `api` mode, or any `API`: `application.rs` also gets `ApiUser`/`OptionalApiUser` once the authentication generator adds tokens; `controllers/api/mod.rs` (`ApiJson`, `ApiDoc`, `ErrorBody`, `InvalidBody`, the `/dev/api-docs` page) for `API: rest | both`; `controllers/graphql.rs` and `src/graphql/` for `API: graphql | both` ([api](../guides/api.md), [graphql](../guides/graphql.md));
-   - `health.rs`: `/up`;
-   - `errors.rs`: the `not_found` fallback;
-   - `dev.rs`: the `/dev` index (with the Try-it buttons), routes, system, `/dev/introspect.json`, `/dev/reload`, `POST /dev/jobs/test`, `POST /dev/migrations`, and the `/dev/mailers` → Previews redirect ([dev-tools](../guides/dev-tools.md));
-   - `migrations.rs`: `pending()`, the development pending-migrations guard and its Run button ([dev-tools](../guides/dev-tools.md#pending-migrations)). `/up` uses `pending()` too (503 while any is pending).
-10. `src/routes.rs` ([routing](../guides/routing.md)). `pub fn router(state) -> anyhow::Result<Router>` contains:
-    - `/`, `/up`, and `/robots.txt` + `/sitemap.xml` (UI modes: [views](../guides/views.md#meta-favicon-and-social-cards-every-app-with-pages); `api`: `/robots.txt` only);
-    - with `API`: `/api/openapi.json`, `/api/v1/…`, `POST /graphql` (with `Extension(graphql::schema())`), and in development `/dev/api-docs` and `/dev/graphiql`; the CORS layer from `APP_CORS_ORIGINS` and the same origins as CSRF trusted origins ([api](../guides/api.md#cors));
-    - `/static` with cache headers;
-    - the fallback;
-    - the middleware stack (per [routing](../guides/routing.md#middleware): `kernel::hosts::middleware` right inside the security middleware; `TimeoutLayer::with_status_code(StatusCode::SERVICE_UNAVAILABLE, 30s)`, never `REQUEST_TIMEOUT`; `kernel::live::gate` innermost when the app has live regions; the CSRF layer also trusts `http://localhost:<APP_DEV_HTTP_PORT>` when set);
-    - `paths` (including `new_session`, used by `error.rs` before auth exists, and `dev_mailbox`);
-    - `ROUTES` with an `Access` level for every route;
-    - `/admin/jobs`: `jobs::web::router().route_layer(from_extractor_with_state::<AdminAccess, _>(state.clone()))`, mounted when the app is in development or has an admin access method;
-    - `dev::router()` plus `kernel::mailbox::router(crate::mailers::previews::PREVIEWS)`, merged only when `APP_ENV=development`, then the `migrations::guard` layer (development only).
-
-    Each kernel router (jobs web, mailbox, dev) ends with `.layer(kernel::ui::no_store())`.
-11. `src/tasks/mod.rs`, then `tasks/seed.rs` (empty; idempotent per record, in one transaction: [cli](../cli.md#seeds)) and `tasks/test_db_cleanup.rs` (calls `kernel::db::drop_idle_test_databases`, which drops this app's leftover, idle `test_<crate>_<hex>` Postgres databases; see [testing](../guides/testing.md#database-per-test)). `kernel/db.rs` also has `ping(db)` for `/up`, so no SQL lives outside the kernel
-12. `src/lib.rs` (`pub mod` lines only), `src/main.rs`: the full CLI from [`cli.md`](../cli.md). Right after `init_tracing`, `main` logs each of `config.boot_warnings()` at warn (an unset `APP_ENV`). `serve` listens on `config.bind` (never a literal `[0, 0, 0, 0]`: `offrails check` `[bind]` fails it) and uses `into_make_service_with_connect_info::<SocketAddr>()`, which `ClientIp` needs for rate limiting, and shuts down gracefully on Ctrl-C or SIGTERM. With `APP_TLS_CERT`/`APP_TLS_KEY` unset it serves plain HTTP with `axum::serve` (behind a TLS proxy). **With them set, it serves HTTPS itself, h2 + http/1.1 via ALPN** ([deployment](../guides/deployment.md#direct-tls-optional)). This is part of `new` in every app, because any app with live updates needs HTTP/2 in the browser, in development too ([realtime](../guides/realtime.md#many-tabs-stall-http11-vs-http2)). Copy this branch exactly:
-
-    ```rust
-    // APP_BIND: 127.0.0.1 in development (this machine only), 0.0.0.0 in production.
-    let addr = SocketAddr::new(config.bind, config.port);
-    // One bind for both branches: a taken port fails here, once, with a clear error.
-    let listener = tokio::net::TcpListener::bind(addr).await.with_context(|| format!("binding {addr}"))?;
-    let drain = config.shutdown_drain; // APP_SHUTDOWN_DRAIN_SECS, default 5
-    let (stopping_tx, mut stopping) = tokio::sync::watch::channel(false);
-    let stop = async move { shutdown_signal().await; pubsub.close(); hub.close(); let _ = stopping_tx.send(true); };
-    match config.tls.clone() {
-        None => {
-            // axum 0.8's graceful shutdown has no timeout: race it against the drain clock.
-            let drained = async move { let _ = stopping.wait_for(|s| *s).await; tokio::time::sleep(drain).await };
-            tokio::select! {
-                r = axum::serve(listener, service).with_graceful_shutdown(stop).into_future() => r?,
-                () = drained => tracing::warn!(?drain, "shutdown drain timed out; dropping open connections"),
-            }
-        }
-        Some(tls) => {
-            // sqlx/lettre bring ring, axum-server brings aws-lc-rs: rustls can't pick a provider alone.
-            let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-            let cfg = axum_server::tls_rustls::RustlsConfig::from_pem_file(&tls.cert, &tls.key).await
-                .with_context(|| format!("loading APP_TLS_CERT={} / APP_TLS_KEY={}", tls.cert, tls.key))?;
-            // Development only: the same router and state on plain HTTP beside the TLS port.
-            if let Some(port) = config.dev_http_port {
-                let plain = tokio::net::TcpListener::bind(SocketAddr::new(config.bind, port)).await
-                    .with_context(|| format!("binding APP_DEV_HTTP_PORT={port}"))?;
-                let (service, mut stopping) = (service.clone(), stopping.clone());
-                tokio::spawn(async move {
-                    let stopped = async move { let _ = stopping.wait_for(|s| *s).await; };
-                    let _ = axum::serve(plain, service).with_graceful_shutdown(stopped).await;
-                });
-            }
-            let handle = axum_server::Handle::new();
-            let graceful = handle.clone();
-            tokio::spawn(async move { stop.await; graceful.graceful_shutdown(Some(drain)); });
-            // Plain http:// on this port (a bare `localhost:PORT`) gets a 307 to https:// (kernel/tls.rs).
-            let acceptor = axum_server::tls_rustls::RustlsAcceptor::new(cfg).acceptor(kernel::tls::HttpToHttps);
-            axum_server::from_tcp(listener.into_std()?)?.acceptor(acceptor).handle(handle).serve(service).await?;
-        }
-    }
-    ```
-
-    Verified with axum 0.8.9 and axum-server 0.8.0 in the reference app. Never `bind_rustls(addr, …)` after binding `listener`: that binds the port twice. [realtime](../guides/realtime.md) moves this into `kernel::server::run(state, listener, stop)` so the shutdown test runs the real code. `Config` gains `shutdown_drain` (`APP_SHUTDOWN_DRAIN_SECS`, 5) and `dev_http_port` (`APP_DEV_HTTP_PORT`, refused outside development) ([config](../guides/config.md))
-
-    `service` is `router.into_make_service_with_connect_info::<SocketAddr>()` and `stop` is the shutdown future (signal, then close pubsub and sockets). Include `app health` (the container healthcheck: `GET /up` on 127.0.0.1:$PORT, no curl needed in the image). With TLS on, it only checks that the port accepts a connection, because a plain-text probe can't talk to a TLS listener.
-
-13. **Sample anchors.** Put each of these one-line comments, **on a line of its own**, at the spot it names, so an optional [sample](../guides/samples.md) can be installed later by `tools/install.sh` (it inserts code above the anchor). They cost nothing if no sample is ever used. Rust files use `// samples: <anchor>`, templates `{# samples: <anchor> #}`, `.env.example` and `compose.yaml` `# samples: <anchor>`. Skip an anchor whose spot your app doesn't have (`install.sh` names a missing one, and the README of each sample says where it goes in words).
-
-    | File | Anchors (where) |
-    |------|-----------------|
-    | `src/lib.rs` | `lib mods` (after the `pub mod` lines) |
-    | `src/kernel/mod.rs` | `kernel mods` |
-    | `src/kernel/ui.rs` | `kernel tabs` (in the kernel header's tab list), `hidden tabs` (a list of tab keys a sample replaces) |
-    | `src/kernel/introspect.rs` | `introspect sections` (in `snapshot`, before it returns: `out["x"] = …;`) |
-    | `src/kernel/security.rs` | `dev csp` (extra CSP directives in development only) |
-    | `src/config.rs` | `config fields` (end of `Config`), `config debug` (end of the `Debug` chain), `config parse` (in `from_env`, before the missing/invalid check), `config init` (end of the `Config { … }` literal in `from_env`), `config test` (end of `Config::test()`'s literal), `config sections` (end of the file, outside any `impl`) |
-    | `src/state.rs` | `state fields`, `state build` (in `AppState::new`, before the struct literal), `state init` (end of that literal), `state fns` (end of `impl AppState`) |
-    | `src/routes.rs` | `routes` (after the last app `.route`), `dev routers` (inside the development-only merge), `outer layers` (just inside `SetRequestIdLayer`, the outermost layer), `paths` (end of `mod paths`), `routes table` (end of `ROUTES`) |
-    | `src/controllers/mod.rs`, `controllers/application.rs` | `controller mods`; `ctx init` (in the `Ctx` extractor's literal), `extractors` (end of file) |
-    | `src/controllers/dev.rs` | `dev routes` (in `router()`), `dev tiles` (end of the `/dev` tile list), `dev try-it` (end of the Try-it buttons), `system facts` (end of `/dev/system`'s facts) |
-    | the sitemap handler | `sitemap paths` (end of the public paths `/sitemap.xml` lists) |
-    | `src/views/mod.rs`, `src/models/mod.rs`, `src/tasks/mod.rs` | `view mods`, `ctx fields` (end of `Ctx`); `model mods`, `model aliases`; `task mods`, `tasks` (in the task `match`) |
-    | `src/main.rs` | `cli commands` (end of the `Command` enum), `cli dispatch` (in the `match`), `serve start` (in `serve`, after state is built), `serve stop` (in the shutdown future), `tracing layers` (the layer list in `init_tracing`: build it as in [errors-and-logging](../guides/errors-and-logging.md#logging), never as a bare empty `Vec`) |
-    | `migration/src/lib.rs` | `migration mods`, `migrations` (end of the `vec![…]`, after the last `Box::new`) |
-    | `templates/layouts/application.html`, `templates/shared/_nav.html` | `dev footer links`; `nav links` |
-    | `templates/kernel/layout.html` | `kernel head` (last line inside `<head>`), `kernel main` (first line inside `<main>`, before the content block) |
-    | `tests/app/main.rs`, `support.rs`, `factories.rs` | `test mods`; `test support` (end of `impl TestApp`); `factories` |
-    | `tests/app/security_test.rs`, `kernel_web_test.rs` | `router sources` (in `every_mounted_route_is_in_the_routes_table`'s list); `no-store paths` |
-    | `.env.example`, `compose.yaml` | `env` (end of file); `compose env` (end of the app's `environment`) |
-
-    Run `cargo fmt --all`, then check that none ended up trailing code: `grep -rnE '[^[:space:]].*(//|\{#|#) samples: ' src templates migration tests | grep -vE ':[[:space:]]*(//|\{#|#) samples: '` prints nothing ([why](../guides/samples.md#anchors)).
-
-## 5. Frontend by mode
-
-- **`htmx`:**
-  - Templates: every class in both color schemes, from the palette in [views](../guides/views.md#dark-mode) (`<meta name="color-scheme" content="light dark">` in the layout and the standalone error pages; `tests/app/theme_test.rs` enforces it). `templates/layouts/application.html` (with the `htmx-config` meta from [frontend-htmx](../guides/frontend-htmx.md#required-config-swap-422-responses), and `{% if ctx.dev %}<script src="/static/dev-reload.js" defer></script>{% endif %}`), `templates/shared/_flash.html`, `_errors.html`, `_nav.html`, `templates/home/index.html`, and `templates/errors/404.html`, `403.html`, `500.html`, plus the `_invalid.html` fragment (the 422 fallback list; HTML is never built with `format!`). The error pages are standalone documents with no layout and no `ctx`.
-  - Assets: `assets/app.css` (with the component layer from [views](../guides/views.md#dark-mode)), `static/app.js` and `static/dev-reload.js` ([dev-tools](../guides/dev-tools.md#hot-reload)).
-  - Vendor htmx and the sse extension into `static/vendor/` ([frontend-htmx](../guides/frontend-htmx.md#setup-done-by-generatorsnewmd)).
-- **`inertia`:**
-  - `pnpm create vite web --template react-ts`, then follow the "Vite wiring" section of [frontend-inertia](../guides/frontend-inertia.md#vite-wiring-verified-with-vite-8-vitejsplugin-react-6-tailwind-4) exactly, including `.cargo/config.toml`, `test-setup.ts` and `app.css` with the progress-bar CSS.
-  - Rust: `views/home.rs` (`HomeIndexProps`), `SharedProps` + `type Inertia` in `controllers/application.rs`, and `home::index` rendering `"home/Index"`. There is no `views::Ctx` and no `templates/shared/`.
-  - Web: `web/src/inertia.d.ts`, `paths.ts`, `pages/home/Index.tsx`, `pages/errors/Show.tsx`, `components/Layout.tsx` and `components/Flash.tsx` with `Flash.test.tsx`.
-  - Templates: the HTML shell `templates/layouts/application.html`, plus the standalone `templates/errors/{404,403,500}.html` for first visits and the `_invalid.html` fragment.
-  - Run `cargo test --lib export_bindings` once, so `web/src/types/` exists before `pnpm --dir web typecheck`. Commit `web/src/types/`.
-  - `UI_LIBRARY: svelte`: scaffold with `--template svelte-ts` instead, and follow [frontend-svelte#inertia-mode](../guides/frontend-svelte.md#inertia-mode): `main.ts` entry (`VITE_ENTRY = "src/main.ts"`, **no** React refresh preamble or `/dev/vite-preamble.js` route), `.svelte` pages and components, `svelte-check` as `typecheck`, Biome with `html.experimentalFullSupportEnabled`.
-- **`spa`:** the same Vite scaffold, set up per [frontend-react](../guides/frontend-react.md) with `api/client.ts`, the router, the QueryClient and the home route.
-  - `UI_LIBRARY: svelte`: SvelteKit in SPA mode instead, per [frontend-svelte#spa-mode-sveltekit](../guides/frontend-svelte.md#spa-mode-sveltekit): `sv create`, `adapter-static` with `fallback: "index.html"` and `appDir: "assets"`, `ssr = false`, and `kernel/assets.rs` `SpaShell` serving `web/dist/index.html` with the hashed CSP.
-- **`api`:** no app templates, no `assets/`, no Tailwind (`bin/setup-tailwind` and the Dockerfile's Tailwind line are left out), no `web/`. Only the kernel's `templates/kernel/`, `templates/mailers/` and the standalone `templates/errors/` pages, plus `static/kernel/` and the vendored htmx they use. Errors are JSON everywhere except `/dev` and `/admin` ([api](../guides/api.md#responses)).
-- **`ISLANDS: yes`:** add `web/` in islands configuration ([frontend-htmx#islands](../guides/frontend-htmx.md#islands); Svelte islands: [frontend-svelte#islands](../guides/frontend-svelte.md#islands)).
-- Any TS mode: `.cargo/config.toml` with `TS_RS_EXPORT_DIR` and `TS_RS_LARGE_INT = "number"` ([frontend-inertia](../guides/frontend-inertia.md#vite-wiring-verified-with-vite-8-vitejsplugin-react-6-tailwind-4)).
-- **All modes:**
-  - `static/vendor/htmx-<ver>.min.js`: the kernel pages use it even in `inertia`/`spa`;
-  - `static/kernel/admin.css`, `static/kernel/admin.js` (the `pageshow` reload), `templates/kernel/layout.html` and `templates/kernel/{jobs,mailbox,dev}/`;
-  - a dev-only "Dev tools" link to `/dev` in the layout or `Layout` component (`ctx.dev` in htmx), **with `hx-boost="false"`** (htmx mode; a plain `<a href>` in TS modes), like every link into a kernel page ([dev-tools](../guides/dev-tools.md#rules)).
-- **Every mode with pages (`htmx`, `inertia`, `spa`): brand assets and social meta from day one.** Run `bash .offrails/tools/brand/render.sh "<APP_NAME>" "<accent>" "<one-line pitch>" static` (renders with headless Chrome; without it, `rsvg-convert` (librsvg) rasterizes the SVGs and draws a plain social card; with neither, it copies the neutral set in `tools/brand/default/` and `favicon.svg` still carries the app's initial: log that in `docs/decisions.md` and re-run where Chrome exists. It writes `favicon.svg`, `favicon.ico`, `apple-touch-icon.png`, `icon-512.png`, `og.png`, and keeps the source at `assets/brand/og.html`). Commit them. The layout (or the HTML shell in TS modes) links them and carries `<title>`, description, canonical, `theme-color`, Open Graph and Twitter tags, per [views](../guides/views.md#meta-favicon-and-social-cards-every-app-with-pages). No Chrome: ship `favicon.svg` only and log the missing PNGs in `docs/decisions.md`.
-- Design: follow any references from the interview. Otherwise use a clean, neutral Tailwind design with a top nav, a centered max-width container, and visible focus states.
-
-## 6. Scripts & ops files
-
-| File | Content |
-|------|---------|
-| `.gitignore` | `/target`, `.env`, `/storage/*`, `!/storage/.keep`, `/static/app.css`, `/bin/tailwindcss`, `/mutants.out*/`, `/lcov.info`, `web/node_modules`, `web/dist` |
-| `.dockerignore` | `target/`, `storage/`, `.env`, `.git/`, `bin/tailwindcss`, `web/node_modules/`, `web/dist/` |
-| `storage/.keep` | empty, so the directory exists in git |
-| `.env.example` | Every `Config` var, with dev defaults ([config](../guides/config.md#envexample)) |
-| `bin/setup-tailwind` | htmx mode or islands. Pinned `TAILWIND_VERSION`, downloads and verifies `bin/tailwindcss` ([frontend-htmx](../guides/frontend-htmx.md#setup-done-by-generatorsnewmd)) |
-| `bin/setup` | `set -euo pipefail`. In order: <ul><li>check tools (install nextest/watch if missing)</li><li>copy `.env.example` to `.env` if missing</li><li>`mkdir -p storage`</li><li>`bin/setup-tailwind && bin/tailwindcss -i assets/app.css -o static/app.css --minify` (htmx), or `pnpm --dir web install` (TS modes)</li><li>print `Compiling (the first build takes several minutes)…`: a cold build of this stack takes about 10 minutes</li><li>`cargo run -- db setup`</li></ul> |
-| `bin/dev` | **HTTPS + HTTP/2 only with a locally trusted certificate**: unless `APP_TLS=off`, run `bin/dev-cert` on every start; exit 0 → export `APP_TLS_CERT`/`APP_TLS_KEY`; otherwise serve plain HTTP/1.1 and print why (login works, ~6-tab limit, how to install mkcert). With `DEV_CERT_SELF_SIGNED=1` also set `APP_DEV_HTTP_PORT` (default `PORT+1`) and tell the user to open that http URL. Then `cargo run -q -- db migrate`, `cargo watch -q -w src -w templates -w migration -x 'run -q -- db migrate' -x 'run -- serve'`, and `bin/tailwindcss … --watch=always --minify` (htmx; islands add `pnpm --dir web exec vite build --watch --mode development`, never the Vite dev server: [why](../guides/frontend-htmx.md#islands)) or Vite (`inertia`/`spa`; `spa` serves the Rust app over plain http behind Vite's proxy), as background jobs. It writes `storage/pids/dev-<port>.pid`, refuses to start when that PID is alive or the port is taken, and on exit stops only its own process tree and removes the file (never `kill 0`). Prints the exact URL with its scheme, and `✓ ready: <url>` once the port accepts connections. Copy it from [dev-tools](../guides/dev-tools.md#the-bindev-script) |
-| `bin/dev-cert` | Trusted or nothing: `mkcert` with its CA installed (refuses with "run `mkcert -install`" when mkcert warns the CA isn't in the trust store), exit 0; no mkcert: refuses, says how to install it, exit 3; `DEV_CERT_SELF_SIGNED=1`: an openssl self-signed certificate (SAN `localhost`, `127.0.0.1`, `::1`) for scripts. Writes `storage/dev-certs/`. Copy it from [realtime](../guides/realtime.md#many-tabs-stall-http11-vs-http2) ([why](../guides/dev-tools.md#https-in-development)) |
-| `bin/docker-entrypoint` | `#!/bin/sh`, `set -e`, `app db migrate` unless `SKIP_MIGRATIONS=true`, then `exec "$@"` ([deployment](../guides/deployment.md)) |
-| `compose.yaml` | **The whole app, production-shaped**: `docker compose up --build` runs the `app` service (built from the `Dockerfile`, `APP_ENV=production`, healthcheck `app health`) against a `db` service (Postgres, the production major, healthcheck `pg_isready`, a named volume, published on `127.0.0.1:${DB_PORT:-5432}` so `TEST_DATABASE_URL` works from the host). Profiles: `worker` (a separate `app worker` container; run with `APP_INLINE_WORKER=false`) and `mail` (Mailpit; `SMTP_URL=smtp://mailpit:1025`). Ports overridable (`APP_PORT`, `DB_PORT`, `MAILPIT_PORT`). The full file is in [deployment](../guides/deployment.md#docker-compose-the-whole-app-locally). `bin/dev` stays the fast native loop |
-| `Dockerfile` | Per [deployment](../guides/deployment.md#dockerfile-shape) (trixie images). Delete the `web` stage in plain htmx and `api` modes, and the Tailwind line in `api` mode |
-| Deploy config | Only for the chosen `DEPLOY_TARGET`. Skip it if "decide later" |
-| `.github/workflows/ci.yml` | Per [testing](../guides/testing.md#ci), with `sh .offrails/tools/offrails-check` as the SQLite job's first check: SQLite, Postgres, frontend (TS modes), **security** (cargo-deny + gitleaks over the full history) and Docker jobs. The Docker job boots the production image and runs the **ZAP baseline** against it ([security](../guides/security.md#automated-enforcement)) |
-| `deny.toml` | cargo-deny: advisories (`yanked = "deny"`, `unmaintained = "all"`), permissive licenses, `[licenses.private] ignore = true`, the [stack](../stack.md) "Banned" list as `[bans] deny` (plus `openssl`, `openssl-sys`, `native-tls`), crates.io-only sources. Set `publish = false` in `Cargo.toml` and `migration/Cargo.toml`. The full file is in [security](../guides/security.md#automated-enforcement) |
-| `.gitleaks.toml` | `[extend] useDefault = true` and an allowlist of build/runtime paths only (`target/`, `storage/`, `node_modules/`, `web/dist/`, `static/vendor/`) |
-| `.zap/rules.tsv` | The triaged ZAP baseline rules (htmx `eval` 10110, anti-CSRF tokens 10202, COEP 90004 → `IGNORE`; 10049/10111/10112 → `INFO`), each with its reason. Plus `.zap/.gitignore` for scan output (`/zap-report.*`, `/zap.yaml`, `/gen.conf`) |
-| `.github/dependabot.yml` | Weekly, grouped updates for `cargo` and `github-actions` (plus `npm` with `directory: /web` in TS modes) |
-
-`chmod +x bin/*`.
-
-## 7. Tests
-
-The layout is one binary, `tests/app/` ([testing](../guides/testing.md)):
-
-| File | Content |
-|------|---------|
-| `main.rs` | `mod errors_test; mod factories; mod headers_test; mod kernel_jobs_test; mod kernel_test; mod kernel_web_test; mod security_test; mod smoke_test; mod theme_test;` (no `theme_test` in `api` mode) plus `#[allow(dead_code)] mod support;`. Not every test file uses every helper, and clippy `-D warnings` would fail on that |
-| `support.rs` | `TestApp` and `TestResponse`, including the query counter, per-test Postgres databases, the job helpers (`drain_jobs`/`drain_queue`/`drain_all_jobs` → `Drained`, `enqueued`, `assert_enqueued`, `refute_enqueued`, `perform_job`) and `wait_until` ([jobs](../guides/jobs.md#testing-obantesting-equivalents)) |
-| `factories.rs` | Empty for now. Each model adds one |
-| `smoke_test.rs` | See the list below |
-| `security_test.rs` | The access matrix over `ROUTES` ([test-standards §3](../guides/test-standards.md#3-security-tests-every-app)) |
-| `headers_test.rs` | **The header matrix** ([security](../guides/security.md#the-header-matrix)): one request per response class in development and production (https `APP_URL`), each asserting the full header set; production over plain http sends no TLS-only directives. `TestApp::request_head` reads status and headers without the body, for SSE. Grows with the app: authenticated page, SSE and WebSocket rows arrive with auth and channels |
-| `kernel_test.rs` | Cache fetch/hit, delete, `delete_prefix` (a `_` in a key is literal), expiry with `Duration::ZERO`; the rate limiter's 11th hit → `TooManyRequests`, development allows 1000 per window while test and production keep 10, and hammering a locked-out key doesn't extend the window ([security](../guides/security.md#rate-limiting-kernelrate_limitrs)); `Flash::notice` sets the cookie attributes; `From<DbErr>` maps `ConnectionAcquire(ConnAcquireErr::Timeout)` to `Unavailable`; a 503 from the timeout layer carries `Retry-After` |
-| `theme_test.rs` | The theme and stale-CSS guards ([test-standards §11](../guides/test-standards.md#11-theme-and-css-guards)) |
-| `kernel_web_test.rs` (additions) | `/dev/introspect.json` answers in development with every key and no secrets; `/dev/introspect.json` and `/dev/reload` are 404 with a production **and** a test `Config`, and pages there don't load `dev-reload.js` ([dev-tools](../guides/dev-tools.md#introspection)) |
-| `src/kernel/tls.rs` (unit tests) | `redirect_target` keeps host and path and refuses `//host` paths and odd hosts; the acceptor redirects a plain request with 307 and passes a `0x16` first byte through |
-| `errors_test.rs` | Every `AppError` variant × flavor, through `error::shape_errors` on a small test router: HTML pages never leak internals; dev 500 shows the chain; `Unauthorized` → 303 or `HX-Redirect`; `/api` JSON shapes (insta); `ClientIp` honors `X-Forwarded-For` only with `APP_TRUSTED_PROXY`; tasks run by name. Never run `test_db_cleanup` from a Postgres test |
-
-`smoke_test.rs` covers:
-
-- the home page returns 200 and renders the layout;
-- `/up` returns 200;
-- an unknown path returns the 404 page, and an unknown `/api/...` path returns `{"error":"not_found"}` (an insta inline snapshot);
-- security headers are present (CSP, nosniff, frame options, referrer policy, `x-request-id`). The full matrix is `headers_test.rs`;
-- the SQLite connection has `foreign_keys = 1`;
-- an email sent with `deliver_later` is delivered only after `drain_jobs()` (memory mailer);
-- with development config (`Mailer::Local`), an email sent with `deliver_later` and drained lands in `mailbox_messages`, **`GET /dev/mailbox` shows it, and `GET /dev/mailbox/{id}/html` renders its HTML** with the iframe CSP;
-- a flash cookie is rendered once, then cleared. A fresh app has nothing that sets a flash yet, so the test sets the `_flash` cookie itself: base64url (no padding) of `{"kind":"notice","message":"Saved"}`;
-- the home page's query count is stable (`assert_query_count_stable`);
-- **meta and brand assets** (modes with pages): the home page has `<title>`, `meta name="description"`, `link rel="canonical"` (absolute, from `APP_URL`), `og:title`/`og:description`/`og:image` (absolute URL), `twitter:card`, `link rel="icon"` and `apple-touch-icon`; `/favicon.ico`, `/static/og.png`, `/robots.txt` and `/sitemap.xml` return 200.
-
-`api` mode replaces the page checks: `GET /` is the JSON index, `/robots.txt` disallows everything, any unknown path is `{"error":"not_found"}`, there is no flash test, and `errors_test.rs` checks HTML error pages only under `/dev` (everything else is JSON). Its API suites come from [api](../guides/api.md#testing) and [graphql](../guides/graphql.md#required-tests-graphql-archetype).
-
-`security_test.rs` covers:
-
-- every `ROUTES` entry is routable in development, parameterized paths included (`{id}` → `1`). Streaming (SSE) routes are requested with `request_head`, never `get`, or the sweep waits forever on a body that never ends ([test-standards §3](../guides/test-standards.md#3-security-tests-every-app)). A handler's own 404 (no such record) is fine; the router fallback marks its response with `x-route-fallback: 1` ([errors-and-logging](../guides/errors-and-logging.md)), so "not routed" is exact;
-- non-public routes never return 2xx anonymously (production config with an admin password);
-- `Dev` routes return 404 with production config;
-- `/admin/jobs` returns 404 in production with no access method, accepts the admin password, and rejects a wrong one;
-- a cross-site POST and a foreign-`Origin` POST both get 403;
-- development refuses a rebound `Host` (pages, `/dev` and a same-origin POST get the 403 page, with the header matrix and the host escaped), answers `localhost`, `127.0.0.1`, `[::1]`, `APP_URL`'s host and `APP_ALLOWED_HOSTS`, and production and test answer any host: `development_refuses_a_rebound_host_name`, `development_answers_local_and_configured_hosts`, `production_and_test_answer_any_host` ([security](../guides/security.md#development-is-this-machine-only)). `config.rs` has `development_binds_loopback_unless_told_otherwise` and `an_unset_app_env_warns_at_boot`, `kernel/hosts.rs` its two unit tests.
-
-Also, generated with the kernel and never skipped:
-
-- `tests/app/kernel_jobs_test.rs`: the full list in [jobs](../guides/jobs.md#testing-obantesting-equivalents) (claims race, outcomes, retries, uniqueness, `insert_all`, Lifeline, Pruner, Cron once across nodes, the runtime: run + shutdown, cancel-while-executing aborts, pause/resume, shutdown leaves work to Lifeline; the admin API).
-- `tests/app/guard_test.rs` and `tests/app/tenancy_test.rs` when `TENANCY` isn't `none`: generated in step 8 by [`authentication.md`](authentication.md) from [test-standards §4](../guides/test-standards.md#4-tenant-isolation-suite-every-app-with-accounts), registered in `main.rs`.
-- `tests/app/kernel_web_test.rs`: the dashboard pages, fragments, actions, bulk confirmation, flashes and gone-job redirect ([jobs-dashboard](../guides/jobs-dashboard.md#mounting-and-access)); the mailbox (tabs, iframe CSP, `/message.eml`, attachments, Cc/Bcc, new-mail banner, previews, JSON, mailer selection, `deliver_later_until`) ([mailers](../guides/mailers.md#testing)); `/dev` pages; `no-store` everywhere; app links into kernel pages carry `hx-boost="false"`; the pending-migrations page and `/up` 503 ([dev-tools](../guides/dev-tools.md#pending-migrations)); and the axum fact that `/{id}.eml` panics.
-
-## 8. Accounts
-
-If `ACCOUNTS` isn't "none", run [`authentication.md`](authentication.md) now.
-
-## 9. Verify & report
-
-1. `bin/setup` (creates `.env`, builds the CSS, migrates and seeds the dev DB).
+1. `bin/setup` (creates `.env`, builds the CSS, migrates and seeds the dev DB). Windows: [template → Windows](../template/README.md#windows).
 2. `sh .offrails/tools/offrails-check` exits 0, then the [Definition of Done](../workflow.md#definition-of-done), on SQLite **and** Postgres. Without a local Postgres, run `docker run -d --name pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:<major>`, then `TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres cargo nextest run`.
 3. Prove the migrations are reversible on both databases: `cargo run -- db rollback --steps <n>` then `cargo run -- db migrate`. For Postgres, set `DATABASE_URL` to a scratch database.
 4. Run the app: `cargo run -- serve`, then:
    - `curl -i localhost:3000/up` returns 200;
    - `/` shows digested `/static/...?v=` URLs, and fetching one returns `cache-control: …immutable`;
-   - `/dev` returns 200, and `curl -X POST -H 'Sec-Fetch-Site: same-origin' localhost:3000/dev/mailbox/test` then `curl -s localhost:3000/dev/mailbox/latest.json` shows the test email;
+   - `/dev` returns 200; with the `dev-mailbox` part, `curl -X POST -H 'Sec-Fetch-Site: same-origin' localhost:3000/dev/mailbox/test` then `curl -s localhost:3000/dev/mailbox/latest.json` shows the test email;
    - `curl -X POST -H 'Origin: https://evil.example' localhost:3000/` returns 403;
    - `curl -s -o /dev/null -w '%{http_code}' -H 'Host: evil.test' localhost:3000/dev` prints 403, and `lsof -nP -iTCP:3000 -sTCP:LISTEN` shows `127.0.0.1:3000` (development is this machine only);
    - the [fresh-database smoke](../guides/dev-tools.md#pending-migrations): an empty database shows the pending-migrations page (503), never a boot crash.
 
-   In `inertia`/`spa`, `bin/dev` runs Vite next to the server. Open `https://localhost:3000` (not :5173) and check that the browser console is clean, which means no CORS or CSP errors. Then `pnpm --dir web build` and `APP_ENV=production … serve`: the shell links `/assets/…` from the manifest, and `/assets` responses are `immutable`.
-5. Optional, when Node ≥ 22.12 and Chrome are installed: `BASE=http://localhost:3000 bash .offrails/tools/browser-smoke/run.sh` (styled navigation into the kernel pages, Back/Forward, no CSP violations; [dev-tools](../guides/dev-tools.md#browser-smoke)).
-6. If Docker is available: `docker compose up --build` from a clean checkout brings `app` and `db` to `healthy` (migrations run on boot), `curl localhost:3000/up` answers `ok`, then `docker compose down -v`. Port 3000 or 5432 taken: `APP_PORT=… DB_PORT=… docker compose up --build`.
-7. Log the generation in `docs/decisions.md`: `YYYY-MM-DD: app generated (mode=…, prod db=…, deploy=…)`.
-8. `git add -A && git commit -m "new: <app_name> skeleton"`. This is the one commit you make unprompted, because it's the baseline.
-9. Tell the human, in product terms:
-   - what exists;
-   - how to run it (`bin/setup && bin/dev`);
-   - that http://localhost:3000/dev has the mailbox and jobs dashboard;
-   - what you'll build next from the plan.
+   In `inertia`/`spa`, `bin/dev` runs Vite next to the server. Open `https://localhost:3000` (not :5173) and check that the browser console is clean. Then `pnpm --dir web build` and `APP_ENV=production … serve`: the shell links `/assets/…` from the manifest, and `/assets` responses are `immutable`.
+5. Optional, when Node ≥ 22.12 and Chrome are installed: `BASE=http://localhost:3000 bash .offrails/tools/browser-smoke/run.sh` ([dev-tools](../guides/dev-tools.md#browser-smoke)).
+6. If Docker is available: `docker compose up --build` from a clean checkout brings `app` and `db` to `healthy`, `curl localhost:3000/up` answers `ok`, then `docker compose down -v`.
+7. `git add -A && git commit -m "new: <app_name> skeleton"`. This is the one commit you make unprompted, because it's the baseline.
+8. Tell the human, in product terms: what exists, which parts are in (and that more can be added any time), how to run it (`bin/setup && bin/dev`), that http://localhost:3000/dev has the dev tools (and the mailbox, jobs dashboard and dev dashboard when those parts are in), and what you'll build next from the plan.
+
+## What the template contains
+
+Read this when you change a kernel file, port a fix from a newer template, or convert to another mode. Each item points at the guide that is its spec. The files themselves are in `.offrails/template/app/` (and in your app).
+
+### Workspace & dependencies
+
+- `Cargo.toml`: the app plus the `migration` crate as a workspace, `publish = false`, `[profile.dev.package."*"] opt-level = 1`, `[profile.dev] debug = "line-tables-only"` + `split-debuginfo = "unpacked"` (faster rebuilds; `CARGO_PROFILE_DEV_DEBUG=true` for a debugging session). `Cargo.lock` is the tested resolution; `cargo update` is an ordinary change.
+- `migration/`: `sea-orm-migration` with `default-features = false` and `["runtime-tokio-rustls", "sqlx-sqlite", "sqlx-postgres"]` (no CLI runner: the app binary has `db migrate|rollback|status`), no `rust-version` line (the MSRV-aware resolver would downgrade dependencies), and the migrations list as a **multi-line** `vec![` … `]`, the only shape `sea-orm-cli migrate generate` registers into. One migration: `create_cache_entries` ([caching](../guides/caching.md)). Parts bring their own tables.
+- Crates: the htmx set from [stack](../stack.md#blessed-crates), added with `cargo add`. More arrive with the feature or part that needs them. For other modes and APIs:
+
+  ```sh
+  # TS modes (inertia / spa / ISLANDS: yes):
+  cargo add ts-rs --features chrono-impl,serde-json-impl
+  # API: rest | both (guides/api.md), and CORS for any API:
+  cargo add utoipa --features axum_extras,chrono
+  cargo add tower-http --features cors
+  # API: graphql | both (guides/graphql.md):
+  cargo add async-graphql --features chrono,dataloader
+  cargo add async-graphql-axum
+  ```
+
+  `cargo add` accepts several crates in one call only when no `--features` flag is given. In zsh, don't loop over a quoted list (it doesn't word-split); one `cargo add` per line.
+
+### Rust skeleton
+
+Module order (each compiles against the ones before it): config → kernel → error/models → state → views → controllers → routes → tasks → main.
+
+1. `src/config.rs`: `Config`, `AppEnv`, `LogFormat`, `bind_address` (`APP_BIND`: 127.0.0.1 in development), `parse_allowed_hosts`, `boot_warnings`, `Config::test()`, `resolve_app_url`, and the lean runtime settings `APP_WORKER_THREADS` (2) and `APP_BLOCKING_THREADS` (16) ([config](../guides/config.md)).
+2. `src/kernel/db.rs`: `connect` (SQLite: WAL, foreign keys, busy timeout, a 1 MiB page cache, a pool of 4 by default; Postgres: a pool of 10), `begin`, `ping`, `drop_idle_test_databases` ([database](../guides/database.md#kerneldbrs-spec)).
+3. `src/error.rs`: `AppError` (with `Unavailable` → 503 + `Retry-After`), `ResponseFlavor`, `shape_errors`, `retry_after` ([errors-and-logging](../guides/errors-and-logging.md#response-mapping)).
+4. `src/models/mod.rs`: `Errors`, `Page` ([models](../guides/models.md)).
+5. The kernel: `security.rs` (the header matrix and CSP, [security](../guides/security.md#the-header-matrix)), `hosts.rs` (development-only Host authorization, [security](../guides/security.md#development-is-this-machine-only)), `flash.rs`, `cookie.rs`, `rate_limit.rs`, `assets.rs` + `css.rs` ([views](../guides/views.md#dark-mode)), `tls.rs` (`HttpToHttps`, [deployment](../guides/deployment.md#direct-tls-optional)), `introspect.rs` ([dev-tools](../guides/dev-tools.md#introspection)), `cache.rs`, `redact.rs` ([errors-and-logging](../guides/errors-and-logging.md#redacting-stored-error-text)), `theme.rs` (the System/Light/Dark switch), `ui.rs` (kernel chrome: `Chrome`, `Chrome::stylesheet`/`script`, `KernelFlash`, `no_store()`). CSRF is tower-http's `CsrfLayer`, configured in `routes.rs` ([security](../guides/security.md#csrf)). In TS modes add `inertia.rs` and its pieces ([frontend-inertia](../guides/frontend-inertia.md#the-adapters-rust-surface)).
+   - **Parts, not base:** the mailer and dev mailbox (`mailer`, `dev-mailbox`), the job queue and `/admin/jobs` (`jobs`, `jobs-dashboard`), sessions and accounts (`auth-*`), channels and pubsub (`realtime`), `/dev/dashboard` (`dev-dashboard`). Their guides ([mailers](../guides/mailers.md), [jobs](../guides/jobs.md), [jobs-dashboard](../guides/jobs-dashboard.md), [auth](../guides/auth.md), [channels](../guides/channels.md), [dev-tools](../guides/dev-tools.md)) remain their spec. `storage` arrives with the first attachment field ([storage](../guides/storage.md)).
+6. `src/state.rs`: `AppState { config, db, cache, assets, rate_limit }` plus what parts add, built by `AppState::new(config, db)`; tests build it the same way.
+7. `src/views/mod.rs`: `render`, `Ctx` with the page meta (`title`, `description`, `path`, `app_url`; [views](../guides/views.md#meta-favicon-and-social-cards-every-app-with-pages)), `views/helpers.rs`, `views/home.rs`, `views/errors.rs`.
+8. `src/controllers/`: `application.rs` (the `Ctx` extractor, `HxRequest`, `AdminAccess`), `home.rs`, `health.rs` (`/up`, 503 while migrations are pending), `meta.rs` (`/robots.txt`, `/sitemap.xml`), `theme.rs` (`POST /theme`), `errors.rs` (the fallback), `dev.rs` (`/dev`, routes, system, introspection, reload) and `migrations.rs` (the pending-migrations guard, [dev-tools](../guides/dev-tools.md#pending-migrations)). Actions carry `#[tracing::instrument(skip_all)]` ([errors-and-logging](../guides/errors-and-logging.md#spans)).
+9. `src/routes.rs` ([routing](../guides/routing.md#middleware)): the routes, `/static` with cache headers, the fallback, the middleware stack (`kernel::hosts::middleware` right inside the security middleware; `TimeoutLayer::with_status_code(StatusCode::SERVICE_UNAVAILABLE, 30s)`), `paths`, and `ROUTES` with an `Access` level for every route; `dev::router()` merged only in development, then the `migrations::guard` layer. Each kernel router ends with `.layer(kernel::ui::no_store())`.
+10. `src/tasks/`: `seed.rs` (idempotent per record, in one transaction: [cli](../cli.md#seeds)) and `test_db_cleanup.rs`.
+11. `src/main.rs`: the CLI from [`cli.md`](../cli.md); a runtime built from `Config` (worker and blocking thread caps); `serve` on `config.bind` with `into_make_service_with_connect_info::<SocketAddr>()`, graceful shutdown on Ctrl-C or SIGTERM (Ctrl-C only on Windows), plain HTTP or direct TLS (h2 + http/1.1 via ALPN, [deployment](../guides/deployment.md#direct-tls-optional)); `app health` for the container healthcheck.
+
+### Anchors
+
+Shared files carry one-line comments where a part inserts its wiring: `// samples: <anchor>` in Rust, `{# samples: <anchor> #}` in templates, `# samples: <anchor>` in `.env.example` and `compose.yaml`. `cargo offrails add-part` (and the samples repo's `tools/install.sh`) inserts above them. Each is **on a line of its own**; keep them, they cost nothing ([why](../guides/samples.md#anchors)).
+
+| File | Anchors (where) |
+|------|-----------------|
+| `src/lib.rs` | `lib mods` (after the `pub mod` lines) |
+| `src/kernel/mod.rs` | `kernel mods` |
+| `src/kernel/ui.rs` | `kernel tabs` (in the kernel header's tab list), `hidden tabs` (a list of tab keys a part replaces) |
+| `src/kernel/introspect.rs` | `introspect sections` (in `snapshot`, before it returns: `out["x"] = …;`) |
+| `src/kernel/redact.rs` | `token routes` (a route pattern whose `{token}` segment is a secret) |
+| `src/kernel/security.rs` | `dev csp` (extra CSP directives in development only) |
+| `src/config.rs` | `config fields` (end of `Config`), `config debug` (end of the `Debug` chain), `config parse` (in `from_env`, before the missing/invalid check), `config init` (end of the `Config { … }` literal in `from_env`), `config test` (end of `Config::test()`'s literal), `config sections` (end of the file, outside any `impl`) |
+| `src/state.rs` | `state fields`, `state build` (in `AppState::new`, before the struct literal), `state init` (end of that literal), `state fns` (end of `impl AppState`) |
+| `src/routes.rs` | `routes` (after the last app `.route`), `dev routers` (inside the development-only merge), `outer layers` (just inside `SetRequestIdLayer`), `paths` (end of `mod paths`), `routes table` (end of `ROUTES`) |
+| `src/controllers/mod.rs`, `controllers/application.rs` | `controller mods`; `ctx init` (in the `Ctx` extractor's literal), `extractors` (end of file) |
+| `src/controllers/dev.rs` | `dev routes` (in `router()`), `dev tiles` (end of the `/dev` tile list), `dev try-it` (end of the Try-it buttons), `system facts` (end of `/dev/system`'s facts) |
+| `src/controllers/meta.rs` | `sitemap paths` (end of the public paths `/sitemap.xml` lists) |
+| `src/views/mod.rs`, `src/models/mod.rs`, `src/tasks/mod.rs` | `view mods`, `ctx fields` (end of `Ctx`); `model mods`, `model aliases`; `task mods`, `tasks` (in the task `match`) |
+| `src/main.rs` | `cli commands` (end of the `Command` enum), `cli dispatch` (in the `match`), `serve start` (in `serve`, after state is built), `serve stop` (in the shutdown future), `tracing layers` (the layer list in `init_tracing`) |
+| `migration/src/lib.rs` | `migration mods`, `migrations` (end of the `vec![…]`, after the last `Box::new`) |
+| `templates/layouts/application.html`, `templates/shared/_nav.html` | `dev footer links`; `nav links` |
+| `templates/kernel/layout.html` | `kernel head` (last line inside `<head>`), `kernel main` (first line inside `<main>`, before the content block) |
+| `tests/app/main.rs`, `support.rs`, `factories.rs` | `test mods`; `test support` (end of `impl TestApp`); `factories` |
+| `tests/app/security_test.rs`, `kernel_web_test.rs`, `theme_switch_test.rs` | `router sources`; `no-store paths`; `kernel pages` |
+| `.env.example`, `compose.yaml` | `env` (end of file); `compose env` (end of the app's `environment`) |
+
+After `cargo fmt --all`, none may trail code: `grep -rnE '[^[:space:]].*(//|\{#|#) samples: ' src templates migration tests | grep -vE ':[[:space:]]*(//|\{#|#) samples: '` prints nothing.
+
+### Frontend
+
+- Templates: every class in both color schemes ([views](../guides/views.md#dark-mode); `tests/app/theme_test.rs` enforces it); `templates/layouts/application.html` (the `htmx-config` meta from [frontend-htmx](../guides/frontend-htmx.md#required-config-swap-422-responses), `data-theme` from the theme cookie, `dev-reload.js` in development), `templates/shared/{_flash,_errors,_nav}.html`, `templates/home/index.html`, the standalone error pages `templates/errors/{404,403,429,500,503}.html` and the `_invalid.html` fragment, and `templates/kernel/` (layout, `/dev` pages).
+- Assets: `assets/app.css` (Tailwind 4, the `dark` variant that follows the theme switch, the component layer), `static/app.js`, `static/dev-reload.js` ([dev-tools](../guides/dev-tools.md#hot-reload)), `static/kernel/admin.{css,js}`, htmx and its sse extension in `static/vendor/` ([frontend-htmx](../guides/frontend-htmx.md#setup-done-by-generatorsnewmd)), and the brand set (`favicon.svg`, `favicon.ico`, `apple-touch-icon.png`, `icon-512.png`, `og.png`, source `assets/brand/og.html`).
+- Links into kernel pages carry `hx-boost="false"` ([dev-tools](../guides/dev-tools.md#rules)).
+
+### Scripts & ops files
+
+| File | Content |
+|------|---------|
+| `.gitignore`, `.dockerignore`, `storage/.keep` | Build output, `.env`, `storage/*`, `static/app.css`, `bin/tailwindcss`, `web/node_modules`, `web/dist` |
+| `.gitattributes` | `* text=auto eol=lf`: LF everywhere, so a Windows checkout keeps rustfmt, anchors and tests green |
+| `.cargo/config.toml` | The `cargo offrails` alias (the vendored generators) |
+| `.env.example` | Every `Config` var with dev defaults ([config](../guides/config.md#envexample)) |
+| `bin/setup-tailwind`, `bin/setup` | Pinned Tailwind, verified download; first run: tools, `.env`, CSS, `db setup` |
+| `bin/dev` | HTTPS + HTTP/2 only with a locally trusted certificate (`bin/dev-cert`), else plain HTTP; `cargo watch` server + Tailwind watcher; one PID file per port; stops only its own tree ([dev-tools](../guides/dev-tools.md#the-bindev-script)) |
+| `bin/dev-cert`, `bin/docker-entrypoint` | mkcert or nothing ([why](../guides/dev-tools.md#https-in-development)); migrate unless `SKIP_MIGRATIONS=true`, then `exec "$@"` |
+| `compose.yaml`, `Dockerfile` | The whole app, production-shaped, on Postgres; profiles `worker` and `mail` ([deployment](../guides/deployment.md#docker-compose-the-whole-app-locally), [Dockerfile](../guides/deployment.md#dockerfile-shape)) |
+| `.github/workflows/ci.yml` | SQLite (with `offrails-check` first), Postgres, security (cargo-deny + gitleaks) and Docker (boots the production image, ZAP baseline) jobs ([testing](../guides/testing.md#ci)) |
+| `deny.toml`, `.gitleaks.toml`, `.zap/rules.tsv`, `.github/dependabot.yml` | [security](../guides/security.md#automated-enforcement) |
+
+Deploy config only for the chosen `DEPLOY_TARGET` ([deployment](../guides/deployment.md)); none for "decide later".
+
+### Tests
+
+One binary, `tests/app/` ([testing](../guides/testing.md)): `main.rs` (`#[allow(dead_code)] mod support;`), `support.rs` (`TestApp`, `TestResponse`, the query counter, per-test Postgres databases), `factories.rs` (empty; each model adds one), and the kernel suites:
+
+- `smoke_test.rs`: home page and layout, `/up`, the 404 page and `/api` JSON 404, security headers, `foreign_keys = 1`, a flash rendered once, a stable query count, meta and brand assets, `/robots.txt` and `/sitemap.xml`;
+- `headers_test.rs`: the header matrix per response class, development and production ([security](../guides/security.md#the-header-matrix));
+- `security_test.rs`: every `ROUTES` entry is routable, non-public routes are never 2xx anonymously, `Dev` routes 404 in production, cross-site and foreign-`Origin` POSTs get 403, development refuses a rebound `Host` ([test-standards §3](../guides/test-standards.md#3-security-tests-every-app));
+- `errors_test.rs`, `logs_test.rs` (tokens never reach logs), `kernel_test.rs` (cache, rate limiter, flash cookie, `DbErr` mapping, `Retry-After`), `kernel_web_test.rs` (`/dev`, introspection, `no-store`, the pending-migrations page and `/up` 503), `theme_test.rs` and `theme_switch_test.rs` ([test-standards §11](../guides/test-standards.md#11-theme-and-css-guards)); unit tests in `kernel/tls.rs`, `kernel/hosts.rs`, `config.rs`.
+
+Each part brings its own suites (`tests/app/<part>_test.rs`). `tests/app/guard_test.rs` and `tenancy_test.rs` arrive with [`authentication.md`](authentication.md) when `TENANCY` isn't `none`.
+
+### Other modes
+
+- **`api`:** no app templates, no `assets/`, no Tailwind (`bin/setup-tailwind` and the Dockerfile's Tailwind line go), no `web/`. Keep the kernel's `templates/kernel/`, the standalone `templates/errors/` pages, `static/kernel/` and the vendored htmx they use. `views/` holds JSON bodies (`#[derive(Serialize, ToSchema)]`, a `PageInfo` envelope); `controllers/root.rs` answers `GET /` with a JSON index and `/robots.txt` with `Disallow: /`; errors are JSON everywhere except `/dev` and `/admin`; `controllers/api/mod.rs` (`ApiJson`, `ApiDoc`, `ErrorBody`, `/dev/api-docs`) for `API: rest | both` ([api](../guides/api.md)). `smoke_test.rs` checks the JSON index, robots and JSON 404s instead of pages; no `theme_test.rs`.
+- **`inertia`:** `pnpm create vite web --template react-ts`, then the "Vite wiring" section of [frontend-inertia](../guides/frontend-inertia.md#vite-wiring-verified-with-vite-8-vitejsplugin-react-6-tailwind-4) exactly (including `.cargo/config.toml`'s `TS_RS_EXPORT_DIR` and `TS_RS_LARGE_INT`, `test-setup.ts`, and `app.css` with the progress-bar CSS); `SharedProps` + `type Inertia`, `home::index` rendering `"home/Index"`; the HTML shell layout; `cargo test --lib export_bindings` before `pnpm --dir web typecheck`. Svelte: [frontend-svelte#inertia-mode](../guides/frontend-svelte.md#inertia-mode).
+- **`spa`:** the same Vite scaffold per [frontend-react](../guides/frontend-react.md); Svelte: SvelteKit SPA per [frontend-svelte#spa-mode-sveltekit](../guides/frontend-svelte.md#spa-mode-sveltekit).
+- **`ISLANDS: yes`:** `web/` in islands configuration ([frontend-htmx#islands](../guides/frontend-htmx.md#islands)).

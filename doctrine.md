@@ -48,9 +48,11 @@ Rails hid boilerplate behind metaprogramming because typing was expensive. Typin
 - No macros beyond what blessed crates provide.
 - Repetition across resources is fine, and greppable. Don't abstract until a third copy *and* a spec reason exist.
 
-## 7. Markdown is the framework; code is its rendering
+## 7. Markdown is the spec; the template is its rendering
 
-The framework ships specs, not libraries. Where Rails would ship a gem (job queue, sessions, Inertia adapter), Off Rails ships a precise spec and the agent generates the code into `src/kernel/`. Snippets in these docs are reference shapes, not copy-paste libraries. Adapt them to the resolved crate versions.
+The guides are the spec: what each part must do, and why. Where Rails would ship a gem (sessions, a job queue, a mailer), Off Rails ships that spec **and its rendering as code you copy**: [`template/app/`](template/README.md), a complete app proven on SQLite and Postgres, and the optional parts (the [samples](guides/samples.md)), added with one command. There is no library and no runtime link back: once copied, the code is the app's, read, adapted and owned by its agent like code it wrote. Humans still write none of it (§0). Snippets in the guides are teaching excerpts; where one disagrees with the template file, the tested template wins, and the guide is the bug to fix.
+
+(Until 0.7.0 the framework shipped Markdown only and agents retyped the skeleton from it, token by token. That cost 50+ minutes per app and drifted. 2026-10-17: the skeleton ships as files.)
 
 ## 8. Sharp knives, labeled
 

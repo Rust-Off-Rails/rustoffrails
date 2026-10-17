@@ -22,6 +22,15 @@ app introspect                  # development only: the app's state as JSON (rou
 app task tokens create <email> [name] | list <email> | revoke <id>   # API tokens (apps with an API; guides/api.md)
 ```
 
+App jobs, workers and `app jobs …` exist once the `jobs` part is in; API tokens once accounts and an API are.
+
+**The framework's generators**, from the app root on any OS (the alias in `.cargo/config.toml`; [template](template/README.md#using-it)):
+
+```
+cargo offrails list-parts                     # parts: installed or available, what each needs and adds
+cargo offrails add-part <name>… [--dry-run]   # add parts (dependencies first); re-running is a no-op
+```
+
 Verified (reference app): `Migrator::up(&db, None)`, `Migrator::down(&db, Some(steps))`, `Migrator::fresh(&db)` and `Migrator::get_migration_with_status(&db)` from `sea-orm-migration` 2.0.4. `main` parses the CLI, loads `Config::from_env()`, initializes tracing, then connects. `routes` and `db console` run before connecting.
 
 `serve` binds `$APP_BIND:$PORT`: **`127.0.0.1` in development** (its `/dev` tools have no login), `0.0.0.0` in production (the container's interface, behind the platform's proxy); a dev container sets `APP_BIND=0.0.0.0` ([security](guides/security.md#development-is-this-machine-only)). It serves `into_make_service_with_connect_info::<SocketAddr>()` (rate limiting needs the client IP), and shuts down gracefully on Ctrl-C/SIGTERM. It also runs the worker in-process when `APP_INLINE_WORKER=true`, like `SOLID_QUEUE_IN_PUMA`. That's the default in development, and in production on SQLite, so a single process does everything.

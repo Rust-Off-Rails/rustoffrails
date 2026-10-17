@@ -2,6 +2,12 @@
 
 The rules agents need most, on two pages. Read this first; open a full guide only when your task touches its topic ([AGENTS.md](AGENTS.md#load-order) maps topics to guides). When this page and a guide disagree, the guide wins.
 
+## Start from the template ([template](template/README.md))
+
+- **New app:** after the interview, `cargo run -q --manifest-path "$FW/tools/offrails-gen/Cargo.toml" --target-dir <dir>/target/offrails-gen -- new <dir> <crate> "<Name>" --parts <a,b>` ([new](generators/new.md)). Never retype the skeleton.
+- **Parts:** propose the ones the spec implies (dev-dashboard always; mailer+dev-mailbox for email; jobs+jobs-dashboard for slow/scheduled work; auth-core+method for sign-in; realtime for pushed updates), link <https://github.com/Rust-Off-Rails/samples>, the human confirms. Later: `cargo offrails list-parts`, `cargo offrails add-part <name>`. Check for a part before hand-writing kernel code.
+- The copied code is the app's: adapt `// APP:` lines, keep `// SECURITY:`/`// INVARIANT:` lines and their tests.
+
 ## Stack, one crate per job ([stack.md](stack.md))
 
 - **Web:** axum 0.8 on hyper (`/{id}`, never `/:id`) · tower-http (CsrfLayer, trace, compression, timeout, catch-panic) · tokio.
