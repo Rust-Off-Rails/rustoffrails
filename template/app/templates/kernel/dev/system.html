@@ -1,0 +1,28 @@
+{% extends "kernel/layout.html" %}
+{% block content %}
+<h1>System</h1>
+<div class="grid">
+  <section class="panel">
+    <header><h2>Runtime</h2></header>
+    <dl class="kv">
+      {% for (k, v) in facts %}<dt>{{ k }}</dt><dd>{{ v }}</dd>{% endfor %}
+    </dl>
+  </section>
+  <section class="panel">
+    <header><h2>Migrations</h2><span class="muted">{{ applied.len() }} applied &middot; {{ pending.len() }} pending</span></header>
+    {% if !pending.is_empty() %}
+      <div class="notice">
+        <strong>{{ pending.len() }} pending</strong>
+        <ul>{% for name in pending %}<li class="mono">{{ name }}</li>{% endfor %}</ul>
+        <form method="post" action="/dev/migrations">
+          <input type="hidden" name="return_to" value="/dev/system">
+          <button class="btn">Run migrations</button>
+        </form>
+      </div>
+    {% endif %}
+    <ul class="timeline">
+      {% for name in applied %}<li class="mono">{{ name }}</li>{% endfor %}
+    </ul>
+  </section>
+</div>
+{% endblock %}

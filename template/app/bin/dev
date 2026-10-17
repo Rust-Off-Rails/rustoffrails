@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Everything for development in one terminal: server (rebuilt on change) + Tailwind watcher.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+port="${PORT:-3000}"
+
+# One PID file per server: stop exactly this bin/dev with `kill "$(cat storage/pids/dev-$PORT.pid)"`.
+pidfile="storage/pids/dev-$port.pid"
+mkdir -p storage/pids
+if [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+  echo "bin/dev is already running on port $port (PID $(cat "$pidfile")). Stop it: kill \$(cat $pidfile)" >&2
+  exit 1
+fi
+if command -v lsof >/dev/null && lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null; then
+  echo "port $port is taken by another process (lsof -nP -iTCP:$port -sTCP:LISTEN); pick another: PORT=… bin/dev" >&2
+  exit 1
+fi
+echo $$ > "$pidfile"
+# On exit (Ctrl-C, `kill <pid>`, an error) stop our own process tree, leaves first, and nothing else.
+# Never `kill 0`: started from an agent's shell, bin/dev shares that shell's process group, and
+# `kill 0` would kill the caller too.
+children() { ps -A -o pid= -o ppid= | awk -v p="$1" '$2 == p { print $1 }'; }
+stop_tree() { local c; for c in $(children "$1"); do stop_tree "$c"; done; kill "$1" 2>/dev/null || true; }
+cleanup() { trap - EXIT INT TERM; rm -f "$pidfile"; for c in $(children $$); do stop_tree "$c"; done; }
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# HTTPS + HTTP/2 only with a locally trusted certificate (bin/dev-cert: mkcert + `mkcert -install`).
+# Without one, plain HTTP/1.1: login works, live pages stall past ~6 tabs. APP_TLS=off forces http.
+scheme=http
+open_url=""   # set when the URL a person should open differs from the main one
+if [ "${APP_TLS:-on}" != "off" ]; then
+  if [ "${DEV_CERT_SELF_SIGNED:-}" = 1 ] && [ -f storage/dev-certs/cert.pem ] || bin/dev-cert; then
+    export APP_TLS_CERT=storage/dev-certs/cert.pem APP_TLS_KEY=storage/dev-certs/key.pem
+    scheme=https
+    if [ "${DEV_CERT_SELF_SIGNED:-}" = 1 ]; then
+      # Untrusted certificate: browsers drop cookies on it. Same server, plain HTTP beside it.
+      export APP_DEV_HTTP_PORT="${APP_DEV_HTTP_PORT:-$((port + 1))}"
+      open_url="http://localhost:$APP_DEV_HTTP_PORT"
+    fi
+  else
+    cat <<MSG
+!
+! No locally trusted certificate, so bin/dev serves plain HTTP/1.1 at http://localhost:$port
+!   Login and everything else work. Live updates stall past about 6 tabs (HTTP/1.1 allows ~6
+!   connections per origin; HTTP/2 needs HTTPS).
+!   For HTTPS + HTTP/2: install mkcert (brew install mkcert · apt install mkcert libnss3-tools),
+!   run 'mkcert -install' once, then restart bin/dev. Self-signed certificates are refused:
+!   Chrome drops login cookies on them even after "Proceed (unsafe)". APP_TLS=off hides this.
+!
+MSG
+  fi
+fi
+
+echo "Compiling and migrating (the first build takes several minutes)…"
+cargo run -q -- db migrate
+
+# Rebuild CSS on every template change, so a new class is never missing from static/app.css.
+# --minify as in the production build: without it the watcher overwrites a minified file with an
+# unminified one, and any check of the built CSS sees a different file in development.
+bin/tailwindcss -i assets/app.css -o static/app.css --watch=always --minify &
+# Migrate on every rebuild too, so a new migration never meets a stale database.
+cargo watch -q -w src -w templates -w migration -x 'run -q -- db migrate' -x 'run -- serve' &
+
+# The exact URL, scheme included (a bare localhost:$port is http:// to the browser), again once the
+# server accepts connections, so it isn't buried under the build output.
+if [ -n "$open_url" ]; then
+  echo "→ open in your browser: $open_url (HTTP/1.1; the certificate on :$port is self-signed and browsers drop cookies on it)"
+  echo "→ for scripts and h2 checks: $scheme://localhost:$port (curl -k; never a browser login)"
+else
+  echo "→ $scheme://localhost:$port"
+fi
+echo "→ ${open_url:-$scheme://localhost:$port}/dev (mailbox, jobs, routes)"
+(until (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; do sleep 1; done
+ echo "✓ ready: ${open_url:-$scheme://localhost:$port} ($([ "$scheme" = https ] && [ -z "$open_url" ] && echo "HTTP/2" || echo "HTTP/1.1"))") &
+wait

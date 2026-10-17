@@ -1,0 +1,50 @@
+[package]
+name = "offrails_app"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+anyhow = "1.0.104"
+askama = "0.16.1"
+axum = { version = "0.8.9", features = ["multipart"] }
+axum-extra = { version = "0.12.6", features = ["cookie", "typed-header", "form"] }
+axum-server = { version = "0.8.0", features = ["tls-rustls"] }
+base64 = "0.23.1"
+chrono = { version = "0.4.45", features = ["serde"] }
+clap = { version = "4.6.7", features = ["derive", "env"] }
+dotenvy = "0.15.7"
+futures = "0.3.34"
+migration = { version = "0.1.0", path = "migration" }
+moka = { version = "0.12.16", features = ["future"] }
+rand = "0.10.3"
+rustls = { version = "0.23.46", default-features = false, features = ["aws_lc_rs", "std"] }
+sea-orm = { version = "2.0.4", features = ["sqlx-sqlite", "sqlx-postgres", "runtime-tokio-rustls", "macros", "with-chrono", "with-json", "with-uuid"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_html_form = "0.4.1"
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+thiserror = "2.0.21"
+tokio = { version = "1.53.3", features = ["full"] }
+tokio-stream = { version = "0.1.19", features = ["sync"] }
+tower = "0.5.3"
+tower-http = { version = "0.7.1", features = ["fs", "trace", "compression-gzip", "set-header", "timeout", "request-id", "catch-panic", "csrf"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+uuid = { version = "1.28.0", features = ["v4", "serde"] }
+
+[workspace]
+members = [".", "migration"]
+
+[profile.dev.package."*"]
+opt-level = 1          # faster tests, still-fast builds
+
+[dev-dependencies]
+http-body-util = "0.1.5"
+insta = { version = "1.49.0", features = ["json", "redactions"] }
+tempfile = "3.27.0"
+tower = { version = "0.5.3", features = ["util"] }
+
+[profile.dev]
+debug = "line-tables-only"   # faster rebuilds (a peer: template edit 16–23 s → 3.6–5.9 s); lldb shows no locals:
+split-debuginfo = "unpacked" # CARGO_PROFILE_DEV_DEBUG=true for a debugging session

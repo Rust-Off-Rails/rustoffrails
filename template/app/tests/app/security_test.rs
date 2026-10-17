@@ -1,0 +1,258 @@
+//! The access matrix and the other security guarantees (test-standards.md §3). Most of these
+//! iterate over `ROUTES`, so a new route is covered automatically.
+
+use axum::http::StatusCode;
+use offrails_app::{
+    config::{AppEnv, Config},
+    routes::{Access, ROUTES},
+};
+
+use crate::support::TestApp;
+
+fn production() -> Config {
+    Config {
+        env: AppEnv::Production,
+        app_url: "https://app.example.com".into(),
+        ..Config::test()
+    }
+}
+
+fn development() -> Config {
+    Config {
+        env: AppEnv::Development,
+        ..Config::test()
+    }
+}
+
+/// A concrete URL for a route pattern (parameters a test never resolves to a real record).
+pub fn concrete(path: &str) -> String {
+    path.replace("{id}", "1")
+        .replace("{n}", "0")
+        .replace("{token}", "not-a-real-token")
+        .replace("{mailer}", "no_such_mailer")
+        .replace("{action}", "no_such_action")
+        .replace("{name}", "default")
+}
+
+async fn request(app: &TestApp, method: &str, path: &str) -> StatusCode {
+    match method {
+        // WHY: headers only: a streaming route (SSE) never ends its body.
+        "GET" => app.request_head(path, &[]).await.0,
+        _ => app.post_form(path, &[]).await.status,
+    }
+}
+
+/// Every non-public route, requested anonymously in production: never a 2xx.
+#[tokio::test]
+async fn non_public_routes_never_answer_2xx_anonymously() {
+    let app = TestApp::with_config(production()).await;
+    for (method, path, handler, access) in ROUTES {
+        if *access == Access::Public {
+            continue;
+        }
+        let status = request(&app, method, &concrete(path)).await;
+        assert!(
+            !status.is_success(),
+            "{method} {path} ({handler}, {}) answered {status} anonymously",
+            access.as_str()
+        );
+    }
+}
+
+/// `Dev` routes don't exist in production or test: 404 from the router fallback, every one.
+#[tokio::test]
+async fn dev_routes_are_404_outside_development() {
+    for config in [production(), Config::test()] {
+        let app = TestApp::with_config(config).await;
+        for (method, path, handler, access) in ROUTES {
+            if *access != Access::Dev {
+                continue;
+            }
+            let status = request(&app, method, &concrete(path)).await;
+            assert_eq!(
+                status,
+                StatusCode::NOT_FOUND,
+                "{method} {path} ({handler}) exists outside development"
+            );
+        }
+    }
+}
+
+/// A cross-site POST to every unsafe route is rejected.
+#[tokio::test]
+async fn cross_site_posts_to_every_unsafe_route_are_403() {
+    let app = TestApp::with_config(development()).await;
+    for (method, path, handler, _) in ROUTES {
+        if *method == "GET" {
+            continue;
+        }
+        let res = app
+            .post_form_with_headers(&concrete(path), &[], &[("sec-fetch-site", "cross-site")])
+            .await;
+        assert_eq!(
+            res.status,
+            StatusCode::FORBIDDEN,
+            "{path} ({handler}) accepted a cross-site POST"
+        );
+    }
+}
+
+/// Without fetch metadata (older browsers) the `Origin` decides.
+#[tokio::test]
+async fn the_origin_header_decides_without_fetch_metadata() {
+    let app = TestApp::with_config(development()).await;
+    app.without_fetch_metadata()
+        .with_origin("https://evil.example");
+    app.post_form("/dev/migrations", &[("return_to", "/")])
+        .await
+        .assert_status(StatusCode::FORBIDDEN);
+
+    app.with_origin("http://localhost:3000");
+    app.post_form("/dev/migrations", &[("return_to", "/")])
+        .await
+        .assert_redirect_to("/");
+}
+
+#[tokio::test]
+async fn the_error_pages_do_not_leak_internals_in_production() {
+    let app = TestApp::with_config(production()).await;
+    let res = app.get("/nope").await;
+    res.assert_status(StatusCode::NOT_FOUND)
+        .assert_not_contains("panicked")
+        .assert_not_contains("DATABASE_URL");
+}
+
+/// A route someone mounts but forgets to list in `ROUTES` is invisible to the access matrix,
+/// the CSRF sweep and the routability test. Parses the files that mount routes.
+#[test]
+fn every_mounted_route_is_in_the_routes_table() {
+    let listed: std::collections::BTreeSet<&str> = ROUTES.iter().map(|(_, p, _, _)| *p).collect();
+    let mut missing = Vec::new();
+    let mut checked = 0;
+    for file in [
+        "src/routes.rs",
+        "src/controllers/dev.rs",
+        // samples: router sources
+    ] {
+        let source = std::fs::read_to_string(file).expect("read source");
+        for (start, _) in source
+            .match_indices(".route(\"")
+            .chain(source.match_indices(".route_service(\""))
+        {
+            let rest = &source[start..];
+            let after = &rest[rest.find('"').unwrap() + 1..];
+            let path = &after[..after.find('"').unwrap()];
+            checked += 1;
+            if !listed.contains(path) {
+                missing.push(format!("{file}: {path}"));
+            }
+        }
+    }
+    assert!(checked >= 10, "the parser found only {checked} route calls");
+    assert!(
+        missing.is_empty(),
+        "mounted but not in ROUTES (add the row with its real Access): {missing:#?}"
+    );
+}
+
+/// DNS rebinding: a page on `evil.example` re-points its name at 127.0.0.1 and reads the
+/// development tools same-origin. Development refuses any `Host` that isn't this machine,
+/// `APP_URL`'s or an `APP_ALLOWED_HOSTS` entry, before any handler runs; the page says how to
+/// allow a host on purpose.
+#[tokio::test]
+async fn development_refuses_a_rebound_host_name() {
+    let app = TestApp::with_config(development()).await;
+    for path in ["/dev", "/", "/up"] {
+        let res = app
+            .get_with_headers(path, &[("host", "evil.example:3000")])
+            .await;
+        res.assert_status(StatusCode::FORBIDDEN)
+            .assert_contains("Blocked host: evil.example")
+            .assert_contains("APP_ALLOWED_HOSTS=evil.example");
+        assert!(
+            res.headers.contains_key("content-security-policy"),
+            "the refusal carries the header matrix"
+        );
+    }
+    // A same-origin POST from the rebound page (Fetch Metadata and Origin agree) is refused too:
+    // the CSRF layer alone would pass it.
+    app.post_form_with_headers(
+        "/theme",
+        &[("theme", "dark")],
+        &[
+            ("host", "evil.example:3000"),
+            ("origin", "http://evil.example:3000"),
+        ],
+    )
+    .await
+    .assert_status(StatusCode::FORBIDDEN);
+    // Markup in the Host header is escaped on the page.
+    app.get_with_headers("/", &[("host", "a<b>.example")])
+        .await
+        .assert_status(StatusCode::FORBIDDEN)
+        .assert_not_contains("a<b>");
+}
+
+#[tokio::test]
+async fn development_answers_local_and_configured_hosts() {
+    let app = TestApp::with_config(Config {
+        app_url: "https://dev.example.com".into(),
+        allowed_hosts: vec!["tunnel.example".into(), ".lan.example".into()],
+        ..development()
+    })
+    .await;
+    for host in [
+        "localhost:3000",
+        "127.0.0.1:3000",
+        "[::1]:3000",
+        "dev.example.com",
+        "tunnel.example",
+        "box.lan.example:3000",
+    ] {
+        app.get_with_headers("/up", &[("host", host)])
+            .await
+            .assert_ok();
+    }
+    // No Host at all (HTTP/1.0, a health probe): nothing to rebind.
+    app.get("/up").await.assert_ok();
+}
+
+#[tokio::test]
+async fn production_and_test_answer_any_host() {
+    for config in [production(), Config::test()] {
+        let app = TestApp::with_config(config).await;
+        app.get_with_headers("/up", &[("host", "evil.example")])
+            .await
+            .assert_ok();
+    }
+}
+
+/// ZAP's "Suspicious Comments" rule (10027) reads these words in served script comments as SQL or
+/// debug leftovers. Public pages load the top-level `static/*.js`, so their comments avoid them
+/// (security.md, Gotchas).
+#[test]
+fn public_scripts_have_no_comment_words_zap_flags() {
+    const WORDS: &str = "todo fixme bug bugs xxx query db admin administrator user username select where from later debug";
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir("static").expect("static/") {
+        let path = entry.expect("a static entry").path();
+        if path.extension().and_then(|e| e.to_str()) != Some("js") {
+            continue;
+        }
+        let source = std::fs::read_to_string(&path).expect("a readable script");
+        for (n, line) in source.lines().enumerate() {
+            let trimmed = line.trim_start();
+            let comment = match line.find("//") {
+                Some(at) => &line[at..],
+                None if trimmed.starts_with("/*") || trimmed.starts_with('*') => trimmed,
+                None => continue,
+            };
+            let lower = comment.to_ascii_lowercase();
+            let words = lower.split(|c: char| !c.is_ascii_alphanumeric() && c != '_');
+            for word in words.filter(|w| WORDS.split(' ').any(|z| z == *w)) {
+                found.push(format!("{}:{}: {word}", path.display(), n + 1));
+            }
+        }
+    }
+    assert!(found.is_empty(), "reword these comments: {found:?}");
+}

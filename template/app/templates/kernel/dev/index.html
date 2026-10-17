@@ -1,0 +1,27 @@
+{% extends "kernel/layout.html" %}
+{% block content %}
+<h1>Dev tools</h1>
+<p class="muted">Only mounted when <code>APP_ENV=development</code>. In production these routes don't exist.</p>
+
+<div class="tiles">
+  {% for tile in tiles %}
+    <a class="tile" href="{{ tile.href }}">
+      <strong>{{ tile.title }}</strong>
+      <span class="muted">{{ tile.description }}</span>
+      <span class="figure">{{ tile.figure }}</span>
+    </a>
+  {% endfor %}
+</div>
+
+{% if !try_it.is_empty() %}
+<h2>Try it</h2>
+<div class="try">
+  {% for b in try_it %}<form method="post" action="{{ b.action }}"><button class="btn">{{ b.label }}</button></form>{% endfor %}
+</div>
+{% endif %}
+
+<h2>For agents</h2>
+<pre class="code">curl -s {{ base }}/dev/introspect.json | jq '.migrations, .css, .url'   # ask the app, don't guess
+cargo run -q -- introspect | jq '.routes'                               # the same, without a server
+curl -s {{ base }}/dev/system | grep -i pending                         # forgot to migrate?</pre>
+{% endblock %}

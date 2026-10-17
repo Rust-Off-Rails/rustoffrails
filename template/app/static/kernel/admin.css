@@ -1,0 +1,120 @@
+/* The kernel pages' shared chrome (/dev and every kernel page a sample adds). Plain CSS on purpose:
+   it must not depend on the app's Tailwind build or design, so app UI changes never break it.
+   A kernel page with more UI ships its own stylesheet next to this one (static/kernel/<page>.css)
+   and declares it on its Chrome; nothing a kernel page needs lives in assets/app.css.
+   No inline styles anywhere (the CSP is style-src 'self'). Usable at 375px.
+   Theme: every color token is defined once, `light-dark(<light>, <dark>)`, and `color-scheme`
+   picks the side: the OS by default, or the header switch's choice, which the server renders as
+   `<html data-theme>` from the `offrails_theme` cookie (src/kernel/theme.rs). Never add a
+   color-scheme media query: it would ignore the switch. Every pair meets WCAG 2.2 AA in both.
+   APP: change the tones to match your brand (keep the contrast; run axe in both themes). */
+:root {
+  color-scheme: light dark;
+  --bg: light-dark(#fafaf9, #1c1917);
+  --panel: light-dark(#ffffff, #292524);
+  --fg: light-dark(#1c1917, #fafaf9);
+  --muted: light-dark(#57534e, #c2bcb8);
+  --border: light-dark(#d6d3d1, #57534e);
+  --hover: light-dark(#f5f5f4, #34302d);
+  --accent: light-dark(#4338ca, #a5b4fc);
+  --accent-bg: light-dark(#eef2ff, #312e81);
+  --on-accent: light-dark(#ffffff, #1e1b4b);
+  --ok: light-dark(#166534, #4ade80);
+  --warn: light-dark(#854d0e, #fbbf24);
+  --err: light-dark(#b91c1c, #fca5a5);
+  --info: light-dark(#075985, #7dd3fc);
+  --menu-shadow: 0 8px 24px light-dark(rgb(0 0 0 / .12), rgb(0 0 0 / .5));
+}
+/* WHY: the switch's choice wins over the OS; "system" keeps `light dark`. */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+a { color: var(--accent); }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible, iframe:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+h1 { font-size: 1.25rem; margin: 0 0 .75rem; }
+h2 { font-size: 1rem; margin: 1.25rem 0 .5rem; }
+code, pre, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em; }
+.muted { color: var(--muted); font-size: .85rem; }
+.empty { padding: 1.25rem 1rem; color: var(--muted); margin: 0; }
+.skip { position: absolute; left: -9999px; top: 0; padding: .5rem 1rem; background: var(--panel); color: var(--accent); z-index: 10; }
+.skip:focus { left: .5rem; top: .5rem; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* header */
+.bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 1rem; padding: .55rem 1rem; background: var(--panel); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.bar .brand { font-weight: 600; color: var(--fg); text-decoration: none; }
+.bar nav { display: flex; gap: .25rem; flex: 1; flex-wrap: wrap; }
+.bar nav a { padding: .15rem .6rem; border-radius: 6px; text-decoration: none; color: var(--muted); }
+.bar nav a:hover { background: var(--hover); color: var(--fg); }
+.bar nav a[aria-current="page"] { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+.bar .back { font-size: .85rem; text-decoration: none; color: var(--muted); }
+
+/* theme switch: a disclosure (works without JS) holding a POST form of three toggle buttons */
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.ti { width: 1rem; height: 1rem; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.theme { position: relative; }
+.theme > summary { display: inline-flex; align-items: center; gap: .35rem; padding: .15rem .55rem; border: 1px solid var(--border); border-radius: 6px; font-size: .85rem; color: var(--muted); cursor: pointer; list-style: none; user-select: none; }
+.theme > summary::-webkit-details-marker { display: none; }
+.theme > summary:hover, .theme[open] > summary { background: var(--hover); color: var(--fg); }
+.theme-menu { position: absolute; right: 0; top: calc(100% + .35rem); z-index: 6; display: flex; flex-direction: column; gap: 2px; min-width: 9rem; padding: 4px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--menu-shadow); }
+.theme-menu button { display: flex; align-items: center; gap: .5rem; width: 100%; padding: .35rem .6rem; border: 0; border-radius: 6px; background: transparent; color: var(--fg); font: inherit; font-size: .85rem; text-align: left; cursor: pointer; }
+.theme-menu button:hover { background: var(--hover); }
+.theme-menu button[aria-pressed="true"] { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+.theme-menu .check { margin-left: auto; visibility: hidden; }
+.theme-menu button[aria-pressed="true"] .check { visibility: visible; }
+main { padding: 1rem; max-width: 1400px; margin: 0 auto; }
+.flash { padding: .6rem 1rem; font-size: .9rem; border-bottom: 1px solid var(--border); }
+.flash-notice { background: var(--accent-bg); }
+.flash-alert { background: color-mix(in srgb, var(--err) 15%, var(--panel)); }
+
+/* controls */
+.btn { font: inherit; font-size: .85rem; padding: .3rem .7rem; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--fg); cursor: pointer; text-decoration: none; display: inline-block; }
+.btn:hover { background: var(--hover); }
+.btn.quiet { border-color: transparent; background: transparent; color: var(--muted); }
+.btn.danger { color: var(--err); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+input, select { font: inherit; font-size: .85rem; padding: .25rem .5rem; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--fg); }
+form { margin: 0; }
+
+/* panels, tiles, tables */
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; margin: 0 0 1rem; overflow: hidden; }
+.panel > header { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .6rem 1rem; border-bottom: 1px solid var(--border); }
+.panel > header h2 { margin: 0; }
+.grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.tiles { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); margin: 0 0 1rem; }
+.tile { display: flex; flex-direction: column; gap: .25rem; padding: 1rem; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; color: var(--fg); text-decoration: none; }
+.tile:hover { border-color: var(--accent); }
+.tile .figure { margin-top: auto; padding-top: .5rem; color: var(--accent); font-weight: 600; }
+.try { display: flex; gap: .5rem; flex-wrap: wrap; margin: .5rem 0 1rem; }
+.notice { padding: .75rem 1rem; border: 1px solid var(--warn); border-radius: 8px; background: color-mix(in srgb, var(--warn) 12%, var(--panel)); margin: 1rem; }
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .88rem; background: var(--panel); }
+th, td { padding: .45rem .8rem; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+th { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; white-space: nowrap; }
+tbody tr:hover { background: var(--hover); }
+.badge { display: inline-block; padding: .05rem .5rem; border-radius: 999px; font-size: .75rem; font-weight: 600; color: var(--tone, var(--muted)); background: color-mix(in srgb, var(--tone, var(--muted)) 14%, transparent); }
+.access-public { --tone: var(--ok); }
+.access-user { --tone: var(--accent); }
+.access-admin { --tone: var(--warn); }
+.access-dev { --tone: var(--info); }
+.filters { display: flex; gap: .6rem; flex-wrap: wrap; align-items: flex-end; margin: 0 0 .75rem; padding: .6rem; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
+.filters label { display: flex; flex-direction: column; gap: .15rem; font-size: .75rem; color: var(--muted); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; margin: 0; padding: .75rem 1rem; font-size: .88rem; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+.timeline { margin: 0; padding: .75rem 1rem .75rem 2rem; font-size: .88rem; }
+.code { margin: 0; padding: .75rem 1rem; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
+.confirm { max-width: 640px; padding: 1rem 1.25rem; }
+
+/* phones: brand and "App" on one row, the tabs on their own scrollable row */
+@media (max-width: 600px) {
+  .bar { gap: .25rem .75rem; padding: .5rem .75rem; }
+  .bar nav { order: 3; flex-basis: 100%; flex-wrap: nowrap; overflow-x: auto; margin: 0 -.25rem; }
+  .theme { margin-left: auto; }
+  /* WHY: open, the switch takes its own row instead of floating over the tabs (axe target-size). */
+  .theme[open] { order: 2; flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+  .theme[open] ~ .back { margin-left: auto; }
+  .theme-menu { position: static; flex-direction: row; flex-wrap: wrap; min-width: 0; box-shadow: none; }
+  .theme-menu button { width: auto; }
+}

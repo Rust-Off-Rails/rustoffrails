@@ -1,0 +1,14 @@
+[package]
+edition      = "2024"
+name         = "migration"
+publish      = false
+version      = "0.1.0"
+
+[lib]
+name = "migration"
+path = "src/lib.rs"
+
+[dependencies.sea-orm-migration]
+default-features = false
+features = ["runtime-tokio-rustls", "sqlx-sqlite", "sqlx-postgres"]
+version = "2.0.0"

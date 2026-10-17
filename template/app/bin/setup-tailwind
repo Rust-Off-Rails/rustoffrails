@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Downloads the pinned standalone Tailwind CLI to bin/tailwindcss and verifies its checksum, so
+# every machine, CI and the Docker build compile identical CSS. To upgrade: look up the current
+# v4 tag (curl -sSLf -o /dev/null -w '%{url_effective}' \
+#   https://github.com/tailwindlabs/tailwindcss/releases/latest), then change the line below.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+TAILWIND_VERSION=v4.3.3
+
+os=$(uname -s | sed 's/Darwin/macos/;s/Linux/linux/')
+arch=$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/;s/arm64/arm64/')
+asset="tailwindcss-$os-$arch"
+base="https://github.com/tailwindlabs/tailwindcss/releases/download/$TAILWIND_VERSION"
+
+if [ -x bin/tailwindcss ] && bin/tailwindcss --help 2>/dev/null | grep -q "${TAILWIND_VERSION#v}"; then
+  exit 0 # already the pinned version
+fi
+
+echo "fetching tailwindcss $TAILWIND_VERSION ($asset)"
+curl -sSLf "$base/$asset" -o bin/tailwindcss
+chmod +x bin/tailwindcss
+expected=$(curl -sSLf "$base/sha256sums.txt" | grep "/$asset\$" | awk '{print $1}')
+actual=$(shasum -a 256 bin/tailwindcss | awk '{print $1}')
+if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+  rm -f bin/tailwindcss
+  echo "tailwindcss checksum mismatch for $asset" >&2
+  exit 1
+fi

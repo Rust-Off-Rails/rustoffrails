@@ -1,0 +1,15 @@
+{% extends "kernel/layout.html" %}
+{% block content %}
+<section class="panel confirm">
+  <h1>{{ names.len() }} pending migration{% if names.len() != 1 %}s{% endif %}</h1>
+  <p>The database is behind the code, so this page replaces what would be a "no such table" error. Run the migrations to continue.</p>
+  <ul>
+    {% for name in names %}<li class="mono">{{ name }}</li>{% endfor %}
+  </ul>
+  <form method="post" action="/dev/migrations">
+    <input type="hidden" name="return_to" value="{{ return_to }}">
+    <button class="btn">Run migrations</button>
+  </form>
+  <p class="muted">Or from a terminal: <code>cargo run -- db migrate</code>. In production, deploys migrate before the app starts.</p>
+</section>
+{% endblock %}

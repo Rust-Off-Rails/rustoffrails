@@ -1,0 +1,6 @@
+target/
+storage/
+.env
+.git/
+.offrails/
+bin/tailwindcss

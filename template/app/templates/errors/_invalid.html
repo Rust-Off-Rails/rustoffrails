@@ -1,0 +1,6 @@
+<div role="alert" class="errors rounded-md border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950 p-4 text-sm text-red-800 dark:text-red-200">
+  <p class="font-medium">That didn't go through:</p>
+  <ul class="mt-1 list-disc pl-5">
+    {% for message in messages %}<li>{{ message }}</li>{% endfor %}
+  </ul>
+</div>

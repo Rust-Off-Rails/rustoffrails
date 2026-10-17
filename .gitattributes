@@ -1,0 +1,6 @@
+# LF in every checkout (Windows too): the template and its parts are copied into apps byte for byte.
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.jpg binary
+*.woff2 binary

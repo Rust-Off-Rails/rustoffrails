@@ -1,0 +1,10 @@
+/target
+.env
+/storage/*
+!/storage/.keep
+/static/app.css
+/bin/tailwindcss
+/mutants.out*/
+/lcov.info
+web/node_modules
+web/dist

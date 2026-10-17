@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en" data-theme="{{ theme.as_str() }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="{{ theme.color_scheme() }}">
+  <title>Not allowed</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body class="min-h-screen bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100 antialiased">
+  <main class="mx-auto max-w-xl px-4 py-24 text-center">
+    <p class="text-sm font-medium text-gray-600 dark:text-gray-400">403</p>
+    <h1 class="mt-2 text-3xl font-semibold tracking-tight">Not allowed</h1>
+    <p class="mt-3 text-gray-700 dark:text-gray-300">You can't do that here. If you followed a link from another site, go back and try from this one.</p>
+    <p class="mt-8"><a class="link" href="/">Back to the home page</a></p>
+  </main>
+</body>
+</html>

@@ -1,0 +1,11 @@
+[extend]
+useDefault = true
+
+[allowlist]
+paths = [
+  '''target/''',
+  '''storage/''',
+  '''node_modules/''',
+  '''web/dist/''',
+  '''static/vendor/''',
+]

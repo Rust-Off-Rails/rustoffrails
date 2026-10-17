@@ -1,0 +1,63 @@
+# cargo-deny: run in CI and by /offrails:check (`cargo deny check`).
+# Generated from stack.md "Banned". Never loosen without a docs/decisions.md entry + human approval.
+
+[graph]
+all-features = false
+
+[advisories]
+# RustSec advisory DB. A vulnerable or yanked crate fails the build; unmaintained crates are
+# reported for the whole tree (they're the ones nobody will fix).
+version = 2
+yanked = "deny"
+unmaintained = "all"
+ignore = [
+  # Triaged exceptions only, each with a reason and a review date:
+  # { id = "RUSTSEC-YYYY-NNNN", reason = "…, not reachable because …; recheck 2026-12-01" },
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# Permissive licenses only. A copyleft or unknown license fails the build.
+allow = [
+  "MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause",
+  "ISC", "Zlib", "0BSD", "BSL-1.0", "CC0-1.0", "Unicode-3.0", "CDLA-Permissive-2.0", "MPL-2.0",
+]
+
+# The app and its migration crate are `publish = false`; they're ours, not a dependency.
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+# Never anywhere in the tree (stack.md "Banned"). Direct-only bans (lazy_static, once_cell,
+# async-trait, log macros) are checked against Cargo.toml by the plugin hook and /offrails:doctor,
+# because healthy crates still pull them in transitively.
+deny = [
+  { crate = "diesel", reason = "SeaORM is the one data layer (stack.md)" },
+  { crate = "actix-web", reason = "one web stack: axum (stack.md)" },
+  { crate = "rocket", reason = "one web stack: axum (stack.md)" },
+  { crate = "poem", reason = "one web stack: axum (stack.md)" },
+  { crate = "loco-rs", reason = "one web stack: axum (stack.md)" },
+  { crate = "leptos", reason = "no WASM front ends (stack.md)" },
+  { crate = "dioxus", reason = "no WASM front ends (stack.md)" },
+  { crate = "yew", reason = "no WASM front ends (stack.md)" },
+  { crate = "tera", reason = "runtime templates hide errors (stack.md)" },
+  { crate = "handlebars", reason = "runtime templates hide errors (stack.md)" },
+  { crate = "minijinja", reason = "runtime templates hide errors (stack.md)" },
+  { crate = "askama_axum", reason = "removed upstream (stack.md)" },
+  { crate = "axum-inertia", reason = "generate the adapter from the spec (stack.md)" },
+  { crate = "redis", reason = "the database does jobs, cache and pub/sub (stack.md)" },
+  { crate = "openssl", reason = "rustls only (security.md)" },
+  { crate = "openssl-sys", reason = "rustls only (security.md)" },
+  { crate = "native-tls", reason = "rustls only (security.md)" },
+]
+
+[sources]
+# Only crates.io. A git or alternative-registry dependency must be justified and added here.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

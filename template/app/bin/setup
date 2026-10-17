@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# First run: check tools, create .env, build the CSS, set up the database.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+need() { command -v "$1" >/dev/null 2>&1 || { echo "missing: $1 ($2)"; exit 1; }; }
+need cargo "install Rust from https://rustup.rs"
+for tool in cargo-nextest cargo-watch; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "installing $tool"; cargo install --locked "$tool"; }
+done
+
+[ -f .env ] || { cp .env.example .env; echo "created .env from .env.example"; }
+mkdir -p storage static
+
+bin/setup-tailwind
+bin/tailwindcss -i assets/app.css -o static/app.css --minify
+
+echo "Compiling (the first build takes several minutes: a cold build of this stack takes about 10 minutes)…"
+cargo run --quiet -- db setup
+echo "ready: bin/dev"

@@ -1,0 +1,5 @@
+# Source files are LF on every OS, so a Windows checkout keeps rustfmt, the anchors and the tests green.
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.woff2 binary

@@ -1,0 +1,7 @@
+# ZAP baseline triage (tab-separated: rule id, IGNORE|INFO|WARN|FAIL, reason). Run WITHOUT -I so an untriaged WARN fails.
+10110	IGNORE	(Dangerous JS Functions) htmx ships a documented eval path that is disabled by allowEval:false and blocked by the CSP (no unsafe-eval)
+10202	IGNORE	(Absence of Anti-CSRF Tokens) by design: Fetch Metadata + Origin checks (tower-http CsrfLayer) and SameSite=Lax cookies, see guides/security.md#csrf
+90004	IGNORE	(Insufficient Site Isolation Against Spectre) COEP is deliberately unset: require-corp breaks third-party embeds; COOP and CORP are set
+10049	INFO	(Storable and Cacheable / Non-Storable Content) informational: public pages and /static are meant to be cacheable, authenticated responses and redirects are no-store
+10111	INFO	(Authentication Request Identified) informational: a sign-in form, once an authentication sample adds one
+10112	INFO	(Session Management Response Identified) informational: the session cookie

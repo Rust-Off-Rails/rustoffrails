@@ -1,0 +1,20 @@
+{% extends "kernel/layout.html" %}
+{% block content %}
+<h1>Routes <span class="muted">{{ shown }} of {{ total }}</span></h1>
+<form class="filters" method="get" action="/dev/routes" role="search">
+  <label>Filter <input name="q" type="search" value="{{ q }}" placeholder="method, path or handler"></label>
+  <button class="btn">Filter</button>
+  {% if !q.is_empty() %}<a class="btn quiet" href="/dev/routes">Clear</a>{% endif %}
+</form>
+<div class="scroll" tabindex="0" role="region" aria-label="Routes table">
+<table>
+  <thead><tr><th scope="col">Method</th><th scope="col">Path</th><th scope="col">Handler</th><th scope="col">Access</th></tr></thead>
+  <tbody>
+    {% for r in rows %}
+      <tr><td class="mono">{{ r.method }}</td><td class="mono">{{ r.path }}</td><td class="mono">{{ r.handler }}</td><td><span class="badge access-{{ r.access }}">{{ r.access }}</span></td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% if rows.is_empty() %}<p class="empty">No route matches.</p>{% endif %}
+{% endblock %}

@@ -1,0 +1,36 @@
+#!/bin/sh
+# Local TLS certificate for `bin/dev`: LOCALLY TRUSTED or nothing.
+# Why HTTPS: browsers only speak HTTP/2 over TLS, and over HTTP/1.1 they hold ~6 connections per
+# origin, so live pages stall past ~6 tabs (guides/realtime.md, "Many tabs stall").
+# Why trusted only: on a self-signed certificate Chrome drops Set-Cookie even after "Proceed to
+# localhost (unsafe)", so login "succeeds" and bounces back to the login page.
+# Exit 0: a trusted certificate (mkcert, CA installed) is in $dir. Exit 3: none possible here;
+# bin/dev then serves plain HTTP. DEV_CERT_SELF_SIGNED=1 writes a self-signed one anyway (curl, CI).
+set -eu
+dir="${1:-storage/dev-certs}"
+mkdir -p "$dir"
+rm -f "$dir/cert.pem" "$dir/key.pem"
+if command -v mkcert >/dev/null 2>&1; then
+  out="$(mkcert -cert-file "$dir/cert.pem" -key-file "$dir/key.pem" localhost 127.0.0.1 ::1 2>&1)" || {
+    echo "$out" >&2; exit 1; }
+  # mkcert writes the files either way and only warns when its CA isn't trusted.
+  untrusted='not installed in the system trust store'
+  [ "$(uname -s)" = Linux ] && untrusted='not installed in the'  # Chrome on Linux reads the NSS store
+  case "$out" in
+    *"$untrusted"*)
+      rm -f "$dir/cert.pem" "$dir/key.pem"
+      echo "bin/dev-cert: mkcert's CA is not trusted by this machine yet. Run once: mkcert -install" >&2
+      exit 3 ;;
+  esac
+  echo "bin/dev-cert: trusted certificate (mkcert) in $dir"
+  exit 0
+fi
+if [ "${DEV_CERT_SELF_SIGNED:-}" = 1 ]; then
+  openssl req -x509 -newkey rsa:2048 -nodes -days 825 -keyout "$dir/key.pem" -out "$dir/cert.pem" \
+    -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:::1" >/dev/null 2>&1
+  echo "bin/dev-cert: SELF-SIGNED certificate in $dir (DEV_CERT_SELF_SIGNED=1). Browsers drop cookies on it: login won't stick. For curl -k and scripted checks only." >&2
+  exit 0
+fi
+echo "bin/dev-cert: mkcert not found; refusing to make a self-signed certificate (Chrome drops login cookies on it)." >&2
+echo "  Install mkcert (macOS: brew install mkcert · Debian/Ubuntu: apt install mkcert libnss3-tools · https://github.com/FiloSottile/mkcert), then: mkcert -install" >&2
+exit 3

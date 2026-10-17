@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en" data-theme="{{ chrome.theme.theme.as_str() }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="{{ chrome.theme.theme.color_scheme() }}">
+  <meta name="robots" content="noindex">
+  <meta name="htmx-config" content='{"allowEval":false,"includeIndicatorStyles":false,"historyCacheSize":0}'>
+  <title>{{ chrome.title }} · {{ chrome.app_name }}</title>
+  <link rel="icon" href="{{ chrome.assets.favicon_svg }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ chrome.assets.admin_css }}">
+  {% for href in chrome.stylesheets %}<link rel="stylesheet" href="{{ href }}">
+  {% endfor %}
+  <script src="{{ chrome.assets.htmx }}" defer></script>
+  <script src="{{ chrome.assets.admin_js }}" defer></script>
+  {% for src in chrome.scripts %}<script src="{{ src }}" defer></script>
+  {% endfor %}
+  {# samples: kernel head #}
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="bar">
+    <a class="brand" href="/">{{ chrome.app_name }}</a>
+    <nav aria-label="Tools">
+      {% for tab in chrome.tabs %}<a href="{{ tab.href }}"{% if tab.active %} aria-current="page"{% endif %}>{{ tab.label }}</a>{% endfor %}
+    </nav>
+    {# The theme switch: kernel/theme.rs (cookie, data-theme), admin.js (instant switch + themechange). #}
+    <svg class="sprite" aria-hidden="true" focusable="false">
+      <symbol id="ti-system" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
+      <symbol id="ti-light" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+      <symbol id="ti-dark" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></symbol>
+      <symbol id="ti-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    </svg>
+    <details class="theme" data-theme-switch>
+      <summary><svg class="ti" aria-hidden="true" focusable="false"><use href="#ti-{{ chrome.theme.theme.as_str() }}" data-theme-icon></use></svg><span class="visually-hidden">Theme: </span><span data-theme-label>{{ chrome.theme.theme.label() }}</span></summary>
+      <form class="theme-menu" method="post" action="{{ crate::routes::paths::theme() }}" role="group" aria-label="Theme" data-theme-form>
+        <input type="hidden" name="return_to" value="{{ chrome.theme.return_to }}">
+        {% for option in crate::kernel::theme::Theme::ALL %}
+        <button type="submit" name="theme" value="{{ option.as_str() }}" aria-pressed="{{ chrome.theme.pressed(option.as_str()) }}"><svg class="ti" aria-hidden="true" focusable="false"><use href="#ti-{{ option.as_str() }}"></use></svg>{{ option.label() }}<svg class="ti check" aria-hidden="true" focusable="false"><use href="#ti-check"></use></svg></button>
+        {% endfor %}
+      </form>
+    </details>
+    <a class="back" href="/">&larr; App</a>
+  </header>
+  {% if let Some(flash) = chrome.flash %}
+    <div class="flash {% if flash.is_alert() %}flash-alert{% else %}flash-notice{% endif %}" role="status">{{ flash.message }}</div>
+  {% endif %}
+  <main id="main">
+    {# samples: kernel main #}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

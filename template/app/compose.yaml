@@ -1,0 +1,62 @@
+# The whole app in containers, production-shaped: `docker compose up --build`, then http://localhost:3000.
+# Same image as the deploy (Dockerfile), Postgres, migrations on boot (bin/docker-entrypoint).
+# Day-to-day development is `bin/dev` (native, SQLite, fast rebuilds); this is "does it run like prod?".
+#
+#   docker compose up --build                     app + Postgres
+#   docker compose up -d db                       only Postgres, for `TEST_DATABASE_URL=… cargo nextest run`
+#   docker compose down -v                        stop and delete the database volume
+#
+# Ports are overridable: APP_PORT (3000), DB_PORT (5432).
+name: offrails-app
+
+x-app: &app
+  build: .
+  image: offrails-app:local
+  depends_on:
+    db:
+      condition: service_healthy
+  environment: &app-env
+    APP_ENV: production
+    DATABASE_URL: postgres://postgres:postgres@db:5432/offrails_app
+    APP_URL: http://localhost:${APP_PORT:-3000}
+    RUST_LOG: ${RUST_LOG:-info}
+    # samples: compose env
+
+services:
+  app:
+    <<: *app
+    ports: ["${APP_PORT:-3000}:3000"]
+    healthcheck:
+      test: ["CMD", "app", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  worker:
+    <<: *app
+    profiles: [worker]
+    command: ["app", "worker"]
+    environment:
+      <<: *app-env
+      SKIP_MIGRATIONS: "true"            # the app service migrates
+    depends_on:
+      app:
+        condition: service_healthy
+
+  db:
+    image: postgres:17                 # match your production major (managed hosts commonly run 16/17); CI uses the same
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: offrails_app
+    ports: ["127.0.0.1:${DB_PORT:-5432}:5432"]
+    volumes: ["pg:/var/lib/postgresql/data"]   # postgres:18+ moved PGDATA: mount /var/lib/postgresql instead
+    # Upgrading an app that already has a compose file: keep its existing volume name, or you orphan local data.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d offrails_app"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  pg:
