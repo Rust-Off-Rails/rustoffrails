@@ -1,0 +1,12 @@
+[package]
+name = "offrails-gen"
+version = "0.7.1"
+edition = "2024"
+publish = false
+description = "Rust off Rails generators: a new app from the template, add a part, list parts, scaffold a resource"
+
+# Standard library only: it builds offline in seconds on Linux, macOS and Windows.
+[dependencies]
+
+# Its own workspace root, so it builds from inside an app's .offrails/ without joining the app's workspace.
+[workspace]

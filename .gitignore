@@ -4,3 +4,6 @@ results/
 
 # Launch video sources and renders (large, local only)
 /media/
+
+# offrails-gen build output (cargo offrails / tools/new-app.sh use --target-dir; this catches a plain cargo build)
+/tools/offrails-gen/target/
