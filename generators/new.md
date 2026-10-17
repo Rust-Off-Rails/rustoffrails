@@ -144,7 +144,7 @@ Shared files carry one-line comments where a part inserts its wiring: `// sample
 | `src/controllers/dev.rs` | `dev routes` (in `router()`), `dev tiles` (end of the `/dev` tile list), `dev try-it` (end of the Try-it buttons), `system facts` (end of `/dev/system`'s facts) |
 | `src/controllers/meta.rs` | `sitemap paths` (end of the public paths `/sitemap.xml` lists) |
 | `src/views/mod.rs`, `src/models/mod.rs`, `src/tasks/mod.rs` | `view mods`, `ctx fields` (end of `Ctx`); `model mods`, `model aliases`; `task mods`, `tasks` (in the task `match`) |
-| `src/main.rs` | `cli commands` (end of the `Command` enum), `cli dispatch` (in the `match`), `serve start` (in `serve`, after state is built), `serve stop` (in the shutdown future), `tracing layers` (the layer list in `init_tracing`) |
+| `src/main.rs` | `cli commands` (end of the `Command` enum), `cli dispatch` (the first line in the `match`: rustfmt pulls a comment after a last arm ending in `}` onto that brace), `serve start` (in `serve`, after state is built), `serve stop` (in the shutdown future), `tracing layers` (the layer list in `init_tracing`) |
 | `migration/src/lib.rs` | `migration mods`, `migrations` (end of the `vec![…]`, after the last `Box::new`) |
 | `templates/layouts/application.html`, `templates/shared/_nav.html` | `dev footer links`; `nav links` |
 | `templates/kernel/layout.html` | `kernel head` (last line inside `<head>`), `kernel main` (first line inside `<main>`, before the content block) |

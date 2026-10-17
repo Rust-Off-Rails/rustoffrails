@@ -276,6 +276,49 @@ fn anchor_stands_alone(line: &str) -> bool {
     t.starts_with("//") || t.starts_with("{#") || t.starts_with('#') || t.starts_with("/*")
 }
 
+/// `} // samples: x` (rustfmt pulls a comment after a last match arm ending in `}` onto that
+/// brace): the code before the anchor is only closing punctuation, so the anchor can safely move
+/// back onto its own line, at the same indent. Returns the line split in two.
+fn split_trailing_anchor(line: &str, anchor: &str) -> Option<String> {
+    let bare = line.trim_end_matches(['\r', '\n']);
+    if !is_anchor_line(bare, anchor) || anchor_stands_alone(bare) {
+        return None;
+    }
+    let at = bare.find("//")?;
+    let (code, comment) = bare.split_at(at);
+    let indent: String = code
+        .chars()
+        .take_while(|c| *c == ' ' || *c == '\t')
+        .collect();
+    let closers = code.trim();
+    if closers.is_empty()
+        || !closers
+            .chars()
+            .all(|c| matches!(c, '}' | ')' | ']' | ',' | ';'))
+    {
+        return None;
+    }
+    Some(format!("{indent}{closers}\n{indent}{}", comment.trim_end()))
+}
+
+/// Apply `split_trailing_anchor` to every line of a file; `None` when nothing needed it.
+fn heal_anchor(file: &str, anchor: &str) -> Option<String> {
+    let nl = util::newline_of(file);
+    let mut changed = false;
+    let mut out = String::with_capacity(file.len() + 8);
+    for line in file.split_inclusive('\n') {
+        match split_trailing_anchor(line, anchor) {
+            Some(fixed) => {
+                out.push_str(&fixed.replace('\n', nl));
+                out.push_str(nl);
+                changed = true;
+            }
+            None => out.push_str(line),
+        }
+    }
+    changed.then_some(out)
+}
+
 /// Insert `text` above the anchor line in `file`, indented like it. Idempotent: when the text's
 /// non-blank lines already appear together in the file, nothing changes. Returns whether it changed.
 pub fn insert_at(file: &str, anchor: &str, text: &str) -> Option<String> {
@@ -411,7 +454,7 @@ pub fn add(fw: &Path, app: &Path, targets: &[String], opts: &AddOptions) -> Resu
                  (.offrails/template/parts/{owner}/README.md, Wiring)",
                 w.file, w.anchor
             )),
-            Some(l) if !anchor_stands_alone(l) => problems.push(format!(
+            Some(l) if !anchor_stands_alone(l) && split_trailing_anchor(l, &w.anchor).is_none() => problems.push(format!(
                 "{owner}: the 'samples: {}' anchor in {} shares its line with code; move it onto its own line",
                 w.anchor, w.file
             )),
@@ -463,7 +506,15 @@ pub fn add(fw: &Path, app: &Path, targets: &[String], opts: &AddOptions) -> Resu
     let mut env = false;
     let apply = |owner: &str, w: &Wire, touched: &mut Vec<String>| -> Result<()> {
         let target = rel(app, &w.file);
-        let text = util::read_text(&target)?;
+        let mut text = util::read_text(&target)?;
+        if let Some(healed) = heal_anchor(&text, &w.anchor) {
+            util::write_text(&target, &healed)?;
+            println!(
+                "  fix  {}: the 'samples: {}' anchor back on a line of its own (rustfmt had moved it)",
+                w.file, w.anchor
+            );
+            text = healed;
+        }
         let wire = rename_crate(&w.text, &krate);
         match insert_at(&text, &w.anchor, &wire) {
             Some(new) => {
@@ -746,6 +797,19 @@ mod tests {
         );
         assert!(insert_at(&once, "things", "a();\nb();\n").is_none());
         assert!(insert_at(file, "other", "a();\n").is_none());
+    }
+
+    #[test]
+    fn an_anchor_rustfmt_pulled_onto_a_brace_is_healed() {
+        let file = "    match x {\n        A => {\n            a()\n        } // samples: cli dispatch\n    }\n";
+        let healed = heal_anchor(file, "cli dispatch").unwrap();
+        assert_eq!(
+            healed,
+            "    match x {\n        A => {\n            a()\n        }\n        // samples: cli dispatch\n    }\n"
+        );
+        assert!(heal_anchor(&healed, "cli dispatch").is_none());
+        // Code before the anchor that isn't only closers is never moved.
+        assert!(heal_anchor("    pub mod x; // samples: kernel mods\n", "kernel mods").is_none());
     }
 
     #[test]

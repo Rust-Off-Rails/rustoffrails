@@ -84,6 +84,9 @@ async fn run(cli: Cli, config: Config) -> anyhow::Result<()> {
     }
 
     match cli.command.unwrap_or(Command::Serve) {
+        // samples: cli dispatch
+        // WHY: the anchor heads the match: after a last arm ending in `}`, rustfmt pulls a
+        // trailing comment onto that brace's line, and the next part's wiring would refuse.
         Command::Serve => serve(config).await,
         Command::Db { command } => db_command(config, command).await,
         Command::Routes => print_routes(),
@@ -93,7 +96,6 @@ async fn run(cli: Cli, config: Config) -> anyhow::Result<()> {
             tasks::run(&state, &name, args).await
         }
         Command::Introspect => introspect(config).await,
-        // samples: cli dispatch
     }
 }
 
