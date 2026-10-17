@@ -139,7 +139,7 @@ Phoenix 1.8's default. There are no passwords to leak, reuse or reset. Every rul
 | Log out | `POST /session/delete` | `DELETE /session` | `DELETE /api/session` |
 
 1. **Request** (`login_links::create`):
-   - Normalize the email, then apply the rate limits: per IP + action, and per email (`format!("login_links#create:{email}")`), each 10 per 3 minutes; plus a **daily cap per address**, 20 emails a day (`format!("emails/day:{email}")`, `Duration::from_secs(86_400)`), shared with password reset requests. The per-IP limit doesn't stop a flood from many IPs, and 10 per 3 minutes alone is still 4,800 emails a day to one inbox. Over the cap, answer exactly as for a sent link (no enumeration) and send nothing.
+   - Normalize the email, then apply the rate limits: per IP + action, and per email (`format!("login_links#create:{email}")`), each 10 per 3 minutes; plus a **daily cap per address**, 20 emails a day (`format!("emails/day:{email}")`, `Duration::from_secs(86_400)`), shared with password reset requests. The per-IP limit doesn't stop a flood from many IPs, and 10 per 3 minutes alone is still 4,800 emails a day to one inbox. Over any of these, send nothing and re-render the form with **429** and "Try again later." like login (with `Retry-After`). That reveals nothing about the address: any address, registered or not, hits the same limits.
    - If the reader may log in, enqueue **`LoginLinkEmailJob { email }`**. Under `magic-link` that's every syntactically valid email (sign-up happens on first login); under `magic-link-invite`, only an existing user.
    - **Always** redirect to `/login_links/sent`, with no hint about whether the address exists. Invalid email syntax re-renders the form with 422 "Email is invalid". That's a format error, not enumeration.
 2. **The job** issues the link: a `login_links` row (email, digest, `expires_at = now + 15 min`). It renders `mailers::login_links::login` with `{APP_URL}/login_links/{token}` and delivers it directly. `MAX_ATTEMPTS = 5`. The token never sits in job args; the email does, and that's personal data, not a secret.
@@ -180,7 +180,7 @@ On top of [test-standards](test-standards.md):
 - First login under `magic-link` creates exactly one user. Under `magic-link-invite`, an unknown email creates nothing and gets no mail.
 - Return-to is honored after the POST.
 - `/admin/jobs` args for `LoginLinkEmailJob` contain no `/login_links/` URL.
-- The daily cap: the 21st request for one address in a day sends nothing and answers exactly like the 1st (`link_requests_are_capped_per_address_per_day`; build the requests from different IPs with `APP_TRUSTED_PROXY=true`).
+- The daily cap: the 21st request for one address in a day sends nothing and gets the 429 form, for a registered and an unregistered address alike (`link_requests_are_capped_per_address_per_day`; build the requests from different IPs with `APP_TRUSTED_PROXY=true`, and use a rate limiter built for `AppEnv::Test`, since development allows 1000 per window).
 - Signing in by link over another reader's session ends it (sessions, item 5).
 - The dev mailbox hint is on `/login_links/sent` (development) and absent in production config.
 
