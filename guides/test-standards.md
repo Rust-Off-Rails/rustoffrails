@@ -457,7 +457,7 @@ fn every_unscoped_marker_gives_a_reason() {
   ```
   Load related rows with `find_also_related`, or in one `is_in` batch (`blob::by_ids`), never per row.
 - **Suite time:** the SQLite suite should stay under ~60s. A test over 2s is slow. Nextest's `slow-timeout` reports it. Fix it, or move it to `#[ignore]` with a decision entry. The usual culprit is password hashing in factories: hash the factory password **once** per test binary and reuse the digest ([auth gotchas](auth.md#gotchas-agents-get-wrong)). In the reference app that cut a 47s test to under 1s.
-- **Postgres per-test databases** are named `test_<crate>_<hex>`, and `app task test_db_cleanup` drops only this app's databases that have no open connections ([testing](testing.md#database-per-test)). So it's safe on a shared server and while a suite runs. Still, never call it from a test.
+- **Postgres test databases** are named `test_<crate>_<tag>_tpl` (the template) and `test_<crate>_<tag>_<n>` (the slots, reset before each test), and `app task test_db_cleanup` drops only this app's databases that have no open connections ([testing](testing.md#postgres-test-databases)). So it's safe on a shared server and while a suite runs. Still, never call it from a test.
 
 ## 7. Test quality rules
 

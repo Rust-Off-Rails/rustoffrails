@@ -113,7 +113,7 @@ Read this when you change a kernel file, port a fix from a newer template, or co
 Module order (each compiles against the ones before it): config → kernel → error/models → state → views → controllers → routes → tasks → main.
 
 1. `src/config.rs`: `Config`, `AppEnv`, `LogFormat`, `bind_address` (`APP_BIND`: 127.0.0.1 in development), `parse_allowed_hosts`, `boot_warnings`, `Config::test()`, `resolve_app_url`, and the lean runtime settings `APP_WORKER_THREADS` (2) and `APP_BLOCKING_THREADS` (16) ([config](../guides/config.md)).
-2. `src/kernel/db.rs`: `connect` (SQLite: WAL, foreign keys, busy timeout, a 1 MiB page cache, a pool of 4 by default; Postgres: a pool of 10), `begin`, `ping`, `drop_idle_test_databases` ([database](../guides/database.md#kerneldbrs-spec)).
+2. `src/kernel/db.rs`: `connect` (SQLite: WAL, foreign keys, busy timeout, a 1 MiB page cache, a pool of 4 by default; Postgres: a pool of 10), `begin`, `ping`, and the Postgres test harness's DDL (`create_database_from`, advisory locks, `install_test_reset`/`reset_test_database`, `drop_idle_test_databases`; [testing](../guides/testing.md#postgres-test-databases)) ([database](../guides/database.md#kerneldbrs-spec)).
 3. `src/error.rs`: `AppError` (with `Unavailable` → 503 + `Retry-After`), `ResponseFlavor`, `shape_errors`, `retry_after` ([errors-and-logging](../guides/errors-and-logging.md#response-mapping)).
 4. `src/models/mod.rs`: `Errors`, `Page` ([models](../guides/models.md)).
 5. The kernel: `security.rs` (the header matrix and CSP, [security](../guides/security.md#the-header-matrix)), `hosts.rs` (development-only Host authorization, [security](../guides/security.md#development-is-this-machine-only)), `flash.rs`, `cookie.rs`, `rate_limit.rs`, `assets.rs` + `css.rs` ([views](../guides/views.md#dark-mode)), `tls.rs` (`HttpToHttps`, [deployment](../guides/deployment.md#direct-tls-optional)), `introspect.rs` ([dev-tools](../guides/dev-tools.md#introspection)), `cache.rs`, `redact.rs` ([errors-and-logging](../guides/errors-and-logging.md#redacting-stored-error-text)), `theme.rs` (the System/Light/Dark switch), `ui.rs` (kernel chrome: `Chrome`, `Chrome::stylesheet`/`script`, `KernelFlash`, `no_store()`). CSRF is tower-http's `CsrfLayer`, configured in `routes.rs` ([security](../guides/security.md#csrf)). In TS modes add `inertia.rs` and its pieces ([frontend-inertia](../guides/frontend-inertia.md#the-adapters-rust-surface)).
@@ -179,7 +179,7 @@ Deploy config only for the chosen `DEPLOY_TARGET` ([deployment](../guides/deploy
 
 ### Tests
 
-One binary, `tests/app/` ([testing](../guides/testing.md)): `main.rs` (`#[allow(dead_code)] mod support;`), `support.rs` (`TestApp`, `TestResponse`, the query counter, per-test Postgres databases), `factories.rs` (empty; each model adds one), and the kernel suites:
+One binary, `tests/app/` ([testing](../guides/testing.md)): `main.rs` (`#[allow(dead_code)] mod support;`), `support.rs` (`TestApp`, `TestResponse`, the query counter, the Postgres template and reset slots), `factories.rs` (empty; each model adds one), and the kernel suites:
 
 - `smoke_test.rs`: home page and layout, `/up`, the 404 page and `/api` JSON 404, security headers, `foreign_keys = 1`, a flash rendered once, a stable query count, meta and brand assets, `/robots.txt` and `/sitemap.xml`;
 - `headers_test.rs`: the header matrix per response class, development and production ([security](../guides/security.md#the-header-matrix));

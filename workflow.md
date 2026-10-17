@@ -79,7 +79,7 @@ gitleaks git . --redact --no-banner                 # secrets anywhere in histor
 pnpm --dir web exec biome check . && pnpm --dir web typecheck && pnpm --dir web test --run && pnpm --dir web build && pnpm --dir web audit --prod   # TS modes; React: `tsc -b` (never `tsc --noEmit`); Svelte: svelte-check
 ```
 
-**Postgres on another port:** if 5432 is taken (another app's Postgres, a native install), never stop it: run the compose `db` service elsewhere with `DB_PORT=54329 docker compose up -d db` and test with `DB_PORT=54329` (or set `TEST_DATABASE_URL` to any Postgres you may create databases in; the suite makes one per test). Check first with `lsof -nP -iTCP:5432 -sTCP:LISTEN`.
+**Postgres on another port:** if 5432 is taken (another app's Postgres, a native install), never stop it: run the compose `db` service elsewhere with `DB_PORT=54329 docker compose up -d db` and test with `DB_PORT=54329` (or set `TEST_DATABASE_URL` to any Postgres you may create databases in; the suite makes a template and one reusable slot per concurrent test). Check first with `lsof -nP -iTCP:5432 -sTCP:LISTEN`.
 
 Plus, each with the command that proves it (paste its output, or say which item you skipped and why):
 
