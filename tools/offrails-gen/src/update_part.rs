@@ -37,7 +37,13 @@ fn read(p: &Path) -> Option<String> {
     fs::read_to_string(p).ok().map(|t| t.replace("\r\n", "\n"))
 }
 
-pub fn run(base_fw: &Path, new_fw: &Path, app: &Path, names: &[String], opts: &Options) -> Result<()> {
+pub fn run(
+    base_fw: &Path,
+    new_fw: &Path,
+    app: &Path,
+    names: &[String],
+    opts: &Options,
+) -> Result<()> {
     let krate = util::package_name(app)?;
     let have = parts::installed(app);
     let old_catalog = parts::catalog(base_fw)?;
@@ -68,10 +74,18 @@ pub fn run(base_fw: &Path, new_fw: &Path, app: &Path, names: &[String], opts: &O
         }
         println!(
             "{} {name} {} -> {}{}",
-            if opts.dry_run { "plan to update" } else { "update" },
+            if opts.dry_run {
+                "plan to update"
+            } else {
+                "update"
+            },
             old.version,
             new.version,
-            if opts.dry_run { " (--dry-run: nothing written)" } else { "" }
+            if opts.dry_run {
+                " (--dry-run: nothing written)"
+            } else {
+                ""
+            }
         );
         let (conflicts, changed) = update_one(app, &krate, old, new, opts)?;
         total_conflicts += conflicts;
@@ -107,7 +121,9 @@ pub fn run(base_fw: &Path, new_fw: &Path, app: &Path, names: &[String], opts: &O
              (yours, the installed part, the new part), then cargo fmt --all and the Definition of Done"
         )));
     }
-    println!("\ndone. Next: re-vendor the newer framework (.offrails/generators/upgrade.md), cargo run -q -- db migrate, then the Definition of Done on SQLite and Postgres; read the part's CHECKS.md");
+    println!(
+        "\ndone. Next: re-vendor the newer framework (.offrails/generators/upgrade.md), cargo run -q -- db migrate, then the Definition of Done on SQLite and Postgres; read the part's CHECKS.md"
+    );
     Ok(())
 }
 
@@ -118,7 +134,9 @@ fn installed_version(app: &Path, name: &str) -> Option<String> {
         .filter_map(|l| l.split_once(": installed sample ").map(|(_, r)| r))
         .find_map(|r| {
             let mut w = r.split_whitespace();
-            (w.next() == Some(name)).then(|| w.next().map(str::to_owned)).flatten()
+            (w.next() == Some(name))
+                .then(|| w.next().map(str::to_owned))
+                .flatten()
         })
 }
 
@@ -127,9 +145,19 @@ fn part_text(part: &Part, f: &str, krate: &str) -> Option<String> {
     util::as_text(&bytes).map(|t| parts::rename_crate(t, krate).replace("\r\n", "\n"))
 }
 
-fn update_one(app: &Path, krate: &str, old: &Part, new: &Part, opts: &Options) -> Result<(usize, bool)> {
-    let old_files: BTreeSet<String> = util::files_under(&old.dir.join("files"))?.into_iter().collect();
-    let new_files: BTreeSet<String> = util::files_under(&new.dir.join("files"))?.into_iter().collect();
+fn update_one(
+    app: &Path,
+    krate: &str,
+    old: &Part,
+    new: &Part,
+    opts: &Options,
+) -> Result<(usize, bool)> {
+    let old_files: BTreeSet<String> = util::files_under(&old.dir.join("files"))?
+        .into_iter()
+        .collect();
+    let new_files: BTreeSet<String> = util::files_under(&new.dir.join("files"))?
+        .into_iter()
+        .collect();
     let labels = (
         "app".to_owned(),
         format!("{} {}", old.name, old.version),
@@ -145,7 +173,9 @@ fn update_one(app: &Path, krate: &str, old: &Part, new: &Part, opts: &Options) -
             Outcome::Merged => format!("  merge  {path} (both changed it; merged cleanly)"),
             Outcome::Conflict(n) => format!("  CONFLICT {path}: {n} hunk(s) with markers"),
             Outcome::Created => format!("  create {path} (new in this version)"),
-            Outcome::Deleted => format!("  remove {path} (gone from this version, unchanged in the app)"),
+            Outcome::Deleted => {
+                format!("  remove {path} (gone from this version, unchanged in the app)")
+            }
             Outcome::Note(n) => format!("  note   {path}: {n}"),
         };
         println!("{line}");
@@ -173,7 +203,12 @@ fn update_one(app: &Path, krate: &str, old: &Part, new: &Part, opts: &Options) -
                 changed = true;
                 report(f, &Outcome::Took);
             } else {
-                report(f, &Outcome::Note("binary, changed in the app and in the part: kept the app's".into()));
+                report(
+                    f,
+                    &Outcome::Note(
+                        "binary, changed in the app and in the part: kept the app's".into(),
+                    ),
+                );
             }
             continue;
         };
@@ -208,7 +243,9 @@ fn update_one(app: &Path, krate: &str, old: &Part, new: &Part, opts: &Options) -
             }
             (Some(b), None) => {
                 if b == theirs {
-                    Outcome::Note("the app deleted it; the part didn't change it: still deleted".into())
+                    Outcome::Note(
+                        "the app deleted it; the part didn't change it: still deleted".into(),
+                    )
                 } else {
                     Outcome::Note("the app deleted it and the part changed it: still deleted; read the new version in the part".into())
                 }
@@ -235,13 +272,27 @@ fn update_one(app: &Path, krate: &str, old: &Part, new: &Part, opts: &Options) -
             changed = true;
             report(f, &Outcome::Deleted);
         } else {
-            report(f, &Outcome::Note("gone from the new version, changed in the app: kept".into()));
+            report(
+                f,
+                &Outcome::Note("gone from the new version, changed in the app: kept".into()),
+            );
         }
     }
     // Wiring.
     let have = parts::installed(app);
-    let applies = |w: &Wire| w.when.as_deref().is_none_or(|when| have.iter().any(|h| h == when));
-    let key = |w: &Wire| format!("{}\u{0}{}\u{0}{}", w.file, w.anchor, w.when.clone().unwrap_or_default());
+    let applies = |w: &Wire| {
+        w.when
+            .as_deref()
+            .is_none_or(|when| have.iter().any(|h| h == when))
+    };
+    let key = |w: &Wire| {
+        format!(
+            "{}\u{0}{}\u{0}{}",
+            w.file,
+            w.anchor,
+            w.when.clone().unwrap_or_default()
+        )
+    };
     for w in new.wires.iter().filter(|w| applies(w)) {
         let text = parts::rename_crate(&w.text, krate);
         let old_w = old.wires.iter().find(|o| key(o) == key(w));
@@ -250,7 +301,13 @@ fn update_one(app: &Path, krate: &str, old: &Part, new: &Part, opts: &Options) -
             continue;
         }
         let Some(file_text) = read(&rel(app, &w.file)) else {
-            report(&w.file, &Outcome::Note(format!("missing; its `samples: {}` wiring can't be updated", w.anchor)));
+            report(
+                &w.file,
+                &Outcome::Note(format!(
+                    "missing; its `samples: {}` wiring can't be updated",
+                    w.anchor
+                )),
+            );
             continue;
         };
         if find_block(&file_text, &text).is_some() {
@@ -291,7 +348,10 @@ fn update_one(app: &Path, krate: &str, old: &Part, new: &Part, opts: &Options) -
             Some(t) => {
                 write(&w.file, &t)?;
                 changed = true;
-                report(&w.file, &Outcome::Note(format!("wiring at `samples: {}` updated", w.anchor)));
+                report(
+                    &w.file,
+                    &Outcome::Note(format!("wiring at `samples: {}` updated", w.anchor)),
+                );
             }
             None => {
                 conflicts += 1;
@@ -300,20 +360,33 @@ fn update_one(app: &Path, krate: &str, old: &Part, new: &Part, opts: &Options) -
                     &Outcome::Note(format!(
                         "CONFLICT: the `samples: {}` wiring changed in the part, and the app's copy isn't the old one; make it:\n{}",
                         w.anchor,
-                        text.lines().map(|l| format!("         {l}")).collect::<Vec<_>>().join("\n")
+                        text.lines()
+                            .map(|l| format!("         {l}"))
+                            .collect::<Vec<_>>()
+                            .join("\n")
                     )),
                 );
             }
         }
     }
-    for o in old.wires.iter().filter(|o| !new.wires.iter().any(|w| key(w) == key(o)) && applies(o)) {
+    for o in old
+        .wires
+        .iter()
+        .filter(|o| !new.wires.iter().any(|w| key(w) == key(o)) && applies(o))
+    {
         let old_text = parts::rename_crate(&o.text, krate);
         if let Some(file_text) = read(&rel(app, &o.file))
             && let Some(t) = remove_block(&file_text, &old_text)
         {
             write(&o.file, &t)?;
             changed = true;
-            report(&o.file, &Outcome::Note(format!("wiring at `samples: {}` removed (gone from the part)", o.anchor)));
+            report(
+                &o.file,
+                &Outcome::Note(format!(
+                    "wiring at `samples: {}` removed (gone from the part)",
+                    o.anchor
+                )),
+            );
         }
     }
     for c in new.crates.iter().filter(|c| !old.crates.contains(c)) {

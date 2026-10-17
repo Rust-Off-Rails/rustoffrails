@@ -33,7 +33,9 @@ pub fn plan(info: &AppInfo, args: &[String], _flags: &Flags) -> Result<Plan> {
     }
     for a in &actions {
         if a.is_empty() || names::RUST_KEYWORDS.contains(&a.as_str()) {
-            return Err(Fail::usage(format!("'{a}' isn't a usable mailer action name")));
+            return Err(Fail::usage(format!(
+                "'{a}' isn't a usable mailer action name"
+            )));
         }
     }
     let cmd = plan.command();
@@ -75,9 +77,19 @@ pub fn plan(info: &AppInfo, args: &[String], _flags: &Flags) -> Result<Plan> {
             "#[tokio::test]\nasync fn {a}_has_both_parts_and_absolute_links() {{\n    let app = TestApp::new().await;\n    let email = {m}::{a}(&app.state.config, \"ada@example.com\").unwrap();\n    assert_eq!(email.to, \"ada@example.com\");\n    assert!(email.subject.starts_with(\"{subject}\"), \"{{}}\", email.subject);\n    let link = format!(\"{{}}/\", app.state.config.app_url);\n    assert!(email.html.contains(&link), \"html part links to the app\");\n    assert!(email.text.contains(&link), \"text part links to the app\");\n}}\n\n#[tokio::test]\nasync fn {a}_is_delivered() {{\n    let app = TestApp::new().await;\n    let email = {m}::{a}(&app.state.config, \"ada@example.com\").unwrap();\n    app.state.mailer.deliver(email).await.unwrap();\n    let sent = app.last_email_to(\"ada@example.com\").expect(\"sent\");\n    assert!(sent.subject.starts_with(\"{subject}\"));\n}}\n\n"
         ));
     }
-    plan.create(format!("src/mailers/{m}.rs"), src.trim_end().to_owned() + "\n");
-    plan.insert("src/mailers/mod.rs", "mailer mods", format!("pub mod {m};\n"));
-    plan.create(format!("tests/app/{m}_test.rs"), tests.trim_end().to_owned() + "\n");
+    plan.create(
+        format!("src/mailers/{m}.rs"),
+        src.trim_end().to_owned() + "\n",
+    );
+    plan.insert(
+        "src/mailers/mod.rs",
+        "mailer mods",
+        format!("pub mod {m};\n"),
+    );
+    plan.create(
+        format!("tests/app/{m}_test.rs"),
+        tests.trim_end().to_owned() + "\n",
+    );
     plan.insert("tests/app/main.rs", "test mods", format!("mod {m}_test;\n"));
     plan.next.push(format!(
         "give each action its data (src/mailers/{m}.rs) and its words (templates/mailers/{m}/); send it from a job: `cargo offrails g job …` then `state.mailer.deliver(email)` in perform"

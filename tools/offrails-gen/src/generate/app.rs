@@ -93,7 +93,9 @@ pub fn anchor_hint(anchor: &str) -> &'static str {
         "routes" => "src/routes.rs, after the last app `.route(…)` statement in `router`",
         "paths" => "src/routes.rs, the last line inside `pub mod paths { … }`",
         "routes table" => "src/routes.rs, the last line inside `ROUTES: &[…]`",
-        "nav links" => "templates/shared/_nav.html, inside the links <div> ({# samples: nav links #})",
+        "nav links" => {
+            "templates/shared/_nav.html, inside the links <div> ({# samples: nav links #})"
+        }
         "sitemap paths" => "src/controllers/meta.rs, the last line of the `public_paths()` vec",
         "migration mods" => "migration/src/lib.rs, after the `mod m…;` lines",
         "migrations" => "migration/src/lib.rs, after the last `Box::new(…)` in `migrations()`",

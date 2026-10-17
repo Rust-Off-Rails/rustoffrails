@@ -65,7 +65,9 @@ impl ModelSpec {
     /// Resolves names, fields, scope and references against the app.
     pub fn resolve(info: &AppInfo, args: &[String], flags: &Flags, command: &str) -> Result<Self> {
         let Some(raw) = args.first() else {
-            return Err(Fail::usage("needs a name and fields: Post title:string body:text"));
+            return Err(Fail::usage(
+                "needs a name and fields: Post title:string body:text",
+            ));
         };
         let names = Names::new(raw)?;
         let scope = match flags.recorded("scope").as_deref() {
@@ -222,14 +224,19 @@ impl ModelSpec {
                 format!("{{{}}}", chrono.join(", "))
             }
         ));
-        s.push_str("use sea_orm::{ActiveValue::Set, QueryOrder, QuerySelect, entity::prelude::*};\n");
+        s.push_str(
+            "use sea_orm::{ActiveValue::Set, QueryOrder, QuerySelect, entity::prelude::*};\n",
+        );
         s.push_str("use serde::Deserialize;\n\n");
         s.push_str("use crate::error::AppError;\n");
         let mut models = vec!["Errors", "Page"];
         if user {
             models.push("User");
         }
-        s.push_str(&format!("use crate::models::{{{}}};\n\n", models.join(", ")));
+        s.push_str(&format!(
+            "use crate::models::{{{}}};\n\n",
+            models.join(", ")
+        ));
 
         // entity
         s.push_str("// ---------- Entity: mirrors the migration exactly ----------\n\n");
@@ -237,7 +244,10 @@ impl ModelSpec {
         s.push_str(&format!("#[sea_orm(table_name = \"{}\")]\n", n.plural));
         s.push_str("pub struct Model {\n    #[sea_orm(primary_key)]\n    pub id: i64,\n");
         if let Some(o) = &self.owner {
-            s.push_str(&format!("    /// The owner, set from the session (never from params).\n    pub {}: i64,\n", o.column));
+            s.push_str(&format!(
+                "    /// The owner, set from the session (never from params).\n    pub {}: i64,\n",
+                o.column
+            ));
         }
         for f in &self.fields {
             if let Some(a) = f.entity_attr() {
@@ -251,7 +261,9 @@ impl ModelSpec {
         s.push_str("    pub created_at: DateTimeUtc,\n    pub updated_at: DateTimeUtc,\n    // samples: columns\n}\n\n");
 
         // relations
-        s.push_str("#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]\npub enum Relation {\n");
+        s.push_str(
+            "#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]\npub enum Relation {\n",
+        );
         let mut related = String::new();
         let mut related_done: Vec<String> = Vec::new();
         if let Some(o) = &self.owner {
@@ -292,9 +304,14 @@ impl ModelSpec {
             n.lower,
             if user { ": no owner" } else { "" }
         ));
-        s.push_str(&format!("#[derive(Debug, Default, Clone, Deserialize)]\npub struct {m}Params {{\n"));
+        s.push_str(&format!(
+            "#[derive(Debug, Default, Clone, Deserialize)]\npub struct {m}Params {{\n"
+        ));
         for f in &self.fields {
-            s.push_str(&format!("    #[serde(default)]\n    pub {}: String,\n", f.param()));
+            s.push_str(&format!(
+                "    #[serde(default)]\n    pub {}: String,\n",
+                f.param()
+            ));
         }
         s.push_str("}\n\n");
         s.push_str(&format!(
@@ -333,7 +350,10 @@ impl ModelSpec {
         if let Some(l) = label_field(&self.fields) {
             let col = l.column();
             let expr = if l.nullable {
-                format!("self.{col}.clone().unwrap_or_else(|| format!(\"{} #{{}}\", self.id))", n.human)
+                format!(
+                    "self.{col}.clone().unwrap_or_else(|| format!(\"{} #{{}}\", self.id))",
+                    n.human
+                )
             } else {
                 format!("self.{col}.clone()")
             };
@@ -437,7 +457,11 @@ impl ModelSpec {
     fn user_queries(&self) -> String {
         let n = &self.names;
         let m = &n.model;
-        let o = self.owner.as_ref().map(|o| o.column.clone()).unwrap_or_else(|| "user_id".into());
+        let o = self
+            .owner
+            .as_ref()
+            .map(|o| o.column.clone())
+            .unwrap_or_else(|| "user_id".into());
         let oc = super::names::camel(&o);
         let refs = if self.targets.is_empty() {
             ""
@@ -523,9 +547,15 @@ impl ModelSpec {
     fn unit_tests(&self) -> String {
         let m = &self.names.model;
         let mut s = String::from("#[cfg(test)]\nmod tests {\n    use super::*;\n\n");
-        s.push_str(&format!("    fn valid() -> {m}Params {{\n        {m}Params {{\n"));
+        s.push_str(&format!(
+            "    fn valid() -> {m}Params {{\n        {m}Params {{\n"
+        ));
         for f in &self.fields {
-            s.push_str(&format!("            {}: {}.into(),\n", f.param(), sample(f, false)));
+            s.push_str(&format!(
+                "            {}: {}.into(),\n",
+                f.param(),
+                sample(f, false)
+            ));
         }
         s.push_str("        }\n    }\n\n");
         s.push_str("    #[test]\n    fn valid_params_validate() {\n        assert!(valid().validate().is_ok(), \"{:?}\", valid().validate());\n    }\n\n");
@@ -539,8 +569,15 @@ impl ModelSpec {
                 "    #[test]\n    fn required_fields_cant_be_blank() {{\n        let errors = {m}Params::default().validate().unwrap_err();\n"
             ));
             for f in &required {
-                let msg = if f.is_reference() { "must exist" } else { "can't be blank" };
-                s.push_str(&format!("        assert_eq!(errors.on(\"{}\"), [\"{msg}\"]);\n", f.name));
+                let msg = if f.is_reference() {
+                    "must exist"
+                } else {
+                    "can't be blank"
+                };
+                s.push_str(&format!(
+                    "        assert_eq!(errors.on(\"{}\"), [\"{msg}\"]);\n",
+                    f.name
+                ));
             }
             s.push_str("    }\n\n");
         }
@@ -553,7 +590,11 @@ impl ModelSpec {
             s.push_str("    #[test]\n    fn strings_have_a_maximum_length() {\n");
             for f in &strings {
                 let max = max_len(f);
-                let rest = if self.fields.len() > 1 { "            ..valid()\n" } else { "" };
+                let rest = if self.fields.len() > 1 {
+                    "            ..valid()\n"
+                } else {
+                    ""
+                };
                 s.push_str(&format!(
                     "        let at_max = {m}Params {{\n            {p}: \"x\".repeat({max}),\n{rest}        }};\n        assert!(at_max.validate().is_ok());\n        let over = {m}Params {{\n            {p}: \"x\".repeat({}),\n{rest}        }};\n        assert_eq!(\n            over.validate().unwrap_err().on(\"{n}\"),\n            [\"is too long (maximum is {max} characters)\"]\n        );\n",
                     max + 1,
@@ -572,7 +613,11 @@ impl ModelSpec {
             s.push_str("    #[test]\n    fn typed_fields_reject_garbage() {\n");
             for f in &typed {
                 let (input, msg) = garbage(f).unwrap_or(("", ""));
-                let rest = if self.fields.len() > 1 { "            ..valid()\n" } else { "" };
+                let rest = if self.fields.len() > 1 {
+                    "            ..valid()\n"
+                } else {
+                    ""
+                };
                 s.push_str(&format!(
                     "        let bad = {m}Params {{\n            {p}: \"{input}\".into(),\n{rest}        }};\n        assert_eq!(bad.validate().unwrap_err().on(\"{n}\"), [\"{msg}\"]);\n",
                     p = f.param(),
@@ -592,7 +637,11 @@ impl ModelSpec {
 
     pub fn register(&self, plan: &mut Plan) {
         let n = &self.names;
-        plan.insert("src/models/mod.rs", "model mods", format!("pub mod {};\n", n.singular));
+        plan.insert(
+            "src/models/mod.rs",
+            "model mods",
+            format!("pub mod {};\n", n.singular),
+        );
         plan.insert(
             "src/models/mod.rs",
             "model aliases",
@@ -694,7 +743,11 @@ impl ModelSpec {
         let mut out = format!(
             "//! `{s}` (src/models/{s}.rs) against the database: {}ordering, paging{}.\n//! Generated by `{}`.\n\nuse {k}::error::AppError;\nuse {k}::models::{{Page, {s}}};\n\nuse crate::factories;\nuse crate::support::TestApp;\n\n",
             if user { "scoping, " } else { "" },
-            if self.uniques().is_empty() { "" } else { ", uniqueness" },
+            if self.uniques().is_empty() {
+                ""
+            } else {
+                ", uniqueness"
+            },
             self.command
         );
         if user {
@@ -800,7 +853,10 @@ impl ModelSpec {
             "model test mods",
             format!("mod {}_test;\n", n.singular),
         );
-        plan.create(format!("tests/app/models/{}_test.rs", n.singular), self.model_test());
+        plan.create(
+            format!("tests/app/models/{}_test.rs", n.singular),
+            self.model_test(),
+        );
         if self.has(|f| matches!(f.kind, Kind::Decimal { .. })) {
             plan.cargo("rust_decimal", "rust_decimal");
             plan.cargo("sea-orm --features with-rust_decimal", "with-rust_decimal");
@@ -849,7 +905,11 @@ fn validate_field(f: &Field) -> String {
         }
         _ => {
             let (parse, msg, placeholder) = parse_of(f);
-            let blank = if f.is_reference() { "must exist" } else { "can't be blank" };
+            let blank = if f.is_reference() {
+                "must exist"
+            } else {
+                "can't be blank"
+            };
             if f.nullable {
                 format!(
                     "        let {c} = match self.{p}.trim() {{\n            \"\" => None,\n            raw => match {parse} {{\n                Some(v) => Some(v),\n                None => {{\n                    errors.add(\"{key}\", \"{msg}\");\n                    None\n                }}\n            }},\n        }};\n"
@@ -945,7 +1005,9 @@ fn to_param(f: &Field) -> String {
         }
         Kind::DateTime => {
             if opt {
-                format!("r.{c}.map(|t| t.format(\"%Y-%m-%dT%H:%M\").to_string()).unwrap_or_default()")
+                format!(
+                    "r.{c}.map(|t| t.format(\"%Y-%m-%dT%H:%M\").to_string()).unwrap_or_default()"
+                )
             } else {
                 format!("r.{c}.format(\"%Y-%m-%dT%H:%M\").to_string()")
             }
@@ -1056,7 +1118,9 @@ fn taken_value(f: &Field, k: &str, s: &str) -> String {
             format!("taken.{c}.map(|d| d.round_dp({scale}).to_string()).unwrap_or_default()")
         }
         Kind::Decimal { scale, .. } => format!("taken.{c}.round_dp({scale}).to_string()"),
-        Kind::DateTime if f.nullable => format!("taken.{c}.map(|t| t.format(\"%Y-%m-%dT%H:%M\").to_string()).unwrap_or_default()"),
+        Kind::DateTime if f.nullable => format!(
+            "taken.{c}.map(|t| t.format(\"%Y-%m-%dT%H:%M\").to_string()).unwrap_or_default()"
+        ),
         Kind::DateTime => format!("taken.{c}.format(\"%Y-%m-%dT%H:%M\").to_string()"),
         Kind::String if f.nullable => format!("taken.{c}.clone().unwrap_or_default()"),
         Kind::String => format!("taken.{c}.clone()"),
@@ -1070,11 +1134,14 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
     let name = super::names::Names::new(args.first().map(String::as_str).unwrap_or(""))?;
     let mut plan = Plan::new("model", &name.singular, args);
     let spec = ModelSpec::resolve(info, args, flags, &plan.command())?;
-    let stamp = flags.recorded("stamp").unwrap_or_else(|| migration::stamp(info));
+    let stamp = flags
+        .recorded("stamp")
+        .unwrap_or_else(|| migration::stamp(info));
     plan.option("stamp", stamp.clone());
     plan.option("scope", spec.scope.as_str());
     spec.plan_into(&mut plan, &stamp);
-    plan.next.push("cargo run -q -- db migrate   # then prove down(): db rollback && db migrate".into());
+    plan.next
+        .push("cargo run -q -- db migrate   # then prove down(): db rollback && db migrate".into());
     plan.next.push(format!(
         "src/models/{}.rs: adjust the `// APP:` lines (what a {} is, validation limits, the label)",
         spec.names.singular, spec.names.lower

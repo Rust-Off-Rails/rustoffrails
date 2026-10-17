@@ -316,7 +316,14 @@ mod tests {
 
     #[test]
     fn every_spelling_from_any_form() {
-        for raw in ["blog_posts", "BlogPost", "blog-posts", "blogPosts", "BlogPosts", "blog_post"] {
+        for raw in [
+            "blog_posts",
+            "BlogPost",
+            "blog-posts",
+            "blogPosts",
+            "BlogPosts",
+            "blog_post",
+        ] {
             let n = Names::new(raw).unwrap();
             assert_eq!(n.singular, "blog_post", "{raw}");
             assert_eq!(n.plural, "blog_posts");
