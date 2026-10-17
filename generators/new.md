@@ -152,12 +152,13 @@ The tables other kernels need (`sessions`, `blobs`, `broadcasts`) come with the 
 
 Generate these in order, **yourself, with no parallel helpers** until step 7's first green `cargo check` ([workflow](../workflow.md#parallel-helpers-subagents)). Each module compiles against the ones before it. The order is: config → kernel → error/models → state → jobs → views → controllers → routes → tasks → main.
 
-1. `src/config.rs`: `Config`, `AppEnv`, `LogFormat`, `parse_queues`, `Config::test()` ([config](../guides/config.md))
+1. `src/config.rs`: `Config`, `AppEnv`, `LogFormat`, `parse_queues`, `bind_address`, `parse_allowed_hosts`, `boot_warnings`, `Config::test()` ([config](../guides/config.md); `APP_BIND` defaults to 127.0.0.1 in development: [where `serve` listens](../guides/config.md#where-serve-listens-app_bind-app_allowed_hosts-and-the-unset-app_env-warning))
 2. `src/kernel/mod.rs`, `kernel/db.rs` ([database](../guides/database.md#kerneldbrs-spec)) with `acquire_timeout(5 s)`
 3. `src/error.rs`: `AppError` (including `Unavailable` → 503 + `Retry-After`), `ResponseFlavor`, the `shape_errors` middleware and `retry_after` (a `map_response` adding `Retry-After: 1` to any 503 without one) ([errors-and-logging](../guides/errors-and-logging.md#response-mapping))
 4. `src/models/mod.rs`: `Errors`, `Page` and the model aliases ([models](../guides/models.md))
 5. The kernel, now. Each item's spec is in the linked guide:
    - `security.rs`: **the header matrix middleware** (CSP, HSTS and `upgrade-insecure-requests` only with an https `APP_URL`, nosniff, Referrer-Policy, Permissions-Policy, COOP, CORP, X-Frame-Options, `no-store` for authenticated responses, production cookie hardening), mounted outside the panic and timeout layers ([security](../guides/security.md#the-header-matrix));
+   - `hosts.rs`: **development-only Host authorization** (DNS rebinding), the whole file in [security](../guides/security.md#development-is-this-machine-only), mounted just inside the security middleware;
    - `flash.rs` and `rate_limit.rs`;
    - `assets.rs`, and `css.rs` (UI modes): `class_lists`, `missing_classes` (template classes with no rule in `static/app.css`), `css_escape`, `has_selector`, used by the theme guard tests, the development CSS banner and introspection ([views](../guides/views.md#dark-mode), [test-standards §11](../guides/test-standards.md#11-theme-and-css-guards));
    - `tls.rs`: the `HttpToHttps` inner acceptor (plain HTTP on the TLS port → 307 to `https://`) ([deployment](../guides/deployment.md#direct-tls-optional));
@@ -193,7 +194,7 @@ Generate these in order, **yourself, with no parallel helpers** until step 7's f
     - with `API`: `/api/openapi.json`, `/api/v1/…`, `POST /graphql` (with `Extension(graphql::schema())`), and in development `/dev/api-docs` and `/dev/graphiql`; the CORS layer from `APP_CORS_ORIGINS` and the same origins as CSRF trusted origins ([api](../guides/api.md#cors));
     - `/static` with cache headers;
     - the fallback;
-    - the middleware stack (per [routing](../guides/routing.md#middleware): `TimeoutLayer::with_status_code(StatusCode::SERVICE_UNAVAILABLE, 30s)`, never `REQUEST_TIMEOUT`; `kernel::live::gate` innermost when the app has live regions; the CSRF layer also trusts `http://localhost:<APP_DEV_HTTP_PORT>` when set);
+    - the middleware stack (per [routing](../guides/routing.md#middleware): `kernel::hosts::middleware` right inside the security middleware; `TimeoutLayer::with_status_code(StatusCode::SERVICE_UNAVAILABLE, 30s)`, never `REQUEST_TIMEOUT`; `kernel::live::gate` innermost when the app has live regions; the CSRF layer also trusts `http://localhost:<APP_DEV_HTTP_PORT>` when set);
     - `paths` (including `new_session`, used by `error.rs` before auth exists, and `dev_mailbox`);
     - `ROUTES` with an `Access` level for every route;
     - `/admin/jobs`: `jobs::web::router().route_layer(from_extractor_with_state::<AdminAccess, _>(state.clone()))`, mounted when the app is in development or has an admin access method;
@@ -201,9 +202,11 @@ Generate these in order, **yourself, with no parallel helpers** until step 7's f
 
     Each kernel router (jobs web, mailbox, dev) ends with `.layer(kernel::ui::no_store())`.
 11. `src/tasks/mod.rs`, then `tasks/seed.rs` (empty; idempotent per record, in one transaction: [cli](../cli.md#seeds)) and `tasks/test_db_cleanup.rs` (calls `kernel::db::drop_idle_test_databases`, which drops this app's leftover, idle `test_<crate>_<hex>` Postgres databases; see [testing](../guides/testing.md#database-per-test)). `kernel/db.rs` also has `ping(db)` for `/up`, so no SQL lives outside the kernel
-12. `src/lib.rs` (`pub mod` lines only), `src/main.rs`: the full CLI from [`cli.md`](../cli.md). `serve` uses `into_make_service_with_connect_info::<SocketAddr>()`, which `ClientIp` needs for rate limiting, and shuts down gracefully on Ctrl-C or SIGTERM. With `APP_TLS_CERT`/`APP_TLS_KEY` unset it serves plain HTTP with `axum::serve` (behind a TLS proxy). **With them set, it serves HTTPS itself, h2 + http/1.1 via ALPN** ([deployment](../guides/deployment.md#direct-tls-optional)). This is part of `new` in every app, because any app with live updates needs HTTP/2 in the browser, in development too ([realtime](../guides/realtime.md#many-tabs-stall-http11-vs-http2)). Copy this branch exactly:
+12. `src/lib.rs` (`pub mod` lines only), `src/main.rs`: the full CLI from [`cli.md`](../cli.md). Right after `init_tracing`, `main` logs each of `config.boot_warnings()` at warn (an unset `APP_ENV`). `serve` listens on `config.bind` (never a literal `[0, 0, 0, 0]`: `offrails check` `[bind]` fails it) and uses `into_make_service_with_connect_info::<SocketAddr>()`, which `ClientIp` needs for rate limiting, and shuts down gracefully on Ctrl-C or SIGTERM. With `APP_TLS_CERT`/`APP_TLS_KEY` unset it serves plain HTTP with `axum::serve` (behind a TLS proxy). **With them set, it serves HTTPS itself, h2 + http/1.1 via ALPN** ([deployment](../guides/deployment.md#direct-tls-optional)). This is part of `new` in every app, because any app with live updates needs HTTP/2 in the browser, in development too ([realtime](../guides/realtime.md#many-tabs-stall-http11-vs-http2)). Copy this branch exactly:
 
     ```rust
+    // APP_BIND: 127.0.0.1 in development (this machine only), 0.0.0.0 in production.
+    let addr = SocketAddr::new(config.bind, config.port);
     // One bind for both branches: a taken port fails here, once, with a clear error.
     let listener = tokio::net::TcpListener::bind(addr).await.with_context(|| format!("binding {addr}"))?;
     let drain = config.shutdown_drain; // APP_SHUTDOWN_DRAIN_SECS, default 5
@@ -225,7 +228,7 @@ Generate these in order, **yourself, with no parallel helpers** until step 7's f
                 .with_context(|| format!("loading APP_TLS_CERT={} / APP_TLS_KEY={}", tls.cert, tls.key))?;
             // Development only: the same router and state on plain HTTP beside the TLS port.
             if let Some(port) = config.dev_http_port {
-                let plain = tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))).await
+                let plain = tokio::net::TcpListener::bind(SocketAddr::new(config.bind, port)).await
                     .with_context(|| format!("binding APP_DEV_HTTP_PORT={port}"))?;
                 let (service, mut stopping) = (service.clone(), stopping.clone());
                 tokio::spawn(async move {
@@ -335,7 +338,8 @@ The layout is one binary, `tests/app/` ([testing](../guides/testing.md)):
 - non-public routes never return 2xx anonymously (production config with an admin password);
 - `Dev` routes return 404 with production config;
 - `/admin/jobs` returns 404 in production with no access method, accepts the admin password, and rejects a wrong one;
-- a cross-site POST and a foreign-`Origin` POST both get 403.
+- a cross-site POST and a foreign-`Origin` POST both get 403;
+- development refuses a rebound `Host` (pages, `/dev` and a same-origin POST get the 403 page, with the header matrix and the host escaped), answers `localhost`, `127.0.0.1`, `[::1]`, `APP_URL`'s host and `APP_ALLOWED_HOSTS`, and production and test answer any host: `development_refuses_a_rebound_host_name`, `development_answers_local_and_configured_hosts`, `production_and_test_answer_any_host` ([security](../guides/security.md#development-is-this-machine-only)). `config.rs` has `development_binds_loopback_unless_told_otherwise` and `an_unset_app_env_warns_at_boot`, `kernel/hosts.rs` its two unit tests.
 
 Also, generated with the kernel and never skipped:
 
@@ -356,7 +360,8 @@ If `ACCOUNTS` isn't "none", run [`authentication.md`](authentication.md) now.
    - `curl -i localhost:3000/up` returns 200;
    - `/` shows digested `/static/...?v=` URLs, and fetching one returns `cache-control: …immutable`;
    - `/dev` returns 200, and `curl -X POST -H 'Sec-Fetch-Site: same-origin' localhost:3000/dev/mailbox/test` then `curl -s localhost:3000/dev/mailbox/latest.json` shows the test email;
-   - `curl -X POST -H 'Origin: https://evil.example' localhost:3000/` returns 403.
+   - `curl -X POST -H 'Origin: https://evil.example' localhost:3000/` returns 403;
+   - `curl -s -o /dev/null -w '%{http_code}' -H 'Host: evil.test' localhost:3000/dev` prints 403, and `lsof -nP -iTCP:3000 -sTCP:LISTEN` shows `127.0.0.1:3000` (development is this machine only);
    - the [fresh-database smoke](../guides/dev-tools.md#pending-migrations): an empty database shows the pending-migrations page (503), never a boot crash.
 
    In `inertia`/`spa`, `bin/dev` runs Vite next to the server. Open `https://localhost:3000` (not :5173) and check that the browser console is clean, which means no CORS or CSP errors. Then `pnpm --dir web build` and `APP_ENV=production … serve`: the shell links `/assets/…` from the manifest, and `/assets` responses are `immutable`.

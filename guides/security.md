@@ -1,7 +1,8 @@
 # Security
 
 > **TL;DR**
-> - 12 **non-negotiables** (CSP, headers, CSRF/Origin, escaping, authorization, tenant scoping, rate limits, tokens, session revocation, cookies, secrets, dependencies) are never weakened without a decision entry **and** the human's explicit OK.
+> - 13 **non-negotiables** (CSP, headers, CSRF/Origin, escaping, authorization, tenant scoping, rate limits, tokens, session revocation, cookies, secrets, dependencies, development reachable from this machine only) are never weakened without a decision entry **and** the human's explicit OK.
+> - Development listens on 127.0.0.1 (`APP_BIND`) and refuses any `Host` that isn't this machine (`kernel/hosts.rs`): `/dev` has no login, and DNS rebinding reaches it same-origin, past CSRF.
 > - CSRF is tower-http's `CsrfLayer` (Fetch Metadata + Origin, no tokens); the header matrix applies to every response class, tested by `headers_test.rs`.
 > - No raw HTML except ammonia output; no SQL via `format!`; no mass assignment (owner/role fields never in `Params`); uploads validated and served safely.
 > - CI enforces cargo-deny, gitleaks and a ZAP baseline; security-relevant changes run `/offrails:security` and add attack tests.
@@ -26,6 +27,7 @@ You must **never weaken** any of these without **both** a `docs/decisions.md` en
 10. **Cookies**: `HttpOnly`, `SameSite=Lax`, `Secure` in production; the session cookie is `__Host-` prefixed in production.
 11. **Secrets hygiene**: env vars only. Never in code, logs, job args, error pages, fixtures or git history (gitleaks in CI).
 12. **Dependencies**: cargo-deny green (no known advisories, permissive licenses, no banned crates, crates.io only).
+13. **Development is this machine only**: `serve` binds 127.0.0.1 in development unless `APP_BIND` says otherwise, and `kernel::hosts` refuses a `Host` that isn't localhost, `APP_URL`'s or an `APP_ALLOWED_HOSTS` entry ([below](#development-is-this-machine-only)).
 
 The plugin's hooks flag the common ways these get weakened as you type (`|safe`, `{@html}`, `dangerouslySetInnerHTML`, inline scripts, `unsafe-inline`/`unsafe-eval`, permissive CORS, SQL built with `format!`, cookies with `Secure`/`HttpOnly` turned off). For a full review run **`/offrails:security`**: threat model, scanners, live header check, the checklist, and attack tests.
 
@@ -143,6 +145,240 @@ See `storage.md`. In short: enforce a size limit per route (`DefaultBodyLimit`),
 - `/admin/jobs` ([jobs-dashboard](jobs-dashboard.md)) is protected by the `AdminAccess` extractor: `RequireAdmin` when roles exist, otherwise HTTP Basic with `APP_ADMIN_PASSWORD`. In production with neither, it isn't mounted. Any future `/admin/*` screen uses the same extractor.
 - `/dev/*` ([dev-tools](dev-tools.md)) exists only in development. It's not hidden, it's not routed. A test proves it 404s with a production config.
 - Admin actions are POSTs (CSRF applies), are logged with the acting user, and send `Cache-Control: no-store`.
+
+## Development is this machine only
+
+`/dev` has no login, by design: the mailbox shows every magic link and reset link, introspection shows the app's state, and `/admin/jobs` is open in development. That's safe only if nobody but you can reach it. Two holes, found by an independent review of generated apps (fixed in 0.7.0):
+
+- **The LAN.** `serve` used to bind `0.0.0.0` in every environment, so anyone on the same Wi-Fi could open `http://<your-ip>:3000/dev/mailbox` and sign in as you.
+- **DNS rebinding.** A page on `evil.example` re-points its own name at `127.0.0.1`. Your browser then sends `Host: evil.example:3000` to your dev server **same-origin**: CORS doesn't apply, and Fetch Metadata says `same-origin`, so the `CsrfLayer` lets its POSTs through too. The `Host` header is the one thing the attacker can't set to `localhost`.
+
+So, in development only:
+
+1. **Bind loopback.** `serve` listens on `config.bind` (`APP_BIND`, default `127.0.0.1` in development, `0.0.0.0` in production: [config](config.md#where-serve-listens-app_bind-app_allowed_hosts-and-the-unset-app_env-warning)). A dev container sets `APP_BIND=0.0.0.0` so the published port works.
+2. **Check `Host`** (Rails' `HostAuthorization`). `kernel/hosts.rs` answers only `localhost`, `127.0.0.1`, `[::1]`, `*.localhost` (RFC 6761), `APP_URL`'s host and `APP_ALLOWED_HOSTS` entries (a leading `.` allows subdomains). Anything else gets a 403 page that says how to allow it. It runs **inside** the header-matrix middleware (the 403 carries the headers) and outside everything else, so no handler and no `/dev` page runs for a refused host ([routing](routing.md#middleware)). A request with no `Host` passes: a browser always sends one, and rebinding needs a browser. Production and test aren't checked: the platform's proxy routes by host, and an app answering any `Host` there exposes nothing that isn't public.
+3. **Say when `APP_ENV` is unset.** It still means development (so `cargo run` works), but `Config::boot_warnings` logs it at every boot, because on a server it's a missing setting that mounts `/dev`.
+
+To open the dev server from a phone or another machine, set both `APP_BIND=0.0.0.0` and `APP_ALLOWED_HOSTS=<the name or IP you'll type>`, and know that everyone on that network can then read your mailbox. A tunnel (`cloudflared`, `ngrok`) only needs `APP_ALLOWED_HOSTS=<tunnel host>` (or set `APP_URL` to it).
+
+`src/kernel/hosts.rs`, whole (from an app generated from these docs, 2026-10-16; axum 0.8.9):
+
+```rust
+//! Development-only Host authorization (Rails' `HostAuthorization`): a request whose `Host` isn't
+//! this machine, `APP_URL`'s host or an `APP_ALLOWED_HOSTS` entry gets a 403 page that says how to
+//! allow it. Why: development serves /dev without a login, and DNS rebinding sends
+//! `Host: evil.example` to this server same-origin, past CORS and the CSRF layer.
+//! Production is not checked: the platform's proxy routes by host.
+//! GUIDE: .offrails/guides/security.md#development-is-this-machine-only
+
+use axum::{
+    extract::{Request, State},
+    http::{HeaderValue, StatusCode, header},
+    middleware::Next,
+    response::{IntoResponse, Response},
+};
+
+use crate::config::Config;
+
+/// The hosts development answers. `None` outside development (no check).
+#[derive(Clone, Debug)]
+pub struct AllowedHosts(Option<Vec<String>>);
+
+impl AllowedHosts {
+    pub fn new(config: &Config) -> Self {
+        if !config.is_development() {
+            return Self(None);
+        }
+        // APP: names development always answers; add yours with APP_ALLOWED_HOSTS, not here.
+        let mut hosts: Vec<String> = ["localhost", "127.0.0.1", "::1"].iter().map(|h| (*h).to_owned()).collect();
+        if let Some(h) = host_of_url(&config.app_url) {
+            hosts.push(h);
+        }
+        hosts.extend(config.allowed_hosts.iter().map(|h| normalize(h)));
+        Self(Some(hosts))
+    }
+
+    /// `Host` values this allows (`host` or `host:port`, any case). A missing `Host` (an
+    /// HTTP/1.0 client, a test request) is allowed: a rebinding attack needs a browser.
+    pub fn allows(&self, host: Option<&str>) -> bool {
+        let Some(list) = &self.0 else { return true };
+        let Some(host) = host else { return true };
+        let host = normalize(host);
+        // `*.localhost` resolves to this machine by definition (RFC 6761).
+        host.ends_with(".localhost")
+            || list.iter().any(|allowed| {
+                allowed == &host
+                    || allowed
+                        .strip_prefix('.')
+                        .is_some_and(|domain| host == domain || host.ends_with(allowed.as_str()))
+            })
+    }
+}
+
+/// `Host: Dev.Example.com:3000` → `dev.example.com`; `[::1]:3000` → `::1`.
+fn normalize(host: &str) -> String {
+    let host = host.trim().to_ascii_lowercase();
+    if let Some(rest) = host.strip_prefix('[') {
+        return rest.split(']').next().unwrap_or_default().to_owned();
+    }
+    if host.matches(':').count() > 1 {
+        return host; // a bare IPv6 address has no port
+    }
+    match host.rsplit_once(':') {
+        Some((name, port)) if port.chars().all(|c| c.is_ascii_digit()) => name.to_owned(),
+        _ => host,
+    }
+}
+
+fn host_of_url(url: &str) -> Option<String> {
+    let rest = url.split("://").nth(1)?;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let authority = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    let host = normalize(authority);
+    (!host.is_empty()).then_some(host)
+}
+
+/// The request's host: the URI authority (HTTP/2's `:authority`), else the `Host` header.
+fn request_host(req: &Request) -> Option<String> {
+    if let Some(authority) = req.uri().authority() {
+        return Some(authority.as_str().to_owned());
+    }
+    req.headers().get(header::HOST).map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
+}
+
+// SECURITY: in development, a request for a Host that isn't this machine (DNS rebinding, or a
+// LAN visitor when APP_BIND opens the port) is refused before any handler or /dev tool runs
+// (test: development_refuses_a_rebound_host_name).
+pub async fn middleware(State(hosts): State<AllowedHosts>, req: Request, next: Next) -> Response {
+    let host = request_host(&req);
+    if hosts.allows(host.as_deref()) {
+        return next.run(req).await;
+    }
+    let shown = normalize(host.as_deref().unwrap_or_default());
+    tracing::warn!(host = %shown, "blocked a request for a host development doesn't serve (APP_ALLOWED_HOSTS)");
+    refused(&shown)
+}
+
+fn refused(host: &str) -> Response {
+    let host = escape(host);
+    let body = format!(
+        "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Blocked host</title></head>\n<body><main>\n<h1>Blocked host: {host}</h1>\n<p>In development this app answers only requests addressed to this machine (localhost, 127.0.0.1, [::1]) or to the host in <code>APP_URL</code>. That stops a web page from re-pointing its own domain at your machine (DNS rebinding) and reading your development tools.</p>\n<p>If you meant to open it through <strong>{host}</strong> (a tunnel or a name on your network), allow it and restart:</p>\n<pre>APP_ALLOWED_HOSTS={host}</pre>\n<p>A leading dot allows every subdomain (<code>APP_ALLOWED_HOSTS=.{host}</code>). To reach the app from another device at all, it must also listen beyond this machine: <code>APP_BIND=0.0.0.0</code>.</p>\n</main></body></html>\n"
+    );
+    let mut response = (StatusCode::FORBIDDEN, body).into_response();
+    response.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8"));
+    response
+}
+
+fn escape(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            '<' => "&lt;".to_owned(),
+            '>' => "&gt;".to_owned(),
+            '&' => "&amp;".to_owned(),
+            '"' => "&quot;".to_owned(),
+            '\'' => "&#39;".to_owned(),
+            c => c.to_string(),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::AppEnv;
+
+    fn dev(app_url: &str, allowed: &[&str]) -> AllowedHosts {
+        AllowedHosts::new(&Config {
+            env: AppEnv::Development,
+            app_url: app_url.into(),
+            allowed_hosts: allowed.iter().map(|h| (*h).to_owned()).collect(),
+            ..Config::test()
+        })
+    }
+
+    #[test]
+    fn hosts_match_by_name_without_port_or_case() {
+        let hosts = dev("https://dev.example.com", &["tunnel.example", ".lan.example"]);
+        for ok in ["localhost:3000", "LOCALHOST", "127.0.0.1:3000", "[::1]:3000", "app.localhost:3000",
+                   "dev.example.com", "tunnel.example:443", "lan.example", "box.lan.example:3000"] {
+            assert!(hosts.allows(Some(ok)), "{ok} should be allowed");
+        }
+        for refused in ["evil.example", "localhost.evil.example", "127.0.0.1.evil.example",
+                        "evillan.example", "tunnel.example.evil.example", ""] {
+            assert!(!hosts.allows(Some(refused)), "{refused} should be refused");
+        }
+        assert!(hosts.allows(None));
+    }
+
+    #[test]
+    fn the_refusal_page_escapes_the_host() {
+        assert_eq!(escape("<script>"), "&lt;script&gt;");
+    }
+}
+```
+
+`routes.rs` mounts it right inside the security middleware:
+
+```rust
+        .layer(map_response(error::retry_after))
+        // Development only: a Host that isn't this machine is refused (DNS rebinding).
+        .layer(from_fn_with_state(hosts::AllowedHosts::new(&config), hosts::middleware))
+        // Outside the panic and timeout layers, so a 500 or 503 carries the headers too.
+        .layer(from_fn_with_state(security::Hardening::new(&config), security::middleware))
+```
+
+The request tests, in `tests/app/security_test.rs` (`get_with_headers` and `post_form_with_headers` are on `TestApp`: [testing](testing.md#testapp-spec-testsappsupportrs)):
+
+```rust
+fn development() -> Config { Config { env: AppEnv::Development, ..Config::test() } }
+
+/// DNS rebinding: a page on `evil.example` re-points its name at 127.0.0.1 and reads /dev
+/// same-origin. Development refuses any Host that isn't this machine, before any handler runs.
+#[tokio::test]
+async fn development_refuses_a_rebound_host_name() {
+    let app = TestApp::with_config(development()).await;
+    for path in ["/dev", "/", "/up"] {
+        let res = app.get_with_headers(path, &[("host", "evil.example:3000")]).await;
+        res.assert_status(StatusCode::FORBIDDEN)
+            .assert_contains("Blocked host: evil.example")
+            .assert_contains("APP_ALLOWED_HOSTS=evil.example");
+        assert!(res.headers.contains_key("content-security-policy"), "the refusal carries the header matrix");
+    }
+    // A same-origin POST from the rebound page (Fetch Metadata and Origin agree): the CSRF layer
+    // alone would pass it. Use any POST route the app has.
+    app.post_form_with_headers("/dev/jobs/test", &[], &[("host", "evil.example:3000"), ("origin", "http://evil.example:3000")])
+        .await
+        .assert_status(StatusCode::FORBIDDEN);
+    // Markup in the Host header is escaped on the page.
+    app.get_with_headers("/", &[("host", "a<b>.example")]).await
+        .assert_status(StatusCode::FORBIDDEN)
+        .assert_not_contains("a<b>");
+}
+
+#[tokio::test]
+async fn development_answers_local_and_configured_hosts() {
+    let app = TestApp::with_config(Config {
+        app_url: "https://dev.example.com".into(),
+        allowed_hosts: vec!["tunnel.example".into(), ".lan.example".into()],
+        ..development()
+    })
+    .await;
+    for host in ["localhost:3000", "127.0.0.1:3000", "[::1]:3000", "dev.example.com", "tunnel.example", "box.lan.example:3000"] {
+        app.get_with_headers("/up", &[("host", host)]).await.assert_ok();
+    }
+    app.get("/up").await.assert_ok(); // no Host at all (HTTP/1.0, a probe): nothing to rebind
+}
+
+#[tokio::test]
+async fn production_and_test_answer_any_host() {
+    for config in [production(), Config::test()] {   // production(): the suite's production Config
+        let app = TestApp::with_config(config).await;
+        app.get_with_headers("/up", &[("host", "evil.example")]).await.assert_ok();
+    }
+}
+```
+
+Prove it on the running app: `curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: evil.test' localhost:$PORT/dev` prints `403` (and the usual status without the header), `lsof -nP -iTCP:$PORT -sTCP:LISTEN` shows `127.0.0.1:$PORT`, not `*:$PORT`, and `curl http://<this machine's LAN IP>:$PORT/up` is refused (curl exit 7). Verified 2026-10-16 on macOS against an app generated from these docs, along with the boot warning when `APP_ENV` is unset.
 
 ## WebSockets
 
@@ -269,6 +505,7 @@ The "brakeman" pass. Run through this before finishing any work touching auth, p
 - [ ] Tenant data: every query filters by `account_id`, and a cross-tenant test exists.
 - [ ] No entity `Model` is serialized to a client. Only `*Json`/props structs.
 - [ ] `/admin/*` requires `AdminAccess`; `/dev/*` is absent in production (test exists).
+- [ ] Development listens on `config.bind` (127.0.0.1 unless `APP_BIND`) and `kernel::hosts` refuses foreign `Host` names (`development_refuses_a_rebound_host_name`); no `[0, 0, 0, 0]` bind in `src/` (`offrails check` `[bind]`).
 - [ ] Job args carry no secrets or tokens (they're visible in `/admin/jobs`). Auth emails create their token **inside** the job ([auth](auth.md#password-reset-passwordsrs-new-create-edit-update)).
 - [ ] No `|safe` / `dangerouslySetInnerHTML` except sanitized `*_html` fields.
 - [ ] No raw SQL outside the kernel or a logged escape hatch, and all values bound.

@@ -172,6 +172,7 @@ volumes:
 - The `app` healthcheck is `app health`, a subcommand that requests `GET /up` on `127.0.0.1:$PORT` (the slim runtime image has no curl or wget). With direct TLS it only checks the port opens.
 - `APP_ENV=production` inside compose on purpose: it's the deploy's behavior (JSON logs, `/dev` not mounted, the admin password on `/admin/jobs`). `APP_ADMIN_PASSWORD` defaults to `change-me` here only.
 - Don't use `env_file: .env`: `.env` holds development values (SQLite URL, `APP_ENV=development`). Compose reads `.env` only to fill `${…}` defaults.
+- **A container running development needs `APP_BIND=0.0.0.0`.** Development listens on `127.0.0.1` by default ([security](security.md#development-is-this-machine-only)), which inside a container is the container itself: the published port then answers nothing. Production (this file, the Dockerfile) binds `0.0.0.0` already. A dev container or a compose override with `APP_ENV: development` sets `APP_BIND: 0.0.0.0`, publishes the port on `127.0.0.1:` only (`ports: ["127.0.0.1:3000:3000"]`, or the LAN can open `/dev`), and adds `APP_ALLOWED_HOSTS` for any name other than `localhost` it's opened by.
 - `mailpit` is pinned to a tag, never `latest`. Check for a current one before generating.
 - Verified 2026-10-13 with the `offrails-api-demo` app: `docker compose up --build` from scratch (app + db healthy, migrations on boot, REST and GraphQL on Postgres), `--profile mail` (welcome email delivered to Mailpit over SMTP), `--profile worker` (jobs claimed by the worker container's node, none inline).
 
@@ -587,6 +588,7 @@ Redeploy the previous image (`fly deploy --image <prev>`, `kamal rollback <versi
 - [ ] **CI is green on the exact commit you deploy** (`gh run list -L 1 --json headSha,conclusion`). A local DoD doesn't replace it: CI builds from a clean checkout and catches what your machine hides (e.g. a CSS file that only exists locally).
 - [ ] `docker build` succeeds locally, and `/up` returns 200 from the container.
 - [ ] Every new env var is in `.env.example`, `Config`, and the target's config, and you've told the human exactly which secrets to set.
+- [ ] `APP_ENV=production` is set on every process the target runs (web and worker). Unset means development: `/dev` mounted with no login, and the boot log says `APP_ENV is not set`. Check the first boot's log for that line.
 - [ ] Migrations follow expand/contract, and `down` was tested.
 - [ ] SQLite prod: still a single machine, volume mounted, backups configured.
 - [ ] You haven't run any deploy command without the human's go-ahead. Deploys are outward-facing.

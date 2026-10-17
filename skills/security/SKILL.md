@@ -29,6 +29,7 @@ You are the app's adversary. Assume every input is hostile, every client is scri
    - HSTS in production (`max-age=63072000; includeSubDomains`), `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy`, COOP `same-origin` and CORP `same-origin`;
    - `Cache-Control: no-store` on authenticated and kernel pages;
    - cookies `HttpOnly; Secure (prod); SameSite=Lax`, with the `__Host-` prefix where possible.
+   - development is this machine only: `lsof -nP -iTCP:$PORT -sTCP:LISTEN` shows `127.0.0.1`, not `*`, and `curl -H 'Host: evil.test' $URL/dev` is 403 (DNS rebinding; `.offrails/guides/security.md#development-is-this-machine-only`).
 5. **Walk the checklist** in `security.md` item by item against the code, with `file:line` evidence for each verdict. Go hard on:
    - authorization on every route **and** every socket join and push;
    - tenant scoping on every query;

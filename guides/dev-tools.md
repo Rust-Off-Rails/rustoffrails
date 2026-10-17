@@ -1,7 +1,7 @@
 # Dev Tools (`/dev`, a small Phoenix LiveDashboard)
 
 > **TL;DR**
-> - Every app gets `/dev` (index, routes, system, mailbox, mailer previews) and `/admin/jobs`, built by `new`, never stubbed; mounted only in development (`/admin/jobs` needs admin access in production).
+> - Every app gets `/dev` (index, routes, system, mailbox, mailer previews) and `/admin/jobs`, built by `new`, never stubbed; mounted only in development (`/admin/jobs` needs admin access in production), which listens on 127.0.0.1 and refuses foreign `Host` names (no login on `/dev`).
 > - Kernel pages have their own layout: every link into them carries `hx-boost="false"`, every response is `Cache-Control: no-store`, and they use no `confirm()` dialogs.
 > - Pending migrations: in development every HTML request shows a page with a Run migrations button; `/up` is 503 in production while any are pending.
 > - Agents read email via `/dev/mailbox/latest.json?to=…`; the kernel-page browser smoke is `.offrails/tools/browser-smoke/run.sh`.
@@ -57,6 +57,7 @@ templates/kernel/mailbox/       index.html, _list.html, _message.html
   ```
 
   In production the routes **don't exist** (404, not hidden). Every `/dev` route is in `ROUTES` with `Access::Dev`, and `security_test.rs` requests each one with a production `Config` and expects 404.
+- **Reachable from this machine only.** `/dev` has no login, so development binds `127.0.0.1` (`APP_BIND`) and `kernel::hosts` refuses any `Host` that isn't localhost, `APP_URL`'s or an `APP_ALLOWED_HOSTS` entry (DNS rebinding would otherwise read the mailbox same-origin). Opening it from a phone or a dev container takes `APP_BIND=0.0.0.0` plus `APP_ALLOWED_HOSTS`, and exposes the mailbox to that network ([security](security.md#development-is-this-machine-only)).
 - Server-rendered Askama + vendored htmx + `static/kernel/admin.css` + `static/kernel/admin.js` in every `FRONTEND_MODE`, sharing the jobs dashboard's header (tabs: Overview · Jobs · Cron · Dev · Mailbox · Sockets · Routes) and its flash banner.
 - **Every link from an app page into a kernel page carries `hx-boost="false"`**: the "Dev tools" link, the auth screens' "Check your mailbox" hint (`paths::dev_mailbox()`), any nav item into `/admin/jobs`. The htmx-mode app layout has `<body hx-boost="true">`, and a boosted navigation swaps only `<body>`, so a kernel page (its own `<head>` and stylesheet) renders **unstyled** until a hard refresh. Verified in Chrome. `kernel_web_test.rs::app_links_into_kernel_pages_are_not_boosted` scans an app page and fails on any boosted `/dev` or `/admin` link. (Inertia/react apps: use a plain `<a href>`, never `<Link>`/router navigation, for kernel pages.)
 - **Never cached, never stale on Back:** every `/dev`, `/dev/mailbox` and `/admin/jobs` router ends with `.layer(kernel::ui::no_store())`, so all their responses (pages, fragments, JSON, downloads, redirects) are `Cache-Control: no-store`. The kernel layout sets `historyCacheSize: 0`, and `admin.js` reloads pages restored from the back/forward cache. URLs of things that no longer exist redirect with a flash instead of a bare 404 (deleted message → inbox, deleted job → job list).

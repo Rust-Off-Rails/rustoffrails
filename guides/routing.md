@@ -127,6 +127,7 @@ Outermost first. In code, `.layer` calls run bottom-up, so they appear in the **
 
 1. `SetRequestIdLayer::new(x-request-id, MakeRequestUuid)`, then `TraceLayer::new_for_http().make_span_with(...)` (span fields `method`, `path`, `request_id`), then `PropagateRequestIdLayer`
 2. `kernel::security::middleware` (`from_fn_with_state(security::Hardening::new(&config), …)`): the header matrix, `no-store` for authenticated responses, production cookie hardening ([security](security.md#the-header-matrix)). It sits **outside** the panic and timeout layers, so their 500 and 503 responses are hardened too
+   - then `kernel::hosts::middleware` (`from_fn_with_state(hosts::AllowedHosts::new(&config), …)`): development only, a `Host` that isn't this machine gets a 403 before anything else runs ([security](security.md#development-is-this-machine-only))
 3. `CatchPanicLayer::custom(error::panic_response)` ([errors](errors-and-logging.md))
 4. `axum::middleware::map_response(error::retry_after)`: a 503 without `Retry-After` gets `Retry-After: 1` ([errors](errors-and-logging.md#response-mapping))
 5. `TimeoutLayer::with_status_code(StatusCode::SERVICE_UNAVAILABLE, 30s)`: overload is 503, never 408 (`TimeoutLayer::new` is deprecated in tower-http 0.7; `with_status_code(StatusCode, Duration)` checked against 0.7.1)

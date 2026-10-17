@@ -59,7 +59,9 @@ impl TestApp {
     pub async fn request(&self, req: Request<Body>) -> TestResponse;   // any method/headers; cookies applied and stored
     pub fn db(&self) -> &DatabaseConnection;
     pub async fn get(&self, path: &str) -> TestResponse;
+    pub async fn get_with_headers(&self, path: &str, headers: &[(&str, &str)]) -> TestResponse;   // e.g. ("host", "evil.example")
     pub async fn post_form(&self, path: &str, form: &[(&str, &str)]) -> TestResponse;
+    pub async fn post_form_with_headers(&self, path: &str, form: &[(&str, &str)], headers: &[(&str, &str)]) -> TestResponse;
     pub async fn post_json(&self, path: &str, body: &impl Serialize) -> TestResponse;
     pub async fn post_multipart(&self, path: &str, fields: &[(&str, &str)],
                                 files: &[(&str, &str, &str, &[u8])]) -> TestResponse;   // (field, filename, content type, bytes)
