@@ -73,6 +73,12 @@ Jobs:    email book owner on new review
 Assumed: reviews editable by author only; deleting a book deletes its reviews
 ```
 
+**Head start (optional), asked with the plan.** Tested, security-reviewed code exists for the parts most apps need ([samples](guides/samples.md)): the mailer and dev mailbox, the job queue and its dashboard, accounts (password, magic link + code, TOTP two-factor, an account security page), realtime channels with presence, and a LiveDashboard-style dev dashboard. Offer it in one line, naming only the samples this plan would use, and say what each adds over building from the guides:
+
+> **Head start?** a) Build everything from the framework's guides (Recommended: the default; nothing extra to own) b) Start from the tested samples for the mailer, dev mailbox, jobs and jobs dashboard (plus accounts / realtime / dev dashboard when we build those), adapted to this app
+
+Record the answer in `product/README.md` → Decisions. It changes where the code comes from, never what the app must do: the guides' rules and tests apply either way ([new](generators/new.md#generator-new-rails-new), "Head start").
+
 ## Feature-level questions (existing app)
 
 When a human asks for a feature, check this list. **Always ask** (unless the spec already answers it) if the feature touches:

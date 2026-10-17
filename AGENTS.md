@@ -56,6 +56,7 @@ Read on demand:
 | Shipping it, `docker compose`, direct TLS  | [`guides/deployment.md`](guides/deployment.md) |
 | Running a `rails generate` equivalent      | [`generators/`](generators/)            |
 | Upgrading the app to a newer framework release | [`generators/upgrade.md`](generators/upgrade.md) |
+| Optional reference code (samples): offering, adopting, anchors | [`guides/samples.md`](guides/samples.md) |
 | Commands (`rails s`, `db:migrate`, …)      | [`cli.md`](cli.md)                      |
 
 ## Where the framework lives inside an app

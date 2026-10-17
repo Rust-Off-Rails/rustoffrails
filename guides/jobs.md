@@ -8,6 +8,8 @@
 >
 > Read the rest when adding a worker, a recurring job, a queue, or touching the kernel queue.
 
+**Reference implementation (optional).** The `jobs` [samples](samples.md#the-samples) are this guide built, tested on SQLite and Postgres and security-reviewed, with more on top: batches, rate-limited queues, priorities, timeouts, and args and errors redacted wherever they're shown or searched. They're never required and never vendored automatically. Offer them to the human; if they want one, adopt it or borrow from it per [samples](samples.md#using-one), keeping its `// SECURITY:` markers and the tests its CHECKS.md cites. This guide stays the spec.
+
 Background work runs from a persistent, database-backed queue that you generate into `src/kernel/jobs/`. It's modeled on Elixir's **Oban**:
 
 - jobs are rows with an explicit state machine;

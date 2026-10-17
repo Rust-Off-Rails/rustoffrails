@@ -11,6 +11,8 @@
 >
 > Read the rest when changing a kernel page, debugging pending migrations, setting up dev HTTPS, or running the browser smoke.
 
+**Reference implementation (optional).** The `dev-dashboard` (and `dev-mailbox`) [samples](samples.md#the-samples) are this guide built, tested on SQLite and Postgres and security-reviewed, with more on top: `/dev/dashboard`, a LiveDashboard: live charts, requests per route, trace waterfalls, SQL fingerprints with N+1 detection and EXPLAIN, a live log tail, a routes explorer and a schema browser. They're never required and never vendored automatically. Offer them to the human; if they want one, adopt it or borrow from it per [samples](samples.md#using-one), keeping its `// SECURITY:` markers and the tests its CHECKS.md cites. This guide stays the spec.
+
 In development the app serves a toolbox at `/dev`. It's for the human clicking around and for the agent curling around. Keep it modest: it shows what the app already knows, with no metrics pipeline and no profiler.
 
 **`generators/new.md` builds every page below in every app.** None is optional, stubbed or "added later".

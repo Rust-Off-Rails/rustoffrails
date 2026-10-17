@@ -116,6 +116,10 @@ Scaffold Book with title:string, author:string, published_on:date, rating:intege
 Users must be logged in to create books. Send the owner an email when a book gets a review.
 ```
 
+### Optional: start from the samples
+
+Tested, security-reviewed reference code for the parts most apps need (mailer and dev mailbox, jobs and their dashboard, accounts with TOTP, realtime with presence, a dev dashboard) lives in a separate repo, [Rust-Off-Rails/samples](https://github.com/Rust-Off-Rails/samples). Agents offer it during the interview and on upgrade; you decide. Nothing is installed without a yes, and once copied the app owns the code ([guides/samples.md](guides/samples.md)).
+
 ## Repository layout
 
 ```

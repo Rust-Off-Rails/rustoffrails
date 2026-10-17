@@ -8,6 +8,8 @@
 >
 > Read the rest when writing a mailer, previews, or changing the dev mailbox.
 
+**Reference implementation (optional).** The `mailer` and `dev-mailbox` [samples](samples.md#the-samples) are this guide built, tested on SQLite and Postgres and security-reviewed, with more on top: header-injection checks, a `send_test_email` task, and a mailbox with HTML/text/raw/headers, a 320 px phone-width lint, dark previews, one-key copy of codes and links, search and a CLI. They're never required and never vendored automatically. Offer them to the human; if they want one, adopt it or borrow from it per [samples](samples.md#using-one), keeping its `// SECURITY:` markers and the tests its CHECKS.md cites. This guide stays the spec.
+
 | Rails / Phoenix | Off Rails |
 |-----------------|-----------|
 | `UserMailer.welcome(user)` | `mailers::user_mailer::welcome(&state.config, &user)? -> Email` |

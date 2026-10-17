@@ -18,6 +18,8 @@ Creates a complete, deployable, empty app: about 60 files. It's the longest reci
 
 The cost is generation time, not runtime: an idle queue polls once a second, and the kernel's tests come with it. Don't trim it. If the interview says "no email", the mailer still exists and `EMAIL` records `prod: not yet (logged only)`.
 
+**Head start (optional): the kernel from the samples.** If the human took the head start in the interview ([interview](../interview.md#then-confirm-the-plan-once-before-generating)), the mailer, dev mailbox, job queue and jobs dashboard come from the tested [samples](../guides/samples.md) instead of being written from the guides. The profile is the same, and so are the guides' rules, but the code is already proven. Then: in step 3 skip the `create_jobs` and `create_mailbox_messages` migrations (the samples ship theirs); in step 4 skip `mailer.rs`, `mailbox.rs`, `jobs/`, `src/jobs/` and `src/mailers/`, and add the pieces the samples build on, from the samples repo's `host/` (the theme switch, `kernel/cookie.rs`, `kernel/redact.rs`, `Chrome::stylesheet`; [samples](../guides/samples.md#using-one), step 2); after step 4's first green `cargo check`, install `mailer`, `dev-mailbox`, `jobs` and `jobs-dashboard` (`tools/install.sh <name> .` for each, from the samples tag matching `.offrails/VERSION`); the samples' own tests then stand in for step 7's mailbox and jobs suites (`kernel_jobs_test.rs`, the mailbox and dashboard parts of `kernel_web_test.rs`). Log it: `YYYY-MM-DD: head start: kernel from samples v<version> (mailer, dev-mailbox, jobs, jobs-dashboard)`. Feature samples (`auth-*`, `realtime`, `dev-dashboard`) are offered again when their feature is built. No samples tag for this release, or no network: say so and generate from the guides.
+
 ## 0. Preconditions
 
 - [ ] [`interview.md`](../interview.md) Rounds 1–2 are done (or the human said "you decide"), and the plan is confirmed.
@@ -250,6 +252,31 @@ Generate these in order, **yourself, with no parallel helpers** until step 7's f
     Verified with axum 0.8.9 and axum-server 0.8.0 in the reference app. Never `bind_rustls(addr, …)` after binding `listener`: that binds the port twice. [realtime](../guides/realtime.md) moves this into `kernel::server::run(state, listener, stop)` so the shutdown test runs the real code. `Config` gains `shutdown_drain` (`APP_SHUTDOWN_DRAIN_SECS`, 5) and `dev_http_port` (`APP_DEV_HTTP_PORT`, refused outside development) ([config](../guides/config.md))
 
     `service` is `router.into_make_service_with_connect_info::<SocketAddr>()` and `stop` is the shutdown future (signal, then close pubsub and sockets). Include `app health` (the container healthcheck: `GET /up` on 127.0.0.1:$PORT, no curl needed in the image). With TLS on, it only checks that the port accepts a connection, because a plain-text probe can't talk to a TLS listener.
+
+13. **Sample anchors.** Put each of these one-line comments, **on a line of its own**, at the spot it names, so an optional [sample](../guides/samples.md) can be installed later by `tools/install.sh` (it inserts code above the anchor). They cost nothing if no sample is ever used. Rust files use `// samples: <anchor>`, templates `{# samples: <anchor> #}`, `.env.example` and `compose.yaml` `# samples: <anchor>`. Skip an anchor whose spot your app doesn't have (`install.sh` names a missing one, and the README of each sample says where it goes in words).
+
+    | File | Anchors (where) |
+    |------|-----------------|
+    | `src/lib.rs` | `lib mods` (after the `pub mod` lines) |
+    | `src/kernel/mod.rs` | `kernel mods` |
+    | `src/kernel/ui.rs` | `kernel tabs` (in the kernel header's tab list), `hidden tabs` (a list of tab keys a sample replaces) |
+    | `src/kernel/introspect.rs` | `introspect sections` (in `snapshot`, before it returns: `out["x"] = …;`) |
+    | `src/kernel/security.rs` | `dev csp` (extra CSP directives in development only) |
+    | `src/config.rs` | `config fields` (end of `Config`), `config debug` (end of the `Debug` chain), `config parse` (in `from_env`, before the missing/invalid check), `config init` (end of the `Config { … }` literal in `from_env`), `config test` (end of `Config::test()`'s literal), `config sections` (end of the file, outside any `impl`) |
+    | `src/state.rs` | `state fields`, `state build` (in `AppState::new`, before the struct literal), `state init` (end of that literal), `state fns` (end of `impl AppState`) |
+    | `src/routes.rs` | `routes` (after the last app `.route`), `dev routers` (inside the development-only merge), `outer layers` (just inside `SetRequestIdLayer`, the outermost layer), `paths` (end of `mod paths`), `routes table` (end of `ROUTES`) |
+    | `src/controllers/mod.rs`, `controllers/application.rs` | `controller mods`; `ctx init` (in the `Ctx` extractor's literal), `extractors` (end of file) |
+    | `src/controllers/dev.rs` | `dev routes` (in `router()`), `dev tiles` (end of the `/dev` tile list), `dev try-it` (end of the Try-it buttons), `system facts` (end of `/dev/system`'s facts) |
+    | the sitemap handler | `sitemap paths` (end of the public paths `/sitemap.xml` lists) |
+    | `src/views/mod.rs`, `src/models/mod.rs`, `src/tasks/mod.rs` | `view mods`, `ctx fields` (end of `Ctx`); `model mods`, `model aliases`; `task mods`, `tasks` (in the task `match`) |
+    | `src/main.rs` | `cli commands` (end of the `Command` enum), `cli dispatch` (in the `match`), `serve start` (in `serve`, after state is built), `serve stop` (in the shutdown future), `tracing layers` (the layer list in `init_tracing`: build it as in [errors-and-logging](../guides/errors-and-logging.md#logging), never as a bare empty `Vec`) |
+    | `migration/src/lib.rs` | `migration mods`, `migrations` (end of the `vec![…]`, after the last `Box::new`) |
+    | `templates/layouts/application.html`, `templates/shared/_nav.html` | `dev footer links`; `nav links` |
+    | `tests/app/main.rs`, `support.rs`, `factories.rs` | `test mods`; `test support` (end of `impl TestApp`); `factories` |
+    | `tests/app/security_test.rs`, `kernel_web_test.rs` | `router sources` (in `every_mounted_route_is_in_the_routes_table`'s list); `no-store paths` |
+    | `.env.example`, `compose.yaml` | `env` (end of file); `compose env` (end of the app's `environment`) |
+
+    Run `cargo fmt --all`, then check that none ended up trailing code: `grep -rnE '[^[:space:]].*(//|\{#|#) samples: ' src templates migration tests | grep -vE ':[[:space:]]*(//|\{#|#) samples: '` prints nothing ([why](../guides/samples.md#anchors)).
 
 ## 5. Frontend by mode
 

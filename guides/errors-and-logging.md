@@ -8,6 +8,8 @@
 >
 > Read the rest when adding an error variant, changing error pages, or wiring logging.
 
+**Reference implementation (optional).** The `dev-dashboard` [samples](samples.md#the-samples) are this guide built, tested on SQLite and Postgres and security-reviewed, with more on top: traces as waterfalls, a live log tail and insights that rank what's failing, in development; and the `jobs-dashboard` sample groups job errors by root cause. They're never required and never vendored automatically. Offer them to the human; if they want one, adopt it or borrow from it per [samples](samples.md#using-one), keeping its `// SECURITY:` markers and the tests its CHECKS.md cites. This guide stays the spec.
+
 | Rails | Off Rails |
 |-------|-----------|
 | `rescue_from` / exceptions app | `AppError` + `impl IntoResponse` in `src/error.rs` |
@@ -91,19 +93,56 @@ impl From<DbErr> for AppError {
 
 ## Logging
 
-`main.rs` initializes `tracing-subscriber` once:
+`main.rs` initializes `tracing-subscriber` once, as a registry with room for the layers an optional [sample](samples.md) adds (the dev dashboard's log tail and traces) beside the formatter:
 
 ```rust
-let filter = EnvFilter::try_from_default_env()
-    .unwrap_or_else(|_| EnvFilter::new(match config.env {
-        AppEnv::Production => "info",
-        _ => "info,myapp=debug,tower_http=debug",
-    }));
-match config.log_format {
-    LogFormat::Json   => tracing_subscriber::fmt().json().with_env_filter(filter).init(),
-    LogFormat::Pretty => tracing_subscriber::fmt().with_env_filter(filter).init(),
+use tracing_subscriber::{EnvFilter, Layer, Registry, layer::SubscriberExt, util::SubscriberInitExt};
+
+fn init_tracing(config: &Config) {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        EnvFilter::new(match config.env {
+            AppEnv::Production => "info",
+            _ => "info,myapp=debug,tower_http=debug",
+        })
+    });
+    let layers: Vec<Box<dyn Layer<Registry> + Send + Sync>> = vec![
+        // samples: tracing layers
+    ];
+    let registry = tracing_subscriber::registry().with(sample_layers(layers)).with(filter);
+    match config.log_format {
+        LogFormat::Json => registry.with(tracing_subscriber::fmt::layer().json()).init(),
+        LogFormat::Pretty => registry.with(tracing_subscriber::fmt::layer()).init(),
+    }
+}
+
+/// The samples' layers, or none at all.
+// WHY: an empty `Vec` layer answers `Interest::never()` for every callsite, which silences the
+// whole subscriber (no log line at all, warnings included); `None` is a true no-op
+// (test: an_app_without_sample_layers_still_logs).
+fn sample_layers(
+    layers: Vec<Box<dyn Layer<Registry> + Send + Sync>>,
+) -> Option<Vec<Box<dyn Layer<Registry> + Send + Sync>>> {
+    (!layers.is_empty()).then_some(layers)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_app_without_sample_layers_still_logs() {
+        let subscriber = tracing_subscriber::registry()
+            .with(sample_layers(Vec::new()))
+            .with(EnvFilter::new("info"));
+        tracing::subscriber::with_default(subscriber, || {
+            assert!(tracing::enabled!(tracing::Level::WARN));
+            assert!(!tracing::enabled!(tracing::Level::DEBUG));
+        });
+    }
 }
 ```
+
+Never pass the `Vec` itself to `.with(…)`: with no layers in it, the app logs **nothing**, not even the boot warnings (found in the samples' host app, whose log went silent; the test above fails on that version). Verified with tracing-subscriber 0.3.23, 2026-10-16.
 
 - `TraceLayer::new_for_http().make_span_with(...)` creates a span per request with `method`, `path` (the matched route, not the raw URI with ids, when available), and `request_id` from `SetRequestIdLayer` (`MakeRequestUuid`) + `PropagateRequestIdLayer` (header `x-request-id`).
 - **Log structured events, not prose:** `info!(post_id = post.id, user_id = user.id, "post published")`.

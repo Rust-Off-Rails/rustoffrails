@@ -10,6 +10,8 @@
 >
 > Read the rest when adding a live region or stream, or debugging stale pages.
 
+**Reference implementation (optional).** The `realtime` [samples](samples.md#the-samples) are this guide built, tested on SQLite and Postgres and security-reviewed, with more on top: channels over `offrails.v1` with SSE and long-poll fallbacks, presence and `/dev/sockets`. They're never required and never vendored automatically. Offer them to the human; if they want one, adopt it or borrow from it per [samples](samples.md#using-one), keeping its `// SECURITY:` markers and the tests its CHECKS.md cites. This guide stays the spec.
+
 **Broadcast signals, not HTML.** When data changes, the server announces "book 42's reviews changed" on a stream. Clients that care re-fetch through the normal, already-authorized GET routes. This is Turbo 8's "page refresh" broadcast model. Payloads stay tiny, nothing gets rendered per subscriber, authorization can't leak through a broadcast, and it works identically in all three frontend modes.
 
 > Verified on 2026-10-12 in the reference app (htmx, live reviews on a book page): axum 0.8.9 `Sse`, tokio-stream 0.1.19 `BroadcastStream`, htmx 2.0.11 with htmx-ext-sse 2.2.4, tests on SQLite and Postgres, a two-browser smoke (an edit in one context appeared in the other without a refresh), and a Playwright downtime test: a review changed while the page's server was down appeared once it came back, with no reload.

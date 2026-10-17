@@ -6,7 +6,7 @@ Rust off Rails has one founding rule: **all code is written by AI** ([doctrine Â
 
 - **AI-written code is what we accept.** Docs, generators, skills, hooks and scripts in this repo are written by coding agents, steered by people.
 - **Hand-written code is the exception.** If you had to write something by hand, explain why in the PR (what the agents got wrong, which agent and model, what you tried). It may still be accepted, but the explanation is required, and we'll usually prefer turning it into a doc fix so agents get it right next time.
-- **Why no reference code (yet)?** Apps are generated from the docs, so two people with different agents can get different code for the same spec. That's expected: the docs pin the decisions (stack, structure, conventions, security, tests), not the exact lines. We tested shipping sample code and, for now, it isn't in the framework's interest; it may come later as optional, verified reference implementations.
+- **Reference code lives outside the framework.** Apps are generated from the docs, so two people with different agents can get different code for the same spec. That's expected: the docs pin the decisions (stack, structure, conventions, security, tests), not the exact lines. Since 0.7.0 there are optional, verified reference implementations in a separate repo, [Rust-Off-Rails/samples](https://github.com/Rust-Off-Rails/samples) ([guides/samples.md](guides/samples.md)). The framework itself stays Markdown, and a sample is never required. Changes to a sample go to that repo. A guide rule a sample exposed as wrong is a doc fix here.
 
 ## Great contributions
 
