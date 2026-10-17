@@ -28,7 +28,7 @@ The variants share sessions, extractors, return-to, rate limiting and the dev ma
 ## Tables
 
 ```
-users            id, email (lowercased, unique users_email_key), password_digest, role?, created_at, updated_at
+users            id, email (lowercased, unique users_email_key), password_digest, email_verified_at?, role?, created_at, updated_at
 sessions         id, user_id → users (cascade, indexed), token_digest (unique sessions_token_digest_key),
                  ip?, user_agent?, created_at, last_seen_at
 password_resets  id, user_id → users (cascade, indexed), token_digest (unique), expires_at, created_at   (password variants)
@@ -37,6 +37,7 @@ login_links      id, email, token_digest (unique), expires_at, created_at       
 
 - `password_digest` is `NOT NULL` in the password variants and **nullable** in the magic-link variants (where it's only set if the reader later chooses "also set a password").
 - `login_links` stores the **email, not a user id**, so the same flow serves existing readers and first-time sign-ups.
+- `email_verified_at` is `NULL` until something sent to the address is used ([claiming an unverified account](#claiming-an-unverified-account-pre-hijacking)).
 - `role` exists only if the interview chose roles (`DeriveActiveEnum`: `admin`, `member`).
 - Multi-tenant apps add `accounts` and `memberships` (see below).
 - `CleanupJob` deletes sessions idle for more than 30 days, resets older than 1 day, and expired login links. There's no separate recurring job.
@@ -77,6 +78,7 @@ Database-backed, as in Rails 8:
 2. **Every request:** `load_session` (private, in `controllers/application.rs`) reads the cookie and runs `session::find_by_token(db, token, now)`. That's one query: `find_also_related(user::Entity)` filtered on `last_seen_at > now − 30 days`. The result, `None` included, is cached in the request extensions (`LoadedSession`), so `Ctx`, `CurrentUser`, `RequireUser` and `CurrentSession` in one handler cost a single query. `session::touch` bumps `last_seen_at` at most once an hour.
 3. **Logout:** delete the session row (`CurrentSession` extractor) and clear the cookie. Replaying the old cookie must not log anyone in. There's a test for that.
 4. **Log out everywhere** (password reset or change): `session::destroy_all_for_user`.
+5. **Signing in over a session** (any method: password, magic link, a reset; a shared computer where Ann signs in while Bob's session is still in the browser): the handler takes `Option<CurrentSession>` and ends that session with `session::destroy` **in the sign-in transaction**, before starting the new one, never by just overwriting the cookie. `destroy` writes the session-ended signal, so the previous person's open sockets and streams close at once ([channels](channels.md#security)), not at their next revalidation, and the old token is dead even if it was copied. Test: sign in as A, open a stream (or socket) as A, sign in as B in the same browser → A's connection gets `bye` `revoked`, and replaying A's old cookie is logged out.
 
 Build responses that set cookies with `AppendHeaders([(SET_COOKIE, …), (SET_COOKIE, …)])` before the `Flash` and the `Redirect`. A plain header array would replace the earlier `Set-Cookie` instead of appending.
 
@@ -113,7 +115,7 @@ Validate `SignupParams { email, password }`. Then, in **one transaction**, creat
 
 ### Password reset (`passwords.rs`: `new`, `create`, `edit`, `update`)
 
-1. `POST /passwords {email}`: rate limited like login. If the user exists, enqueue **`PasswordResetEmailJob { user_id }`**. **Always** redirect to `/session/new` with the same flash: "If that address exists, we've sent password reset instructions."
+1. `POST /passwords {email}`: rate limited per IP + action like login, **and per address** (`format!("passwords#create:{email}")`, 10 per 3 minutes, plus the daily cap below), because each request emails someone who didn't ask. If the user exists, enqueue **`PasswordResetEmailJob { user_id }`**. **Always** redirect to `/session/new` with the same flash: "If that address exists, we've sent password reset instructions."
 2. **The job creates the token** (`password_reset::issue(db, user_id, now)`, 15-minute expiry), renders `mailers::passwords::reset` and calls `state.mailer.deliver` directly. `MAX_ATTEMPTS = 5`; if the user no longer exists, it returns `Outcome::Cancel`.
    - Why not `deliver_later_until(&txn, email, expires_at)`? That would put the rendered email, reset link included, into job args, where anyone who can open `/admin/jobs` could read it and take over the account ([security](security.md#checklist): "job args carry no secrets"). Issuing the token at send time also means the 15 minutes start when the email actually leaves.
 3. The link is `{APP_URL}/passwords/{token}/edit`. `edit` checks `password_reset::find_valid(db, token, now)` (unexpired, by digest). An invalid or used link redirects to `/passwords/new` with "That password reset link is invalid or has expired."
@@ -135,7 +137,7 @@ Phoenix 1.8's default. There are no passwords to leak, reuse or reset. Every rul
 | Log out | `POST /session/delete` | `DELETE /session` | `DELETE /api/session` |
 
 1. **Request** (`login_links::create`):
-   - Normalize the email, then apply two rate limits: per IP + action, and per email (`format!("login_links#create:{email}")`), each 10 per 3 minutes.
+   - Normalize the email, then apply the rate limits: per IP + action, and per email (`format!("login_links#create:{email}")`), each 10 per 3 minutes; plus a **daily cap per address**, 20 emails a day (`format!("emails/day:{email}")`, `Duration::from_secs(86_400)`), shared with password reset requests. The per-IP limit doesn't stop a flood from many IPs, and 10 per 3 minutes alone is still 4,800 emails a day to one inbox. Over the cap, answer exactly as for a sent link (no enumeration) and send nothing.
    - If the reader may log in, enqueue **`LoginLinkEmailJob { email }`**. Under `magic-link` that's every syntactically valid email (sign-up happens on first login); under `magic-link-invite`, only an existing user.
    - **Always** redirect to `/login_links/sent`, with no hint about whether the address exists. Invalid email syntax re-renders the form with 422 "Email is invalid". That's a format error, not enumeration.
 2. **The job** issues the link: a `login_links` row (email, digest, `expires_at = now + 15 min`). It renders `mailers::login_links::login` with `{APP_URL}/login_links/{token}` and delivers it directly. `MAX_ATTEMPTS = 5`. The token never sits in job args; the email does, and that's personal data, not a secret.
@@ -145,7 +147,20 @@ Phoenix 1.8's default. There are no passwords to leak, reuse or reset. Every rul
    - finds the user by email, or **creates it** under `magic-link` (no password digest) with `INSERT … ON CONFLICT (email) DO NOTHING` then a select (two first logins racing can't fail, and inside a Postgres transaction a unique violation would abort the transaction, see [models](models.md#validations));
    - starts the session (inserts the session row, returns the raw cookie token).
 
-   Then set the cookie, honor return-to, and redirect. If the reader was logged in as someone else, replace that session: take `Option<CurrentSession>` in the handler, which in axum 0.8 needs `impl OptionalFromRequestParts<AppState> for CurrentSession` (a plain `FromRequestParts` impl no longer gives you `Option<T>`).
+   - in an app that also has passwords, claims an unverified account first ([below](#claiming-an-unverified-account-pre-hijacking)).
+
+   Then set the cookie, honor return-to, and redirect. If the reader was logged in as someone else, end that session in the same transaction with `session::destroy` (Sessions, item 5): take `Option<CurrentSession>` in the handler, which in axum 0.8 needs `impl OptionalFromRequestParts<AppState> for CurrentSession` (a plain `FromRequestParts` impl no longer gives you `Option<T>`).
+
+### Claiming an unverified account (pre-hijacking)
+
+An account isn't proven to belong to its address until something sent to that address is used. In `signup`, anyone can register `victim@example.com` with a password they know, before the victim does, and set things up on it (an API token, a webhook, a notification address), hoping the owner later gets in another way (a reset link, or a magic link in an app that offers both) and starts using an account the attacker still holds. The first proof of the address **claims** the account and drops everything set up before it:
+
+- `users.email_verified_at` (nullable `timestamp_with_time_zone`). Sign-up leaves it `NULL`; a magic-link first login creates the user verified (the link was the proof); an invite sets it when the invite is accepted.
+- `user::claim_unverified(txn, user_id, now) -> Result<bool, DbErr>`: `UPDATE users SET email_verified_at = now WHERE id = ? AND email_verified_at IS NULL`, `true` when it updated the row. The UPDATE locks the row, so a racing request either committed before (and its work is dropped below) or waits and sees the account verified.
+- Call it **in the transaction of every proof**: consuming a password reset, consuming a login link (an app with both methods), accepting an invite. When it returns `true`, in that transaction: delete every session (`destroy_all_for_user`, which signals open connections), every API token, every pending reset and login link of that user, and anything else that grants access or redirects mail (webhooks, forwarding addresses) the app has; on a **link** sign-in also set `password_digest = NULL`, because whoever registered chose that password. Then continue (set the new password, start the session).
+- Tests: `an_api_token_made_before_the_first_reset_is_revoked` (`signup` with an API), `a_password_set_before_verification_dies_when_the_owner_signs_in_by_link` (an app with both methods), and that a second reset on a verified account keeps the user's API tokens.
+
+Variants with nothing to claim are n/a: `magic-link` and `magic-link-invite` without passwords (the first login is the proof), and `invite` where the invite link is the only way in.
 
 **Token URLs leak through history, caches and referrers.** The confirm page (`GET /login_links/{token}`, and `GET /passwords/{token}` in the password variants) responds with `Cache-Control: no-store` and `Referrer-Policy: no-referrer`, so the token isn't cached, and isn't sent to any third party the page links to.
 5. **Optional password later:** a "Set a password" page under the account settings lets a reader add a password. Password login then works the same as in `signup`, with `authenticate` treating a `NULL` digest as a mismatch after the dummy verify. Only add this if a spec asks for it.
@@ -163,6 +178,8 @@ On top of [test-standards](test-standards.md):
 - First login under `magic-link` creates exactly one user. Under `magic-link-invite`, an unknown email creates nothing and gets no mail.
 - Return-to is honored after the POST.
 - `/admin/jobs` args for `LoginLinkEmailJob` contain no `/login_links/` URL.
+- The daily cap: the 21st request for one address in a day sends nothing and answers exactly like the 1st (`link_requests_are_capped_per_address_per_day`; build the requests from different IPs with `APP_TRUSTED_PROXY=true`).
+- Signing in by link over another reader's session ends it (sessions, item 5).
 - The dev mailbox hint is on `/login_links/sent` (development) and absent in production config.
 
 ## Dev mailbox hint (all variants)
@@ -238,6 +255,9 @@ pub fn can_destroy(user: &User, book: &Book) -> bool { can_edit(user, book) }
 - Putting a token (or an email that contains one) in job args. Issue the token inside the job.
 - Different error messages, or different timing, for "no such email" and "wrong password". One argon2 verify on both paths.
 - A magic link that logs in on `GET`. Scanners burn it; confirm with a `POST`.
+- Signing in over an existing session by overwriting the cookie. The old session row lives on (a copied token still works) and its sockets stay open. `session::destroy` it in the sign-in transaction.
+- Rate limiting emailed links per IP only. A flood from many IPs fills one inbox; limit per address too, with a daily cap.
+- Treating a `signup` account as its address owner's before anything sent there was used. Claim it on the first proof and drop what was set up before (pre-hijacking).
 - Forgetting `Secure` in production, or setting it in development (where it breaks login over http).
 - Open redirects via return-to, including `/\evil.example`.
 - Running argon2 on the async executor thread.

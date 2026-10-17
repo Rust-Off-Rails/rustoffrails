@@ -25,7 +25,7 @@ Write `product/features/accounts.md` from [`blueprints/feature-spec.md`](../blue
    - password variants: `cargo add argon2` (0.6; default features);
    - all variants: nothing else (`rand`, `sha2`, `base64` come with `new`).
 2. **Migrations**, one each (`sea-orm-cli migrate generate …`), in this order because of the foreign keys:
-   - `create_users`: `big_pk_auto`, `email` + unique `users_email_key`, `password_digest` (`string`; `string_null` for magic-link), `role` if roles, timestamps;
+   - `create_users`: `big_pk_auto`, `email` + unique `users_email_key`, `password_digest` (`string`; `string_null` for magic-link), `email_verified_at` (`timestamp_with_time_zone_null`; [pre-hijacking](../guides/auth.md#claiming-an-unverified-account-pre-hijacking)), `role` if roles, timestamps;
    - `create_sessions`: FK cascade + `sessions_user_id_idx`, unique `sessions_token_digest_key`, `ip`/`user_agent` as `string_null`, `created_at`, `last_seen_at`;
    - then `create_password_resets` (password variants) **or** `create_login_links` (magic-link: `email`, unique digest, `expires_at`, `created_at`, index on `email`);
    - teams: `create_accounts`, `create_memberships` (`account_id`, `user_id`, `role`, unique pair).
@@ -37,10 +37,10 @@ Write `product/features/accounts.md` from [`blueprints/feature-spec.md`](../blue
 
    Both get unit tests (token length and uniqueness, cookie flags, `//` and `/\` rejected).
 4. **Models:**
-   - `user.rs`: entity without `Serialize`; `SignupParams` + `validate`; `normalize_email`; `check_password`; `hash_password`/`verify_password` on `spawn_blocking`; `find`; `find_by_email`; `create` (unique violation → "has already been taken"); `authenticate` with the `LazyLock` dummy digest; `update_password`;
+   - `user.rs`: entity without `Serialize`; `SignupParams` + `validate`; `normalize_email`; `check_password`; `hash_password`/`verify_password` on `spawn_blocking`; `find`; `find_by_email`; `create` (unique violation → "has already been taken"); `authenticate` with the `LazyLock` dummy digest; `update_password`; `claim_unverified(txn, id, now) → bool`;
    - `session.rs`: `start → (Model, raw)`, `find_by_token(db, raw, now)` (one `find_also_related` query, idle-expiry filter), `touch` (hourly), `destroy`, `destroy_all_for_user`, `delete_expired`;
-   - `password_reset.rs`: `issue(db, user_id, now) → raw`, `find_valid`, `consume` (validate the password, then one transaction: update, delete resets and sessions), `delete_stale`;
-   - **or** `login_link.rs`: `issue(db, email, now) → raw`, `find_valid`, `consume(db, raw, now) → Option<(User, Session, raw_token)>` (one transaction: delete the row, find or create the user with `ON CONFLICT DO NOTHING`, start the session), `delete_expired`.
+   - `password_reset.rs`: `issue(db, user_id, now) → raw`, `find_valid`, `consume` (validate the password, then one transaction: `claim_unverified` (and on `true` drop the account's API tokens), update, delete resets and sessions), `delete_stale`;
+   - **or** `login_link.rs`: `issue(db, email, now) → raw`, `find_valid`, `consume(db, raw, now) → Option<(User, Session, raw_token)>` (one transaction: delete the row, find or create the user with `ON CONFLICT DO NOTHING` (created verified), end a session the browser already had (`session::destroy`), start the session), `delete_expired`.
 
    Register them in `models/mod.rs` with `pub type User = user::Model;`.
 5. **Extractors** in `controllers/application.rs`:
