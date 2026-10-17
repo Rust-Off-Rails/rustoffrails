@@ -38,6 +38,10 @@ H="$T/home-doctor"; mkdir -p "$H"
 HOME="$H" OFFRAILS_SOURCE="$T/dist" sh install.sh --yes --no-toolchain --no-agents >/dev/null 2>&1
 HOME="$H" "$H/.local/bin/offrails" doctor >"$T/doctor" 2>&1 || true
 grep -q "framework      ok" "$T/doctor" && pass "local: offrails doctor reports the framework" || { bad "local: offrails doctor"; cat "$T/doctor"; }
+for f in template/README.md template/app/Cargo.toml template/app/Cargo.lock template/app/.cargo/config.toml template/parts/mailer/sample.toml template/parts/SOURCE tools/offrails-gen/Cargo.toml tools/offrails-gen/Cargo.lock tools/offrails-gen/src/main.rs; do
+  [ -f "$H/.offrails/$VERSION/$f" ] || { bad "local: the release has no $f"; continue; }
+done
+[ -d "$H/.offrails/$VERSION/tools/offrails-gen/target" ] && bad "local: the release carries tools/offrails-gen/target" || pass "local: the release carries the template, its parts and offrails-gen (no build output)"
 HOME="$H" "$H/.local/bin/offrails" new Bad_Name >/dev/null 2>&1 && bad "local: invalid app name accepted" || pass "local: invalid app name rejected"
 # upgrade --check: against the installed framework, and against another one with --fw (a tag export)
 A="$T/app"; mkdir -p "$A"; cp -R "$H/.offrails/current/" "$A/.offrails"

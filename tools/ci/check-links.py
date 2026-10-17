@@ -5,7 +5,8 @@ import glob, os, re, sys
 def slug(h):
     return re.sub(r"[^\w\- ]", "", h.strip().lower()).replace(" ", "-")
 
-files = [f for f in glob.glob("**/*.md", recursive=True) if not f.startswith(("evals/results", "node_modules"))]
+files = [f for f in glob.glob("**/*.md", recursive=True) if not f.startswith(("evals/results", "node_modules", "template/app/", "template/parts/"))]
+# template/app and template/parts are app files: their links resolve inside an app (.offrails/...), not here.
 anchors = {}
 for f in files:
     anchors[f], in_code = set(), False
