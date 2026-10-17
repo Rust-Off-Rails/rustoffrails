@@ -114,7 +114,7 @@ impl TestResponse {
 - **Default (SQLite):** `sqlite::memory:` with `max_connections(1)`, `min_connections(1)`, built through `kernel::db::connect`, then `Migrator::up(&db, None)`. It's isolated by construction and takes milliseconds.
 - **localhost:5432 taken** (another app's Postgres, a native install): never stop it. Start the compose `db` service on another port, `DB_PORT=54329 docker compose up -d db`, and run `TEST_DATABASE_URL=postgres://postgres:postgres@localhost:54329/postgres cargo nextest run`. Any Postgres you may create databases in works; check the port first with `lsof -nP -iTCP:5432 -sTCP:LISTEN`.
 - **`TEST_DATABASE_URL=postgres://…/postgres` set:** a reset slot database per test, below.
-- Measured on an all-parts app (654 tests, Apple M2, other builds running, load 6–35): SQLite 6.5–7.8 s; Postgres 14–17 s, down from 100 s with one `CREATE DATABASE` and a full migration per test. Under heavy load `CREATE DATABASE` alone took 1–4 s (it fsyncs a copy of the template), which is why nothing per test does DDL.
+- Measured (Apple M2, other agents building, the same load for old and new, two rounds): the bare app's Postgres run 8.0 / 11.9 s → 1.7 / 1.8 s (121 tests); an app with every part 149 / 46 s → 21 / 14 s (652 tests), against one `CREATE DATABASE` and a full migration per test before. SQLite is unchanged (1.3 s bare, 8–10 s with every part). Under heavy load `CREATE DATABASE` alone took 1–4 s (it fsyncs a copy of the template), which is why nothing per test does DDL.
 
 ### Postgres test databases
 

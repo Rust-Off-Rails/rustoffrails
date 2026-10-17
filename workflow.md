@@ -61,7 +61,7 @@ cargo offrails verify --full   # once, before you say done: also offrails-check,
 
 It prints one line per step with its time and test counts, the tail of each failure (full logs in `target/verify/`), and exits non-zero on any failure. Postgres comes from `TEST_DATABASE_URL` (the environment or `.env`), else the compose `db` URL when something listens on `localhost:${DB_PORT:-5432}`; with neither, the Postgres run is reported **skipped**, never passed. `cargo fmt --all` fixes what `fmt --check` reports.
 
-**Iterate fast, verify fully once.** While a slice is red, run only what you're fixing: `cargo check`, then `cargo nextest run <test name>`. At the end of each slice, `cargo offrails verify` (an all-parts app: ~20 s after a one-line change; a bare app: ~6 s). Never run coverage, `cargo deny`, gitleaks or the full browser smokes per iteration: they belong to `--full`, once, when the work is done. A real-browser smoke of the flow you changed is still due for UI changes (the table below), against the app `bin/dev` is already serving.
+**Iterate fast, verify fully once.** While a slice is red, run only what you're fixing: `cargo check`, then `cargo nextest run <test name>`. At the end of each slice, `cargo offrails verify` (measured after a one-line change, M2, load ~10: a bare app 5.5–6.7 s, an app with every part 33–37 s, most of it the Postgres suite). Never run coverage, `cargo deny`, gitleaks or the full browser smokes per iteration: they belong to `--full`, once, when the work is done. A real-browser smoke of the flow you changed is still due for UI changes (the table below), against the app `bin/dev` is already serving.
 
 What `verify` runs, for running one step by hand:
 
