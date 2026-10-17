@@ -227,7 +227,7 @@ One way for an agent to ask the running app about its state, instead of grepping
 |---|---|
 | `app` | name, version, `frontend_mode`, `boot_id`, `booted_at` |
 | `url` | `app_url`, `tls`, the browser protocol (`h2`, or `http/1.1` and its ~6-tab limit) |
-| `config` | the redacted `Debug` of `Config` (credentials are `[redacted]`; never a raw env dump) |
+| `config` | the `Debug` of `Config`: an allowlist, values only for never-secret settings and `set`/`not set` for the rest ([config](config.md#srcconfigrs); never a raw env dump) |
 | `routes` | every `ROUTES` row: method, path, handler, access |
 | `migrations` | applied count, `pending` names, `current` |
 | `jobs` | counts by state and by queue (`admin::stats`); `null` while the table doesn't exist |

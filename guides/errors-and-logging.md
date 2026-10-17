@@ -108,8 +108,157 @@ match config.log_format {
 - `TraceLayer::new_for_http().make_span_with(...)` creates a span per request with `method`, `path` (the matched route, not the raw URI with ids, when available), and `request_id` from `SetRequestIdLayer` (`MakeRequestUuid`) + `PropagateRequestIdLayer` (header `x-request-id`).
 - **Log structured events, not prose:** `info!(post_id = post.id, user_id = user.id, "post published")`.
 - Workers: one span per job with `job_id`, `worker`, `queue`, `attempt` ([jobs](jobs.md#observability)).
-- **Never log** passwords, session tokens, reset tokens, `Authorization`/`Cookie` headers, full email bodies, or `DATABASE_URL`/`SMTP_URL` (they contain credentials). Implement `Debug` manually (redacted) for `Config` and for any struct holding a secret.
+- **Never log** passwords, session tokens, reset tokens, `Authorization`/`Cookie` headers, full email bodies, or `DATABASE_URL`/`SMTP_URL` (they contain credentials). Implement `Debug` manually for `Config` (an allowlist: [config](config.md#srcconfigrs)) and for any struct holding a secret.
 - SeaORM SQL logging stays off (`sqlx_logging(false)`) except while debugging locally.
+
+### Redacting stored error text
+
+Error messages quote what failed, and what failed is often a URL with its credentials (`https://deploy:hunter2@api.example.com/v1/hooks?token=…`), or an emailed link with its token. Logging them is bad enough; **storing** them (a job's `errors`, shown on `/admin/jobs`, searched, printed by `app jobs show`) keeps the secret for weeks and shows it to every admin. Text that is stored or shown after the fact goes through `kernel::redact::text` first. `src/kernel/redact.rs`, whole (from the samples' host app, trimmed to free text; compiled, clippy-clean and tested with Rust 1.99, edition 2024, 2026-10-16):
+
+```rust
+//! Free text with secrets replaced by `[redacted]`, for text that is stored or shown after the
+//! fact (a job's failure message, an error shown on a dashboard): a URL's `user:password@`, its
+//! random-looking path segments and secret query values; `key=value` pairs whose key names a
+//! secret (`password=…`, `api_key=…`); long random-looking words (tokens).
+//! GUIDE: .offrails/guides/errors-and-logging.md#redacting-stored-error-text
+
+/// What a secret becomes.
+pub const REDACTED: &str = "[redacted]";
+
+/// APP: names whose value is always a secret, whatever it looks like (`x_token` matches `token`).
+pub const SECRET_PARAMS: &[&str] = &[
+    "token", "code", "key", "secret", "password", "signature", "sig", "otp",
+];
+
+/// A word at least this long that looks random (base64url or hex, with a digit or a capital) is
+/// treated as a token.
+const RANDOM_MIN_LEN: usize = 20;
+
+// SECURITY: errors often quote the URL that failed, with its credentials; stored or shown error
+// text goes through here first (test: secrets_in_free_text_are_redacted).
+pub fn text(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut word = String::new();
+    for c in s.chars() {
+        if c.is_whitespace()
+            || matches!(c, '"' | '\'' | '<' | '>' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';' | '`')
+        {
+            out.push_str(&word_redacted(&word));
+            word.clear();
+            out.push(c);
+        } else {
+            word.push(c);
+        }
+    }
+    out.push_str(&word_redacted(&word));
+    out
+}
+
+fn word_redacted(word: &str) -> String {
+    if word.is_empty() {
+        return String::new();
+    }
+    if let Some((scheme, rest)) = word.split_once("://") {
+        let split = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+        let (authority, tail) = rest.split_at(split);
+        let host = match authority.rsplit_once('@') {
+            Some((_, host)) => format!("{REDACTED}@{host}"),
+            None => authority.to_owned(),
+        };
+        let (before_fragment, fragment) = match tail.split_once('#') {
+            Some((b, f)) => (b, Some(f)),
+            None => (tail, None),
+        };
+        let (p, q) = match before_fragment.split_once('?') {
+            Some((p, q)) => (p, Some(q)),
+            None => (before_fragment, None),
+        };
+        let mut out = format!("{scheme}://{host}{}", path(p));
+        if let Some(q) = q {
+            out.push('?');
+            out.push_str(&query(q));
+        }
+        if let Some(f) = fragment {
+            out.push('#');
+            out.push_str(&query(f));
+        }
+        return out;
+    }
+    if let Some((k, v)) = word.split_once(['=', ':'])
+        && !k.is_empty()
+        && !v.is_empty()
+        && (is_secret_param(k.trim_start_matches(['-', '?', '&'])) || looks_random(v))
+    {
+        let sep = &word[k.len()..k.len() + 1];
+        return format!("{k}{sep}{REDACTED}");
+    }
+    if looks_random(word.trim_end_matches(['.', ':'])) {
+        return REDACTED.to_owned();
+    }
+    word.to_owned()
+}
+
+/// A URL path with random-looking segments (tokens in emailed links) redacted.
+fn path(path: &str) -> String {
+    path.split('/')
+        .map(|s| if looks_random(s) { REDACTED } else { s })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn query(q: &str) -> String {
+    q.split('&')
+        .map(|pair| match pair.split_once('=') {
+            Some((k, v)) if is_secret_param(k) || looks_random(v) => format!("{k}={REDACTED}"),
+            Some(_) => pair.to_owned(),
+            None if looks_random(pair) => REDACTED.to_owned(),
+            None => pair.to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
+fn is_secret_param(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    SECRET_PARAMS.iter().any(|p| name == *p || name.ends_with(&format!("_{p}")))
+}
+
+/// Long, URL-safe, and not a lowercase slug: base64url tokens, hex digests, signed blobs.
+fn looks_random(s: &str) -> bool {
+    s.len() >= RANDOM_MIN_LEN
+        && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~' | b'%'))
+        && s.bytes().any(|b| b.is_ascii_digit() || b.is_ascii_uppercase())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TOKEN: &str = "q8Zr2mX0kLwP4vN7tY1sB9cD3fG6hJ5aE2uI8oQ4rTw";
+
+    #[test]
+    fn secrets_in_free_text_are_redacted() {
+        let shown = text(&format!(
+            "GET https://deploy:hunter2@api.example.com/v1/hooks?token=abc123&page=2 failed: 401 (key {TOKEN}); retry with password=swordfish"
+        ));
+        for secret in ["deploy", "hunter2", "abc123", TOKEN, "swordfish"] {
+            assert!(!shown.contains(secret), "{secret} in {shown}");
+        }
+        assert_eq!(
+            shown,
+            "GET https://[redacted]@api.example.com/v1/hooks?token=[redacted]&page=2 failed: 401 (key [redacted]); retry with password=[redacted]"
+        );
+        assert_eq!(text(&format!("https://app.example/login_links/{TOKEN}")), "https://app.example/login_links/[redacted]");
+        // Ordinary text is untouched, and redacting twice changes nothing.
+        let plain = "charging card 42: connection refused (os error 61) at hooks.partner.invalid:443";
+        assert_eq!(text(plain), plain);
+        assert_eq!(text(&shown), shown);
+        assert_eq!(text("postgres://u:p@db/app"), "postgres://[redacted]@db/app");
+    }
+}
+```
+
+It's for text, after the fact. It never replaces the rules above: secrets stay out of job args, logs and error pages to begin with.
 
 ## Health check
 

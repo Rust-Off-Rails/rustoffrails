@@ -162,7 +162,7 @@ fn development_binds_loopback_unless_told_otherwise() {
 }
 ```
 
-- `Config` holds credentials, so implement `Debug` by hand and print `[redacted]` for `database_url`, `smtp_url` and `admin_password`.
+- `Config` holds credentials, so implement `Debug` by hand **as an allowlist**: print the value only for settings that can never hold a secret (`env`, `port`, `app_url`, `database_pool`, `queues`, the numbers, durations and booleans, `bind`, `allowed_hosts`, `log_format`, `revision`, `mail_from`), the database as its backend and host only (`redact_db`), and `set` / `not set` for everything else, `smtp_url`, `admin_password` and every field added later included, until you add it to the allowlist on purpose. A denylist (`[redacted]` for three named fields) leaks the next secret someone adds (`STRIPE_SECRET_KEY`, a webhook signing key) on `/dev/introspect.json` and `app introspect`. Test `debug_shows_no_secret_values`: a `Config` with a sentinel (`"sentinel-secret"`) in every string field outside the allowlist, and `format!("{c:?}")` contains no sentinel.
 
 - **Env var names are string literals in `config.rs`** (`var("APP_URL")`, `parse("PORT", "3000")`, never a name built with `format!`), and every `"SCREAMING_SNAKE"` literal there is an env var: `offrails-check`'s `[env]` rule reads them all and fails on any missing from `.env.example`. A literal that isn't one gets a trailing `// not an env var`.
 - **Read env vars only in `config.rs`.** Nowhere else calls `std::env::var` (the AWS keys read by `object_store`'s `from_env()` are the one sanctioned exception).
