@@ -3,6 +3,7 @@
 //! Inside an app, through the alias in `.cargo/config.toml`:
 //!   cargo offrails list-parts
 //!   cargo offrails add-part mailer [more parts…] [--dry-run] [--force] [--offline] [--no-fmt]
+//!   cargo offrails verify [--fast|--full]      the Definition of Done, in parallel
 //!
 //! Before the app exists, from the framework (`$FW`: the plugin root, ~/.offrails/current or a checkout):
 //!   cargo run -q --manifest-path "$FW/tools/offrails-gen/Cargo.toml" --target-dir <dir>/target/offrails-gen -- \
@@ -13,6 +14,7 @@
 mod newapp;
 mod parts;
 mod util;
+mod verify;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -26,6 +28,8 @@ const USAGE: &str = "usage:
   offrails-gen add-part <name>… [--app <dir>] [--dry-run] [--force] [--offline] [--no-fmt]
   offrails-gen list-parts [--app <dir>]
   offrails-gen vendor --framework <newer framework> [--app <dir>]   re-copy a framework into <app>/.offrails/
+  offrails-gen verify [--fast|--full] [--no-postgres] [--test-threads <n>] [--app <dir>]
+                   the Definition of Done in parallel: --fast while iterating, --full once at the end
 
 In an app: cargo offrails <command> … (the alias in .cargo/config.toml). Docs: .offrails/template/README.md";
 
@@ -34,7 +38,7 @@ struct Args {
     flags: Vec<(String, Option<String>)>,
 }
 
-const VALUE_FLAGS: [&str; 7] = [
+const VALUE_FLAGS: [&str; 8] = [
     "--pitch",
     "--parts",
     "--mode",
@@ -42,6 +46,7 @@ const VALUE_FLAGS: [&str; 7] = [
     "--framework",
     "--app",
     "--title",
+    "--test-threads",
 ];
 
 fn parse_args(raw: Vec<String>) -> Result<Args> {
@@ -239,6 +244,33 @@ fn real_main() -> Result<()> {
                 app.join(".offrails").display()
             );
             Ok(())
+        }
+        "verify" => {
+            args.reject_unknown(&[
+                "--app",
+                "--fast",
+                "--full",
+                "--no-postgres",
+                "--test-threads",
+            ])?;
+            if args.flag("--fast") && args.flag("--full") {
+                return Err(Fail::usage("verify takes --fast or --full, not both"));
+            }
+            let test_threads = match args.value("--test-threads") {
+                Some(n) => Some(n.parse::<usize>().map_err(|_| {
+                    Fail::usage(format!("--test-threads needs a number, not {n:?}"))
+                })?),
+                None => None,
+            };
+            let app = args.app()?;
+            verify::run(
+                &app,
+                &verify::VerifyOptions {
+                    full: args.flag("--full"),
+                    postgres: !args.flag("--no-postgres"),
+                    test_threads,
+                },
+            )
         }
         other => Err(Fail::usage(format!("unknown command '{other}'\n\n{USAGE}"))),
     }

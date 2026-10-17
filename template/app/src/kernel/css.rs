@@ -98,16 +98,24 @@ pub fn class_lists(with_apply: bool) -> Vec<(String, Vec<String>)> {
 }
 
 fn html_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    html_files_under(Path::new(""), dir, out);
+}
+
+/// `html_files` for templates under `root` (`SKIP_DIRS` are relative to it).
+fn html_files_under(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if SKIP_DIRS.iter().any(|s| path.starts_with(s)) {
+        if SKIP_DIRS
+            .iter()
+            .any(|s| path.strip_prefix(root).is_ok_and(|p| p.starts_with(s)))
+        {
             continue;
         }
         if path.is_dir() {
-            html_files(&path, out);
+            html_files_under(root, &path, out);
         } else if path.extension().is_some_and(|e| e == "html") {
             out.push(path);
         }
@@ -160,7 +168,57 @@ fn tokens(list: &str) -> Vec<String> {
 }
 
 /// The development CSS banner: the CSS is missing, or stale (template classes with no rule).
+///
+/// Every development page asks, and the scan reads every template and the built CSS (~85 ms in a
+/// grown app: most of the CPU under load). So the answer is cached until a template or the CSS
+/// changes: size and mtime of `static/app.css`, `assets/app.css` and every template, a few
+/// dozen `stat` calls per page instead of reading them all.
 pub fn css_warning() -> Option<String> {
+    cached_warning(&WARNING, inputs_key(Path::new(".")), scan_css_warning)
+}
+
+/// The last answer and the inputs it was computed from.
+type Cached = std::sync::Mutex<Option<(u64, Option<String>)>>;
+static WARNING: Cached = std::sync::Mutex::new(None);
+
+fn cached_warning(
+    cache: &Cached,
+    key: u64,
+    compute: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    let mut cache = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((k, answer)) = cache.as_ref()
+        && *k == key
+    {
+        return answer.clone();
+    }
+    let answer = compute();
+    *cache = Some((key, answer.clone()));
+    answer
+}
+
+/// What the warning depends on, under `root`: which files exist, their sizes and mtimes.
+fn inputs_key(root: &Path) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut files = Vec::new();
+    html_files_under(root, &root.join(TEMPLATES), &mut files);
+    files.sort();
+    files.push(root.join(CSS_BUILT));
+    files.push(root.join(CSS_SOURCE));
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for f in files {
+        f.hash(&mut hasher);
+        if let Ok(meta) = fs::metadata(&f) {
+            meta.len().hash(&mut hasher);
+            meta.modified().ok().hash(&mut hasher);
+        }
+    }
+    hasher.finish()
+}
+
+fn scan_css_warning() -> Option<String> {
     if let Some(problem) = crate::kernel::assets::app_css_problem() {
         return Some(problem);
     }
@@ -170,4 +228,57 @@ pub fn css_warning() -> Option<String> {
         "{CSS_BUILT} is stale: {} template class(es) have no CSS rule (first: {first}). bin/dev rebuilds it.",
         missing.len()
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_css_warning_is_recomputed_only_when_a_template_or_the_css_changes() {
+        let root = std::env::temp_dir().join(format!("offrails-css-{}", std::process::id()));
+        let page = root.join(TEMPLATES).join("posts").join("index.html");
+        fs::create_dir_all(page.parent().unwrap()).unwrap();
+        fs::create_dir_all(root.join("static")).unwrap();
+        fs::write(&page, r#"<p class="p-4">"#).unwrap();
+        fs::write(root.join(CSS_BUILT), ".p-4{padding:1rem}").unwrap();
+
+        let key = inputs_key(&root);
+        assert_eq!(inputs_key(&root), key, "nothing changed");
+        let calls = std::cell::Cell::new(0);
+        let compute = || {
+            calls.set(calls.get() + 1);
+            None
+        };
+        let cache = Cached::new(None);
+        cached_warning(&cache, key, compute);
+        cached_warning(&cache, key, compute);
+        assert_eq!(calls.get(), 1, "the same inputs reuse the answer");
+
+        fs::write(&page, r#"<p class="p-4 dark:bg-gray-900">"#).unwrap();
+        assert_ne!(inputs_key(&root), key, "an edited template changes the key");
+        cached_warning(&cache, inputs_key(&root), compute);
+        assert_eq!(calls.get(), 2, "and recomputes");
+
+        let key = inputs_key(&root);
+        fs::write(
+            root.join(CSS_BUILT),
+            ".p-4{padding:1rem}.dark\\:bg-gray-900{}",
+        )
+        .unwrap();
+        assert_ne!(inputs_key(&root), key, "a rebuilt CSS changes the key");
+        let key = inputs_key(&root);
+        fs::write(root.join(TEMPLATES).join("new.html"), "<p>").unwrap();
+        assert_ne!(inputs_key(&root), key, "a new template changes the key");
+        let key = inputs_key(&root);
+        let mailer = root.join("templates/mailers/welcome.html");
+        fs::create_dir_all(mailer.parent().unwrap()).unwrap();
+        fs::write(&mailer, "<p>").unwrap();
+        assert_eq!(
+            inputs_key(&root),
+            key,
+            "mailer templates are not checked, so not keyed"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
 }
