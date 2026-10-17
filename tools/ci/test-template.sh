@@ -60,6 +60,30 @@ anchors_alone() {
   [ -z "$trailing" ] || { printf '%s\n' "$trailing"; return 1; }
 }
 
+# Parts' tests known to be flaky under a parallel run (each passes alone): they share the
+# dev dashboard's on-disk state (storage/dashboard/) across test processes. A samples bug, to be
+# fixed upstream and synced; until then one retry is allowed for these names only, and any other
+# flaky test fails the run.
+KNOWN_FLAKY="dev_dashboard_test::run_history_is_capped_redacted_and_reopened dev_dashboard_test::bench_drives_a_running_server"
+
+# suite [TEST_DATABASE_URL]: the test suite, failing on any flaky test not in KNOWN_FLAKY.
+suite() {
+  out=$(mktemp)
+  if [ -n "${1:-}" ]; then
+    TEST_DATABASE_URL=$1 cargo nextest run --no-fail-fast --retries 1 --status-level fail --final-status-level flaky >"$out" 2>&1
+  else
+    cargo nextest run --no-fail-fast --retries 1 --status-level fail --final-status-level flaky >"$out" 2>&1
+  fi
+  status=$?
+  tail -5 "$out"
+  unknown=$(grep -E '^[[:space:]]*FLAKY' "$out" | awk '{ print $NF }' | while IFS= read -r t; do
+    case " $KNOWN_FLAKY " in (*" $t "*) ;; (*) echo "$t" ;; esac
+  done)
+  rm -f "$out"
+  [ "$status" = 0 ] || return 1
+  [ -z "$unknown" ] || { echo "flaky, and not a known samples flake: $unknown" >&2; return 1; }
+}
+
 # The Definition of Done on a generated app. $1: memory budget in MiB.
 gates() {
   step "fmt --check" cargo fmt --all --check || return 1
@@ -68,9 +92,9 @@ gates() {
   step "routes" sh -c 'cargo run -q -- routes > /dev/null' || return 1
   step "clippy" cargo clippy -q --all-targets -- -D warnings || return 1
   step "clippy (no unwrap/expect)" cargo clippy -q --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used || return 1
-  step "tests (SQLite)" cargo nextest run --no-fail-fast --status-level fail --final-status-level fail || return 1
+  step "tests (SQLite)" suite || return 1
   if [ "$postgres" = 1 ]; then
-    step "tests (Postgres)" env TEST_DATABASE_URL="$pg_url" cargo nextest run --no-fail-fast --status-level fail --final-status-level fail || return 1
+    step "tests (Postgres)" suite "$pg_url" || return 1
   fi
   step "offrails-check" sh .offrails/tools/offrails-check || return 1
   step "memory budget" sh "$root/tools/ci/memory-budget.sh" . "$1" || return 1

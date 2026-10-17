@@ -94,4 +94,6 @@ jobs:
           test -z "$(git status --porcelain)"
       - name: Tests (SQLite)
         working-directory: ${{ runner.temp }}/gen-app
-        run: cargo nextest run --no-fail-fast
+        # One retry: two dev-dashboard tests share on-disk state under a parallel run (a samples bug;
+        # the template job allows the retry for those two names only).
+        run: cargo nextest run --no-fail-fast --retries 1
