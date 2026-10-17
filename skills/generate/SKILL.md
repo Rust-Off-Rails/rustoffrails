@@ -11,6 +11,6 @@ Only for Rust off Rails apps (a `.offrails/` directory exists).
 Request: $ARGUMENTS
 
 1. Read `.offrails/AGENTS.md` and its load order if not already done this session.
-2. Pick the recipe from the table in `.offrails/generators/README.md`. If the request is in plain English ("email users a weekly digest"), map it to recipes yourself; it may need several (job + mailer).
+2. Pick the generator(s) from the table in `.offrails/generators/README.md` (`cargo offrails g --help`). If the request is in plain English ("email users a weekly digest"), map it to generators yourself; it may need several (`mailer` + `job`). A kernel need (mail, a queue, sign-in, sockets) is a part: `cargo offrails parts`, `cargo offrails add <part>`.
 3. Write or update the matching `product/features/*.md` spec first.
-4. Execute the recipe(s) in full, then run `cargo offrails verify` (`--full` when the work is done; `.offrails/workflow.md#definition-of-done`).
+4. Run each generator (`cargo offrails g <kind> … --dry-run` first when unsure, then without), then follow the recipe's "what to customize" and the next steps it printed: the `// APP:` lines, the spec's tests, migrate. Then run `cargo offrails verify` (`--full` when the work is done; `.offrails/workflow.md#definition-of-done`).

@@ -27,8 +27,12 @@ App jobs, workers and `app jobs …` exist once the `jobs` part is in; API token
 **The framework's generators**, from the app root on any OS (the alias in `.cargo/config.toml`; [template](template/README.md#using-it)):
 
 ```
-cargo offrails list-parts                     # parts: installed or available, what each needs and adds
-cargo offrails add-part <name>… [--dry-run]   # add parts (dependencies first); re-running is a no-op
+cargo offrails generate <kind> <name> [field:type…] [--dry-run] [--force]   # alias g; `g --help` lists the kinds
+cargo offrails destroy <kind> <name> [--dry-run]                           # alias d; removes only unchanged files
+cargo offrails parts                          # parts: installed or available, what each needs and adds (alias list-parts)
+cargo offrails add <name>… [--dry-run]        # add parts (dependencies first); re-running is a no-op (alias add-part)
+cargo offrails update-part <name>… --framework <newer> [--dry-run]   # 3-way merge of a newer part, conflicts marked
+cargo offrails verify [--fast|--full]         # the Definition of Done in parallel
 ```
 
 Verified (reference app): `Migrator::up(&db, None)`, `Migrator::down(&db, Some(steps))`, `Migrator::fresh(&db)` and `Migrator::get_migration_with_status(&db)` from `sea-orm-migration` 2.0.4. `main` parses the CLI, loads `Config::from_env()`, initializes tracing, then connects. `routes` and `db console` run before connecting.
@@ -59,8 +63,8 @@ The binary embeds the `migration` crate. The Docker entrypoint (`bin/docker-entr
 | `rails db:migrate`            | `cargo run -- db migrate` |
 | `rails db:rollback`           | `cargo run -- db rollback` |
 | `rails db:migrate:status`     | `cargo run -- db status` |
-| `rails g migration X`         | `sea-orm-cli migrate generate <verb>_<noun>` (see `guides/migrations.md`) |
-| `rails g …`                   | `generators/<name>.md` |
+| `rails g migration X`         | `cargo offrails g migration <verb>_<noun> [field:type…]` (never `sea-orm-cli migrate generate`: it drops the anchors) |
+| `rails g …` / `rails d …`     | `cargo offrails g <kind> …` / `cargo offrails d <kind> <name>` ([generators](generators/README.md)) |
 | `rails routes`                | `cargo run -- routes` (or `/dev/routes` in the browser) |
 | Mission Control – Jobs        | `/admin/jobs`, or `cargo run -- jobs stats` / `jobs list --state discarded` ([jobs-dashboard](guides/jobs-dashboard.md)) |
 | letter_opener_web             | `<URL bin/dev printed>/dev/mailbox` ([mailers](guides/mailers.md)) |

@@ -11,12 +11,14 @@ Before building anything new, run the relevant part of [`interview.md`](intervie
 ```
 0. ASK      interview.md: new app → full interview; new feature → feature-level checklist
 1. READ     spec → resources, fields, rules, side effects, acceptance criteria
-2. PLAN     list files to create/change (use generators/ recipes); a kernel need → a part (cargo offrails list-parts);
+2. PLAN     the generators that build it (cargo offrails g --help; --dry-run lists their files);
+            a kernel need → a part (cargo offrails parts); hand-write only what neither covers;
             show the plan for new apps/big features
-3. MIGRATE  migration + entity together; `cargo run -- db migrate`; prove rollback
-4. MODEL    entity, params, validate(), queries
+3. GENERATE cargo offrails g resource|model|api|… (migration + entity + wiring + tests together);
+            `cargo run -- db migrate`; prove rollback
+4. MODEL    customize the `// APP:` lines: validation rules, scopes the spec names, side effects
             (inertia/spa: derive TS on Params + view props; tests export them)
-5. TEST     failing integration tests from the acceptance criteria
+5. TEST     failing tests for the acceptance criteria, next to the generated ones
 6. BUILD    controller, routes, views (templates / Inertia pages / SPA routes), jobs, mailers
 7. CHECK    cargo check → fix → repeat (the compiler is your pair); one test: cargo nextest run <name>
             running app: bin/dev rebuilds, restarts and reloads open tabs on save;

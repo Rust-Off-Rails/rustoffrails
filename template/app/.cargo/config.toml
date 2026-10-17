@@ -1,4 +1,4 @@
-# `cargo offrails <command>`: the framework's generators (add-part, list-parts), built from the
+# `cargo offrails <command>`: the framework's generators (generate, destroy, add, parts, update-part, verify), built from the
 # vendored .offrails/tools/offrails-gen with the standard library only. Works on Linux, macOS and
 # Windows; run it from the app root. Its build output stays in target/offrails-gen.
 [alias]

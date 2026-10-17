@@ -1,12 +1,55 @@
-//! `app task api_token <email> [name] [--read-only] [--days N]`: mints an API token for an
-//! account and prints it once (operators, CI, a first client). Written by `generate api`.
+//! `app task tokens create <email> [name] [--read-only] [--days N] | list <email> | revoke <id>`:
+//! API tokens from the terminal, for operators and CI (.offrails/guides/api.md). A new token is
+//! printed once; only its digest is stored. Written by the first `cargo offrails generate api`.
 
 use chrono::Utc;
 
 use crate::models::{api_token, user};
 use crate::state::AppState;
 
+const USAGE: &str = "usage: app task tokens create <email> [name] [--read-only] [--days N] | list <email> | revoke <id>";
+
 pub async fn run(state: &AppState, args: Vec<String>) -> anyhow::Result<()> {
+    let mut it = args.into_iter();
+    match it.next().as_deref() {
+        Some("create") => create(state, it.collect()).await,
+        Some("list") => {
+            let email = it.next().ok_or_else(|| anyhow::anyhow!(USAGE))?;
+            let person = find(state, &email).await?;
+            for t in api_token::all_for(&state.db, &person).await? {
+                println!(
+                    "{}\t{}\t{}\tcreated {}\tlast used {}\texpires {}",
+                    t.id,
+                    t.name,
+                    t.scope_list().join(","),
+                    t.created_at.format("%Y-%m-%d"),
+                    t.last_used_at.map_or("never".into(), |d| d.format("%Y-%m-%d %H:%M").to_string()),
+                    t.expires_at.map_or("never".into(), |d| d.format("%Y-%m-%d").to_string()),
+                );
+            }
+            Ok(())
+        }
+        Some("revoke") => {
+            let id: i64 = it
+                .next()
+                .and_then(|i| i.parse().ok())
+                .ok_or_else(|| anyhow::anyhow!(USAGE))?;
+            let deleted = api_token::revoke_system(&state.db, id).await?;
+            anyhow::ensure!(deleted, "no token {id}");
+            println!("revoked token {id}");
+            Ok(())
+        }
+        _ => anyhow::bail!(USAGE),
+    }
+}
+
+async fn find(state: &AppState, email: &str) -> anyhow::Result<crate::models::User> {
+    user::find_by_email(&state.db, email)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("no account for {email}"))
+}
+
+async fn create(state: &AppState, args: Vec<String>) -> anyhow::Result<()> {
     let mut positional = Vec::new();
     let mut write = true;
     let mut days: Option<i64> = None;
@@ -16,20 +59,17 @@ pub async fn run(state: &AppState, args: Vec<String>) -> anyhow::Result<()> {
             "--read-only" => write = false,
             "--days" => {
                 let n = it.next().and_then(|d| d.parse::<i64>().ok());
-                days = Some(n.filter(|d| (1..=365).contains(d)).ok_or_else(|| {
-                    anyhow::anyhow!("--days takes 1 to 365")
-                })?);
+                days = Some(
+                    n.filter(|d| (1..=365).contains(d))
+                        .ok_or_else(|| anyhow::anyhow!("--days takes 1 to 365"))?,
+                );
             }
             _ => positional.push(a),
         }
     }
-    let Some(email) = positional.first() else {
-        anyhow::bail!("usage: app task api_token <email> [name] [--read-only] [--days N]");
-    };
+    let email = positional.first().ok_or_else(|| anyhow::anyhow!(USAGE))?;
     let name = positional.get(1).map_or("task", String::as_str);
-    let Some(person) = user::find_by_email(&state.db, email).await? else {
-        anyhow::bail!("no account for {email}");
-    };
+    let person = find(state, email).await?;
     let now = Utc::now();
     let expires = days.map(|d| now + chrono::Duration::days(d));
     let (row, raw) = api_token::issue(&state.db, &person, name, write, expires, now).await?;

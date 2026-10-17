@@ -23,10 +23,15 @@ cargo run -q --manifest-path "$FW/tools/offrails-gen/Cargo.toml" --target-dir bo
 **In an app**, from its root, through the alias in `.cargo/config.toml`:
 
 ```sh
-cargo offrails list-parts                 # every part: installed or available, what it needs, what it adds
-cargo offrails add-part mailer            # the part and its dependencies; prints exactly what it changed and what to run next
-cargo offrails add-part jobs-dashboard --dry-run   # what it would do, changing nothing
+cargo offrails parts                      # every part: installed or available, what it needs, what it adds
+cargo offrails add mailer                 # the part and its dependencies; prints exactly what it changed and what to run next
+cargo offrails add jobs-dashboard --dry-run        # what it would do, changing nothing
+cargo offrails update-part mailer --framework "$FW"   # a newer framework's part, merged 3-way into the app's copy
+cargo offrails g resource posts title:string body:text   # the generators: migration, model, resource, controller, page, api, job, mailer, channel, test
+cargo offrails d resource posts           # undo a generator (files nobody changed)
 ```
+
+The generators ([generators](../generators/README.md)) write a feature's files and its wiring at the same anchors the parts use, format them, and record them in `docs/generated.toml` (so a re-run is a no-op and `destroy` removes exactly what they wrote). `add` is `add-part`, `parts` is `list-parts`.
 
 `add-part` checks everything before changing anything: a file the part brings that exists and differs, or a missing anchor, refuses with the reason and changes nothing (`--force` overwrites files). It then runs each `cargo add`, copies the part's `files/` (crate name replaced), inserts each wire above its `samples: <anchor>` comment, logs `installed sample <name> <version>` in `docs/decisions.md`, updates the `AGENTS.md` header line the part changes (`EMAIL` for `mailer`, `ACCOUNTS` for an auth method), and runs `cargo fmt --all`. Re-running it is a no-op. It is the samples repo's `tools/install.sh` in Rust, with the same file format and the same record line, so either tool sees the other's work. Next steps it prints: `cargo run -q -- db migrate` when the part has tables, `cargo run -q -- routes`, then the [Definition of Done](../workflow.md#definition-of-done) on SQLite **and** Postgres, and the part's README ("After installing", "Adapting it") and CHECKS.md.
 
@@ -37,7 +42,8 @@ template/
   app/                 the base app: kernel, layout, error pages, assets, bin/, migration crate, tests/app, CI, Docker
   parts/<name>/        sample.toml (crates, dependencies, wiring), README.md, CHECKS.md, files/ (at app paths)
   parts/SOURCE         the samples commit the parts were synced from (tools/sync-parts.sh)
-tools/offrails-gen/    new, add-part, list-parts, vendor (Rust, std only; its own workspace)
+tools/offrails-gen/    new, add-part (add), list-parts (parts), update-part, generate (g), destroy (d), vendor, verify
+                       (Rust, std only; its own workspace; src/generate/ holds the generators, testdata/golden/ their golden files)
 tools/new-app.sh       sh shorthand for `new`
 tools/ci/test-template.sh   generate bare / all parts / parts added one by one, then the Definition of Done on both databases
 tools/ci/memory-budget.sh   boot a generated app (release), serve 1000 requests, fail over an RSS budget
@@ -78,7 +84,7 @@ Full templates for these modes are not shipped yet (0.7.1).
 
 ## Windows
 
-`offrails-gen` (`new`, `add-part`, `list-parts`) is plain Rust and runs the same on Windows. The app builds and its SQLite suite runs there (CI matrix: Linux, macOS, Windows). `.gitattributes` keeps every source file LF, so rustfmt, the anchors and the tests agree across systems. The `bin/` scripts are POSIX shell: on Windows use Git Bash or WSL, or the plain commands they wrap:
+`offrails-gen` (`new`, `add`, `parts`, `update-part`, `generate`, `destroy`) is plain Rust and runs the same on Windows. The app builds and its SQLite suite runs there (CI matrix: Linux, macOS, Windows). `.gitattributes` keeps every source file LF, so rustfmt, the anchors and the tests agree across systems. The `bin/` scripts are POSIX shell: on Windows use Git Bash or WSL, or the plain commands they wrap:
 
 ```powershell
 copy .env.example .env
@@ -103,4 +109,5 @@ Known gaps on Windows: `bin/setup`, `bin/dev` and `bin/dev-cert` (sh), `sh .offr
 
 - 2026-10-17: the framework ships its app skeleton as real, tested files that agents copy (template/), instead of Markdown code they retype (because a skeleton built from the guides cost an agent 50+ minutes and still drifted; the human decided: "add the full skeleton as templates")
 - 2026-10-17: optional kernel parts are the samples, vendored, and added with one command (`cargo offrails add-part`), by the same anchor/wire mechanism as the samples' install.sh; the base is lean (no jobs, no mailer) and the agent proposes the parts the product needs (because a blog without background jobs shouldn't carry a job queue, and a part added later must be as easy as one added at generation)
+- 2026-10-17: Rails-style generators (`cargo offrails generate`) write feature code and its wiring instead of agents copying recipes (the human: "can we add actual code generators similar to rails? so the agent can invoke those instead of just copying"); each records what it wrote in `docs/generated.toml` so `destroy` and `--force` touch only unchanged files
 - 2026-10-17: the generators are a std-only Rust tool run through cargo, not shell (because apps are built on Linux, macOS and Windows, and `sed -i` differs or doesn't exist)

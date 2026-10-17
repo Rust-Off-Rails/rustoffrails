@@ -1,19 +1,22 @@
-# Generator: `scaffold` / `resource` / `model`
+# Generator: `resource` (scaffold) / `model`
 
 > **TL;DR**
-> - `scaffold Book title:string … owner:references`: `?` = nullable, `!` = unique; `owner`/`user`/`author` references are set from the session, never from params.
-> - Spec with AC IDs first, then migration → model (+ policy, factory) → failing tests (the standard request set per test-standards) → controller → routes → views for the app's mode.
-> - `resource` = without views; `model` = migration + model + tests; nested resources one level deep, shallow member routes.
+> - `cargo offrails g resource posts title:string slug:string:unique body:text published_at:datetime:optional` writes steps 2–10 below (migration, model, factory, model and request tests, controller, routes, htmx pages, nav, tenancy suites) and prints the rest. `--dry-run` shows the plan; `cargo offrails destroy resource posts` undoes it.
+> - `cargo offrails g model Post title:string …` = the migration, model, factory and model tests only (join tables, internal records).
+> - Yours: the spec with AC ids first (step 1), then the `// APP:` lines (validation limits, the label, what each page shows), the spec's tests, seeds (step 11), the browser smoke (step 12).
 >
-> Read the rest whenever you add a CRUD resource, a model or a nested resource.
+> Read the rest for what each step produces (and how to do it by hand in the modes the generator doesn't write).
 
 ```
-scaffold Book title:string author:string published_on:date? rating:integer owner:references
+cargo offrails g resource books title:string author:references isbn:string:unique published_on:date:optional
+cargo offrails g model Tag name:string:unique
 ```
 
-## Field syntax
+The field types, their columns, form controls, validations and factory values are in [the generators README](README.md#fields). Records belong to the signed-in user when the app has accounts (`--public` otherwise; the generator refuses to guess).
 
-`name:type` plus optional modifiers: `?` makes it nullable (default is required), `!` makes it unique. Example: `email:string!`, `bio:text?`.
+## Field syntax (by hand, and in the other modes)
+
+`name:type` plus optional modifiers: `?` (or `:optional`) makes it nullable (default is required), `!` (or `:unique`) makes it unique. Example: `email:string!`, `bio:text?`. The generator also takes `:index`, `decimal{p.s}`, `uuid`, `references{model}` ([README](README.md#fields)); `rich_text`, `enum{…}` and `attachment` below are by hand.
 
 | Type | Migration helper | Rust type | Form control / TS type |
 |------|------------------|-----------|------------------------|
@@ -35,8 +38,10 @@ Field names that imply ownership (`owner`, `user`, `author` + `references`) are 
 
 ## Scaffold steps
 
+`generate resource` does 2, 3 (per-user scope; the `has_many` side when the parent was generated), 5, 6 (the standard set, not your ACs), 7, 8, 9 (`htmx`), 10 and the tenancy suites, then runs `cargo fmt` and rewrites docs/routes.md. In `inertia`/`spa`/`api` mode run `generate model` (and `generate api`), then do 6–10 by hand from this list.
+
 1. **Spec:** make sure `product/features/<plural>.md` exists. If not, write it from the request, with acceptance criteria for list/create/show/edit/delete, validation rules, and who can do what (interview feature checklist).
-2. **Migration:** `sea-orm-cli migrate generate create_<plural>` → table per [migrations](../guides/migrations.md) (id, fields, timestamps, FKs with indexes, unique indexes for `!`, `CHECK`s for enums). Run `cargo run -- db migrate`, then prove rollback.
+2. **Migration:** `cargo offrails g migration create_<plural> field:type…` (never `sea-orm-cli migrate generate`: it rewrites `migration/src/lib.rs` without the anchors) → table per [migrations](../guides/migrations.md) (id, fields, timestamps, FKs with indexes, unique indexes for `!`, `CHECK`s for enums). Run `cargo run -- db migrate`, then prove rollback.
 3. **Model:** `src/models/<singular>.rs` per [models](../guides/models.md): entity, relations (both sides: add `has_many` + `Related` to the parent model too), `Params`, `New`, `validate()` (required fields → `can't be blank`; strings → max length 255 unless text; integers → range if the spec says; enums → `is not included in the list`), `find`, the list query (paginated, `order_by_desc(created_at)` then `id`), `create`, `update`, `destroy`. Plus the alias in `models/mod.rs`.
    - **`TENANCY` isn't `none`:** `find` and `destroy` are `pub(in crate::models)`. The public surface is `find_for(db, &user, id)`, `all_for(db, &user, page)` and `destroy_for(db, &user, record)` ([scoped lookups](../guides/models.md#scoped-lookups-tenancy)). Add a `reload_<singular>` helper to `tests/app/factories.rs` (tests read through the entity), add the model to `Tenant` in `tests/app/tenancy_test.rs`, teach `fill` its routes, and list its shared routes in `EXPECTED` with their AC ids. Check: `cargo nextest run tenancy_test guard_test`.
 4. **Policy:** `src/policies/<plural>.rs`: `can_view`, `can_edit`, `can_destroy` from the spec (default: anyone logged in views, owner edits/destroys), plus the inline truth-table test ([test-standards §2](../guides/test-standards.md#what-each-suite-contains)).
@@ -71,7 +76,7 @@ Field names that imply ownership (`owner`, `user`, `author` + `references`) are 
 
 ## Model
 
-`model` = steps 1–3 and 5, plus model-level tests (validation unit tests, each query fn against a real DB). Use it for join tables, internal records, and things managed by other controllers.
+`cargo offrails g model <Name> field:type…` = steps 2, 3 and 5, plus model-level tests (validation unit tests, each query fn against a real DB). Use it for join tables, internal records, and things managed by other controllers.
 
 ## Nested resources
 
