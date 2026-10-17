@@ -762,7 +762,11 @@ mod tests {
         fs::create_dir_all(dir.join("src")).unwrap();
         fs::write(dir.join("src/a.rs"), "fn a() {}\n").unwrap();
         fs::write(dir.join("src/b.rs"), "fn b() {}\n// edited\n").unwrap();
-        fs::write(dir.join("src/mod.rs"), "pub mod a;\npub mod b;\n// samples: mods\n").unwrap();
+        fs::write(
+            dir.join("src/mod.rs"),
+            "pub mod a;\npub mod b;\n// samples: mods\n",
+        )
+        .unwrap();
         let mut plan = Plan::new("x", "y", &[]);
         plan.create("src/a.rs", "fn a() {}\n");
         plan.create("src/b.rs", "fn b() {}\n");

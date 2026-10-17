@@ -48,7 +48,7 @@ kinds:
   job <Name> [arg:type…]               a background job (jobs part): worker, registration, test [--queue q]
   mailer <name> [action…]              a mailer (mailer part): HTML + text templates, previews, tests
   channel <name>                       a realtime topic (realtime part): authorization, broadcast, test
-  test <request|model|job> <name>      an empty test file, registered
+  test <request|model|job|unit> <name> a test file with a first test to replace, registered
 
 field types: string text integer bigint boolean decimal{p.s} money datetime date uuid json references{model}
   modifiers: name:type?  (nullable; or name:type:optional, which zsh won't glob)   :unique   :index
