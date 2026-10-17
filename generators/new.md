@@ -272,6 +272,7 @@ Generate these in order, **yourself, with no parallel helpers** until step 7's f
     | `src/main.rs` | `cli commands` (end of the `Command` enum), `cli dispatch` (in the `match`), `serve start` (in `serve`, after state is built), `serve stop` (in the shutdown future), `tracing layers` (the layer list in `init_tracing`: build it as in [errors-and-logging](../guides/errors-and-logging.md#logging), never as a bare empty `Vec`) |
     | `migration/src/lib.rs` | `migration mods`, `migrations` (end of the `vec![…]`, after the last `Box::new`) |
     | `templates/layouts/application.html`, `templates/shared/_nav.html` | `dev footer links`; `nav links` |
+    | `templates/kernel/layout.html` | `kernel head` (last line inside `<head>`), `kernel main` (first line inside `<main>`, before the content block) |
     | `tests/app/main.rs`, `support.rs`, `factories.rs` | `test mods`; `test support` (end of `impl TestApp`); `factories` |
     | `tests/app/security_test.rs`, `kernel_web_test.rs` | `router sources` (in `every_mounted_route_is_in_the_routes_table`'s list); `no-store paths` |
     | `.env.example`, `compose.yaml` | `env` (end of file); `compose env` (end of the app's `environment`) |
