@@ -1,0 +1,3 @@
+# One finding per line, by fingerprint; each is a known-fake example, never a real secret.
+# guides/jobs.md (0.7.0): the redaction test's sample URL (`deploy:hunter2`, `tok_live_abc123`), reworded since.
+efbd07823c7fd7c01480e4656e7e76747a17032d:guides/jobs.md:generic-api-key:373
