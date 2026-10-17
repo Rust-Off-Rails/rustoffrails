@@ -230,6 +230,30 @@ expect "an entity id typed i32 fails" "$d" 1 "src/models/card.rs:2: an id field 
 d=$(make_app pg); echo 'let db = connect("sqlite::memory:").await;' > "$d/tests/app/support.rs"
 expect "a support.rs that never reads TEST_DATABASE_URL fails" "$d" 1 "never reads TEST_DATABASE_URL"
 
+# Development is this machine only: no 0.0.0.0 literal bind, APP_BIND read, a Host check mounted.
+make_server() {
+  cat > "$1/src/main.rs" <<'EOF2'
+let addr = SocketAddr::new(config.bind, config.port);
+// a comment about [0, 0, 0, 0] is fine
+let probe = "0.0.0.0:9"; // not the server bind
+EOF2
+  printf 'let bind = bind_address(env, get("APP_BIND").as_deref());\nlet any = Ipv4Addr::UNSPECIFIED;\n' > "$1/src/config.rs"
+  printf '# APP_BIND=0.0.0.0\n' > "$1/.env.example"
+  printf '        .layer(from_fn_with_state(hosts::AllowedHosts::new(&config), hosts::middleware))\n' >> "$1/src/routes.rs"
+}
+d=$(make_app bind-ok); make_server "$d"
+expect "a loopback-by-default server with a Host check passes" "$d" 0 "serve binds APP_BIND" "0 error(s)"
+
+d=$(make_app bind-literal); make_server "$d"
+printf 'let plain = TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))).await?;\nlet s = "0.0.0.0:3000";\n' >> "$d/src/main.rs"
+expect "a literal 0.0.0.0 bind fails" "$d" 1 "src/main.rs:4: a literal 0.0.0.0 bind" "src/main.rs:5: a literal 0.0.0.0 bind"
+
+d=$(make_app bind-env); make_server "$d"; printf 'let port = parse("PORT", "3000");\n' > "$d/src/config.rs"; printf 'PORT=3000\n' > "$d/.env.example"
+expect "a config.rs without APP_BIND fails" "$d" 1 "src/config.rs never reads APP_BIND"
+
+d=$(make_app bind-hosts); make_server "$d"; grep -v hosts:: "$d/src/routes.rs" > "$d/r" && mv "$d/r" "$d/src/routes.rs"
+expect "no Host check fails" "$d" 1 "no Host check: development answers any Host name"
+
 d=$(make_app routes); : > "$d/docs/routes.md"
 expect "a stale docs/routes.md only warns" "$d" 0 "docs/routes.md is missing ROUTES path(s): /notes/{id}"
 

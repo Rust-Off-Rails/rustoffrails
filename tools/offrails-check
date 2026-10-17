@@ -23,6 +23,8 @@ Checks a Rust off Rails app (default: the current directory):
   env          every env var name in src/config.rs (a "SCREAMING_SNAKE" literal) is in .env.example
   ids          no id / *_id column is a 32-bit integer in migration/src, and no entity id is i32
   postgres     tests/app/support.rs reads TEST_DATABASE_URL (the suite can run on Postgres)
+  bind         development listens on this machine only: no 0.0.0.0 literal bind in src/, config.rs
+               reads APP_BIND, and kernel::hosts refuses foreign Host names (DNS rebinding)
   routes       docs/routes.md lists every ROUTES path (warning only)
 
 Exit status: 0 when there are no errors (warnings allowed), 1 otherwise, 2 on bad usage.
@@ -317,6 +319,33 @@ if [ -f tests/app/support.rs ]; then
     fail postgres "tests/app/support.rs never reads TEST_DATABASE_URL, so the suite can only run on SQLite" \
       "TestApp::new connects to TEST_DATABASE_URL when it's set (a database per test: .offrails/guides/testing.md#database-per-test), then run the suite on Postgres"
   fi
+fi
+
+# ---- development is this machine only ----------------------------------------------------------
+# /dev has no login (the mailbox holds every sign-in link). Development binds 127.0.0.1 (APP_BIND) and
+# refuses Host names that aren't this machine (DNS rebinding reaches it same-origin, past CSRF).
+# A 0.0.0.0 literal that isn't the server's bind ends its line with `// not the server bind`.
+if [ -f src/main.rs ]; then
+  bind_bad=0
+  lits=$(grep -rnE --include='*.rs' '\[0, *0, *0, *0\]|"0\.0\.0\.0(:|")|Ipv[46]Addr::UNSPECIFIED' src 2>/dev/null \
+    | grep -v '^src/config\.rs:' | grep -vF '// not the server bind' | grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' \
+    | awk -F: '{ print $1 ":" $2 }' || true)
+  for h in $lits; do
+    bind_bad=$((bind_bad + 1))
+    fail bind "$h: a literal 0.0.0.0 bind; development must listen on 127.0.0.1 (its /dev tools have no login)" \
+      "bind SocketAddr::new(config.bind, port) (APP_BIND: .offrails/guides/config.md#where-serve-listens-app_bind-app_allowed_hosts-and-the-unset-app_env-warning); not the server's bind: end the line with // not the server bind"
+  done
+  if [ -f src/config.rs ] && ! grep -q '"APP_BIND"' src/config.rs; then
+    bind_bad=$((bind_bad + 1))
+    fail bind "src/config.rs never reads APP_BIND, so development can't default to 127.0.0.1" \
+      "add Config.bind via config::bind_address (127.0.0.1 in development, 0.0.0.0 otherwise) and serve on it (.offrails/guides/config.md)"
+  fi
+  if [ -f src/routes.rs ] && ! grep -rqE --include='*.rs' 'hosts::middleware|AllowedHosts' src 2>/dev/null; then
+    bind_bad=$((bind_bad + 1))
+    fail bind "no Host check: development answers any Host name, so a DNS-rebinding page can read /dev same-origin" \
+      "add src/kernel/hosts.rs and mount it inside the security middleware (.offrails/guides/security.md#development-is-this-machine-only)"
+  fi
+  [ "$bind_bad" = 0 ] && pass bind "serve binds APP_BIND (127.0.0.1 in development) and development checks Host"
 fi
 
 # ---- docs/routes.md -----------------------------------------------------------------------------
