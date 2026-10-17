@@ -64,6 +64,9 @@ impl Step {
     }
 }
 
+/// A suite step's name and environment.
+type Suite = (&'static str, Vec<(String, Option<String>)>);
+
 enum Outcome {
     Passed,
     Failed(String),
@@ -103,7 +106,14 @@ pub fn run(app: &Path, opts: &VerifyOptions) -> Result<()> {
             Err(why) => format!("skipped: {why}"),
         }
     );
+    // The suites' environments, for re-running their failures alone afterwards.
+    let suites: Vec<Suite> = steps
+        .iter()
+        .filter(|s| s.name.starts_with("tests ("))
+        .map(|s| (s.name, s.env.clone()))
+        .collect();
     let mut done = execute(app, &logs, steps);
+    rerun_failures_alone(app, &logs, &suites, &mut done);
     done.extend(skipped);
 
     // The live lines above showed each step as it finished; add the ones that never ran.
@@ -518,6 +528,88 @@ fn run_step(app: &Path, log: &Path, s: &Step) -> Done {
     }
 }
 
+/// The two suites run at the same time, in the same directory: a test that keeps state on disk
+/// (under `storage/`) can trip over its twin in the other suite. Each failed test is run once
+/// more, alone, after everything else. One that passes then is reported as **flaky** (still a
+/// failure: a test that depends on what else runs is a bug, test-standards.md), so the reader
+/// knows it is shared state and not the change.
+fn rerun_failures_alone(app: &Path, logs: &Path, suites: &[Suite], done: &mut [Done]) {
+    for d in done.iter_mut() {
+        let Outcome::Failed(tail) = &d.outcome else {
+            continue;
+        };
+        let Some((_, env)) = suites.iter().find(|(n, _)| *n == d.name) else {
+            continue;
+        };
+        let log = fs::read_to_string(logs.join(log_name(d.name))).unwrap_or_default();
+        let failed = failed_tests(&log);
+        if failed.is_empty() || failed.len() > 20 {
+            continue; // nothing ran, or a real breakage: no point re-running
+        }
+        let filter = failed
+            .iter()
+            .map(|t| format!("test(={t})"))
+            .collect::<Vec<_>>()
+            .join(" | ");
+        let mut cmd = Command::new("cargo");
+        cmd.args([
+            "nextest",
+            "run",
+            "--cargo-quiet",
+            "--no-fail-fast",
+            "--test-threads",
+            "1",
+            "--status-level",
+            "fail",
+            "--final-status-level",
+            "none",
+            "-E",
+            &filter,
+        ])
+        .current_dir(app)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+        for (k, v) in env {
+            match v {
+                Some(v) => cmd.env(k, v),
+                None => cmd.env_remove(k),
+            };
+        }
+        if cmd.status().is_ok_and(|st| st.success()) {
+            let tail = format!(
+                "{tail}\n\nflaky: {} passed when run again alone. It depends on what runs beside \
+                 it (shared files under storage/, a port, a timer): fix the test.",
+                failed.join(", ")
+            );
+            println!(
+                "  FLAKY {:<22}         {} failed beside the other suite, passed alone",
+                d.name,
+                failed.join(", ")
+            );
+            d.note = format!("{} (flaky: {})", d.note, failed.join(", "));
+            d.outcome = Outcome::Failed(tail);
+        }
+    }
+}
+
+/// Test names from nextest's `FAIL [ 0.1s] <binary> <test>` lines (retried ones once).
+fn failed_tests(log: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for line in log.lines() {
+        let t = line.trim_start();
+        if !(t.starts_with("FAIL [") || t.starts_with("TIMEOUT [")) {
+            continue;
+        }
+        if let Some(name) = t.split_whitespace().last()
+            && !out.iter().any(|n| n == name)
+        {
+            out.push(name.to_owned());
+        }
+    }
+    out
+}
+
 /// nextest's `Summary` line, or clippy's warning count, for the one-line report.
 fn summary_note(log: &str) -> String {
     if let Some(line) = log
@@ -663,6 +755,12 @@ mod tests {
         let log = "  Starting 3 tests\n     Summary [   1.204s] 3 tests run: 3 passed, 0 skipped\n";
         assert_eq!(summary_note(log), "3 tests run: 3 passed, 0 skipped");
         assert_eq!(summary_note("warning: x\nwarning: y\n"), "2 warning(s)");
+    }
+
+    #[test]
+    fn failed_tests_are_read_from_nextest_lines() {
+        let log = "        FAIL [   0.121s] app::app a_test::one\n  PASS x\n        FAIL [   0.1s] app::app a_test::one\n     TIMEOUT [  60.0s] app::app b::two\n";
+        assert_eq!(failed_tests(log), vec!["a_test::one", "b::two"]);
     }
 
     #[test]

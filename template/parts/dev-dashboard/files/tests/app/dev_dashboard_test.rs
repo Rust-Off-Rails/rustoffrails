@@ -2988,6 +2988,13 @@ async fn run_history_is_capped_redacted_and_reopened() {
         .await
         .assert_ok()
         .assert_text("From disk, after a restart.");
+    // Leave no future-dated run behind in storage/: after MAX_HISTORY test runs they outranked,
+    // and pruned, the run this test makes, and it failed on every run after that.
+    let _ = std::fs::remove_file(std::path::Path::new(ai_agent::HISTORY_DIR).join(format!(
+        "{}-{}.json",
+        stored.started.timestamp(),
+        stored.id
+    )));
     assert_eq!(
         app.get("/dev/dashboard/ai/runs/not-an-id").await.status,
         StatusCode::NOT_FOUND
