@@ -145,8 +145,8 @@ async fn every_listed_route_is_routable_in_development() {
         // WHY: GETs read headers only: a streaming route (SSE) never ends its body.
         let (status, headers) = match *method {
             "GET" => app.request_head(&path, &[]).await,
-            _ => {
-                let res = app.post_form(&path, &[]).await;
+            other => {
+                let res = app.request_method(other, &path).await;
                 (res.status, res.headers)
             }
         };

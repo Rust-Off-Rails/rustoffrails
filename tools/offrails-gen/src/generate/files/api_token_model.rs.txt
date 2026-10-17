@@ -1,0 +1,147 @@
+//! API tokens: random 32 bytes shown once, only the SHA-256 digest stored, scoped (`read`,
+//! `write`), optionally expiring (.offrails/guides/api.md#authentication-api-tokens).
+//! Written by the first `cargo offrails generate api`.
+
+use chrono::{DateTime, Duration, Utc};
+use sea_orm::{ActiveValue::Set, QueryOrder, entity::prelude::*};
+
+use crate::error::AppError;
+use crate::kernel::auth_token;
+use crate::models::User;
+
+#[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+#[sea_orm(table_name = "api_tokens")]
+pub struct Model {
+    #[sea_orm(primary_key)]
+    pub id: i64,
+    pub user_id: i64,
+    /// What the person called it ("CLI on my laptop").
+    pub name: String,
+    /// SECURITY: the digest only; the token itself is shown once and never stored.
+    pub token_digest: String,
+    /// `["read"]` or `["read", "write"]`.
+    pub scopes: Json,
+    pub last_used_at: Option<DateTimeUtc>,
+    pub expires_at: Option<DateTimeUtc>,
+    pub created_at: DateTimeUtc,
+}
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {
+    #[sea_orm(
+        belongs_to = "super::user::Entity",
+        from = "Column::UserId",
+        to = "super::user::Column::Id",
+        on_delete = "Cascade"
+    )]
+    User,
+}
+
+impl Related<super::user::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::User.def()
+    }
+}
+
+/// Must stay empty: callbacks are banned.
+impl ActiveModelBehavior for ActiveModel {}
+
+impl Model {
+    pub fn scope_list(&self) -> Vec<String> {
+        self.scopes
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
+            .unwrap_or_default()
+    }
+
+    pub fn can_write(&self) -> bool {
+        self.scope_list().iter().any(|s| s == "write")
+    }
+}
+
+/// A new token for `user`: the row, and the raw token (show it once).
+#[tracing::instrument(skip_all)]
+pub async fn issue(
+    db: &impl ConnectionTrait,
+    user: &User,
+    name: &str,
+    write: bool,
+    expires_at: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> Result<(Model, String), AppError> {
+    let raw = auth_token::generate_token();
+    let scopes = if write {
+        serde_json::json!(["read", "write"])
+    } else {
+        serde_json::json!(["read"])
+    };
+    let row = ActiveModel {
+        user_id: Set(user.id),
+        name: Set(name.trim().chars().take(100).collect()),
+        token_digest: Set(auth_token::digest(&raw)),
+        scopes: Set(scopes),
+        last_used_at: Set(None),
+        expires_at: Set(expires_at),
+        created_at: Set(now),
+        ..Default::default()
+    }
+    .insert(db)
+    .await?;
+    Ok((row, raw))
+}
+
+/// The token and its user, if `raw` is a live token (not unknown, not expired). Touches
+/// `last_used_at` at most once a minute.
+#[tracing::instrument(skip_all)]
+pub async fn authenticate(
+    db: &impl ConnectionTrait,
+    raw: &str,
+    now: DateTime<Utc>,
+) -> Result<Option<(Model, User)>, AppError> {
+    let found = Entity::find()
+        .filter(Column::TokenDigest.eq(auth_token::digest(raw)))
+        .find_also_related(super::user::Entity)
+        .one(db)
+        .await?;
+    let Some((token, Some(user))) = found else {
+        return Ok(None);
+    };
+    if token.expires_at.is_some_and(|at| at <= now) {
+        return Ok(None);
+    }
+    let stale = token
+        .last_used_at
+        .is_none_or(|at| now - at > Duration::minutes(1));
+    let token = if stale {
+        let mut am: ActiveModel = token.into();
+        am.last_used_at = Set(Some(now));
+        am.update(db).await?
+    } else {
+        token
+    };
+    Ok(Some((token, user)))
+}
+
+/// `user`'s tokens, newest first (metadata only: the digest never leaves the model).
+#[tracing::instrument(skip_all)]
+pub async fn all_for(db: &impl ConnectionTrait, user: &User) -> Result<Vec<Model>, AppError> {
+    Ok(Entity::find()
+        .filter(Column::UserId.eq(user.id))
+        .order_by_desc(Column::Id)
+        .all(db)
+        .await?)
+}
+
+/// Revokes one of `user`'s tokens (another user's id is `NotFound`).
+#[tracing::instrument(skip_all, fields(id))]
+pub async fn revoke_for(db: &impl ConnectionTrait, user: &User, id: i64) -> Result<(), AppError> {
+    let res = Entity::delete_many()
+        .filter(Column::Id.eq(id))
+        .filter(Column::UserId.eq(user.id))
+        .exec(db)
+        .await?;
+    if res.rows_affected == 0 {
+        return Err(AppError::NotFound);
+    }
+    Ok(())
+}

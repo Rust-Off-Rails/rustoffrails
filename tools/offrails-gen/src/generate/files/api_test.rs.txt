@@ -1,0 +1,84 @@
+//! The API's shared guarantees (.offrails/guides/api.md#testing): one 401 for every bad token,
+//! the caller endpoint, scopes, and the committed OpenAPI document (`docs/openapi.json`).
+//! Written by the first `cargo offrails generate api`.
+
+use axum::http::StatusCode;
+use __CRATE__::routes::{Access, ROUTES};
+
+use crate::factories;
+use crate::support::TestApp;
+
+/// SECURITY: missing, garbage and expired tokens get the same 401 with `WWW-Authenticate`.
+#[tokio::test]
+async fn every_bad_token_is_the_same_401() {
+    let app = TestApp::new().await;
+    let me = factories::user(app.db(), "me@example.com").await;
+    let (_, expired) = __CRATE__::models::api_token::issue(
+        app.db(),
+        &me,
+        "old",
+        true,
+        Some(chrono::Utc::now() - chrono::Duration::minutes(1)),
+        chrono::Utc::now(),
+    )
+    .await
+    .unwrap();
+    let bearer = format!("Bearer {expired}");
+    for headers in [
+        vec![],
+        vec![("authorization", "Bearer not-a-token")],
+        vec![("authorization", "Basic abc")],
+        vec![("authorization", bearer.as_str())],
+    ] {
+        let res = app.send_json("GET", "/api/v1/me", None, &headers).await;
+        res.assert_status(StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            res.headers.get("www-authenticate").unwrap(),
+            "Bearer realm=\"api\""
+        );
+        assert_eq!(res.json::<serde_json::Value>(), serde_json::json!({ "error": "unauthorized" }));
+    }
+}
+
+#[tokio::test]
+async fn me_is_the_tokens_owner() {
+    let app = TestApp::new().await;
+    let me = factories::user(app.db(), "me@example.com").await;
+    let token = app.api_token_for(&me, false).await;
+    let res = app
+        .send_json("GET", "/api/v1/me", None, &[("authorization", format!("Bearer {token}").as_str())])
+        .await;
+    res.assert_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["data"]["email"], "me@example.com");
+    assert_eq!(body["data"]["scopes"], serde_json::json!(["read"]));
+    assert!(res.body.find("token_digest").is_none(), "the digest never leaves the model");
+}
+
+/// The served document is the committed one, and covers every `/api/v1` route.
+/// After an intended change: UPDATE_SCHEMAS=1 cargo nextest run openapi (and commit it).
+#[tokio::test]
+async fn openapi_matches_docs_openapi_json_and_covers_every_route() {
+    let app = TestApp::new().await;
+    let res = app.get("/api/openapi.json").await;
+    res.assert_ok();
+    let served: serde_json::Value = res.json();
+    let pretty = serde_json::to_string_pretty(&served).unwrap() + "\n";
+    let path = "docs/openapi.json";
+    match std::fs::read_to_string(path) {
+        Ok(committed) if std::env::var_os("UPDATE_SCHEMAS").is_none() => assert_eq!(
+            committed, pretty,
+            "the API changed: if on purpose, UPDATE_SCHEMAS=1 cargo nextest run openapi, log it in docs/decisions.md and commit docs/openapi.json"
+        ),
+        // The first run (or UPDATE_SCHEMAS=1) writes it: commit it.
+        _ => std::fs::write(path, &pretty).unwrap(),
+    }
+    for (method, route, handler, access) in ROUTES {
+        if !route.starts_with("/api/v1") {
+            continue;
+        }
+        assert_eq!(*access, Access::User, "{route} ({handler}): API routes need a token");
+        let op = served["paths"][*route][method.to_ascii_lowercase()].clone();
+        assert!(!op.is_null(), "{method} {route} ({handler}) isn't in the OpenAPI document: add it to ApiDoc's paths");
+    }
+}

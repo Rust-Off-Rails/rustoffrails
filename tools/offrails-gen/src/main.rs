@@ -1,8 +1,11 @@
 //! offrails-gen: the Rust off Rails generators, cross-platform (Linux, macOS, Windows).
 //!
 //! Inside an app, through the alias in `.cargo/config.toml`:
-//!   cargo offrails list-parts
-//!   cargo offrails add-part mailer [more parts…] [--dry-run] [--force] [--offline] [--no-fmt]
+//!   cargo offrails generate <kind> <name> [field:type…] [--dry-run] [--force]   (alias: g)
+//!   cargo offrails destroy <kind> <name> [--dry-run]                            (alias: d)
+//!   cargo offrails parts                       (alias: list-parts)
+//!   cargo offrails add mailer [more parts…] [--dry-run] [--force] [--offline] [--no-fmt]   (alias: add-part)
+//!   cargo offrails update-part <part>… [--dry-run]   3-way merge of a newer part into the app
 //!   cargo offrails verify [--fast|--full]      the Definition of Done, in parallel
 //!
 //! Before the app exists, from the framework (`$FW`: the plugin root, ~/.offrails/current or a checkout):
@@ -11,6 +14,7 @@
 //!
 //! Exit status: 0 done, 1 refused or failed (nothing half-applied), 2 usage.
 
+mod generate;
 mod newapp;
 mod parts;
 mod util;
@@ -25,8 +29,13 @@ const USAGE: &str = "usage:
   offrails-gen new <dir> <crate_name> \"<Display Name>\" [--pitch \"<one line>\"] [--parts a,b|none]
                    [--mode htmx|inertia|spa|api] [--prod-db postgres|sqlite] [--no-git] [--offline]
                    [--framework <path>]
-  offrails-gen add-part <name>… [--app <dir>] [--dry-run] [--force] [--offline] [--no-fmt]
-  offrails-gen list-parts [--app <dir>]
+  offrails-gen generate <kind> <name> [args…] [--dry-run] [--force] [--public] [--app <dir>]   (alias: g)
+                   migration | model | resource (scaffold) | controller | page | api | job | mailer | channel | test
+                   `generate --help` lists each kind, the field types and the options
+  offrails-gen destroy <kind> <name> [--dry-run] [--app <dir>]   (alias: d) undo a generate (unchanged files only)
+  offrails-gen add <part>… [--app <dir>] [--dry-run] [--force] [--offline] [--no-fmt]   (alias: add-part)
+  offrails-gen update-part <part>… [--app <dir>] [--dry-run]   merge a newer part version into the app (3-way)
+  offrails-gen parts [--app <dir>]   (alias: list-parts) every part, installed or not, and what it adds
   offrails-gen vendor --framework <newer framework> [--app <dir>]   re-copy a framework into <app>/.offrails/
   offrails-gen verify [--fast|--full] [--no-postgres] [--test-threads <n>] [--app <dir>]
                    the Definition of Done in parallel: --fast while iterating, --full once at the end
@@ -38,7 +47,10 @@ struct Args {
     flags: Vec<(String, Option<String>)>,
 }
 
-const VALUE_FLAGS: [&str; 8] = [
+const VALUE_FLAGS: [&str; 11] = [
+    "--queue",
+    "--every",
+    "--path",
     "--pitch",
     "--parts",
     "--mode",
@@ -129,6 +141,12 @@ fn real_main() -> Result<()> {
     }
     let command = raw.remove(0);
     let args = parse_args(raw)?;
+    if matches!(command.as_str(), "generate" | "g" | "destroy" | "d")
+        && (args.flag("--help") || args.flag("-h") || args.positional.is_empty())
+    {
+        println!("{}", generate::USAGE);
+        return Ok(());
+    }
     if args.flag("--help")
         || args.flag("-h")
         || matches!(command.as_str(), "help" | "--help" | "-h")
@@ -137,6 +155,44 @@ fn real_main() -> Result<()> {
         return Ok(());
     }
     match command.as_str() {
+        "generate" | "g" | "destroy" | "d" => {
+            args.reject_unknown(&[
+                "--app",
+                "--dry-run",
+                "--force",
+                "--no-fmt",
+                "--public",
+                "--no-nav",
+                "--nav",
+                "--queue",
+                "--every",
+                "--path",
+            ])?;
+            let app = args.app()?;
+            let mut values = std::collections::BTreeMap::new();
+            for k in ["--queue", "--every", "--path"] {
+                if let Some(v) = args.value(k) {
+                    values.insert(k.trim_start_matches('-').to_owned(), v);
+                }
+            }
+            let flags = generate::Flags {
+                dry_run: args.flag("--dry-run"),
+                force: args.flag("--force"),
+                fmt: !args.flag("--no-fmt"),
+                public: args.flag("--public"),
+                no_nav: args.flag("--no-nav"),
+                nav: args.flag("--nav"),
+                values,
+                ..generate::Flags::default()
+            };
+            let kind = args.positional[0].clone();
+            let rest = &args.positional[1..];
+            if matches!(command.as_str(), "destroy" | "d") {
+                generate::destroy(&app, &kind, rest, flags)
+            } else {
+                generate::generate(&app, &kind, rest, flags)
+            }
+        }
         "new" => {
             args.reject_unknown(&[
                 "--pitch",
@@ -178,7 +234,7 @@ fn real_main() -> Result<()> {
                 },
             )
         }
-        "add-part" | "add-parts" => {
+        "add-part" | "add-parts" | "add" => {
             args.reject_unknown(&[
                 "--app",
                 "--dry-run",

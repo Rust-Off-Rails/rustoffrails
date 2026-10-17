@@ -1,0 +1,207 @@
+//! The public API (`API: rest`): `/api/v1`, bearer tokens, JSON in and out, OpenAPI at
+//! `/api/openapi.json` (committed as docs/openapi.json; a test fails when it drifts).
+//! Written by the first `cargo offrails generate api`; each API resource adds itself at the
+//! `samples:` anchors; its `/api/v1` handlers are `controllers/api_v1_<resource>.rs` (flat: some
+//! part suites read `src/controllers` one level deep). Spec: .offrails/guides/api.md.
+
+use std::collections::BTreeMap;
+
+use axum::{
+    Json,
+    extract::{FromRequest, FromRequestParts, Request},
+    http::{StatusCode, header, request::Parts},
+    response::{IntoResponse, Response},
+};
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use utoipa::{Modify, OpenApi, ToSchema};
+
+use crate::{
+    error::AppError,
+    models::{Errors, User, api_token},
+    state::AppState,
+};
+
+/// Requests per token per minute, across the API (api.md#rate-limits).
+pub const TOKEN_RATE_LIMIT: u32 = 300;
+
+/// JSON bodies parsed by `ApiJson<T>`, never bare `Json<T>`: axum's own rejections (plain text
+/// 400/415/422) become `422 {"errors": {"body": ["is not valid JSON"]}}`.
+pub struct ApiJson<T>(pub T);
+
+impl<T, S> FromRequest<S> for ApiJson<T>
+where
+    T: for<'de> Deserialize<'de>,
+    S: Send + Sync,
+{
+    type Rejection = AppError;
+
+    async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+        match Json::<T>::from_request(req, state).await {
+            Ok(Json(value)) => Ok(Self(value)),
+            Err(_) => Err(AppError::Invalid(Errors::single(
+                "body",
+                "is not valid JSON",
+            ))),
+        }
+    }
+}
+
+/// `{"error": "not_found"}`
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ErrorBody {
+    pub error: String,
+}
+
+/// `422 {"errors": {"title": ["can't be blank"]}}`
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct InvalidBody {
+    pub errors: BTreeMap<String, Vec<String>>,
+}
+
+/// A list's page: `{"data": [...], "page": {"page": 1, "per": 25, "has_more": true}}`.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct PageInfo {
+    pub page: u64,
+    pub per: u64,
+    pub has_more: bool,
+}
+
+/// The caller, from `Authorization: Bearer <token>`. Missing, unknown, revoked and expired
+/// tokens all get the same 401 (`WWW-Authenticate: Bearer`).
+pub struct ApiUser {
+    pub user: User,
+    pub token: api_token::Model,
+}
+
+impl ApiUser {
+    /// `Forbidden` (403) for a read-only token.
+    pub fn require_write(&self) -> Result<(), AppError> {
+        if self.token.can_write() {
+            Ok(())
+        } else {
+            Err(AppError::Forbidden)
+        }
+    }
+}
+
+/// The 401 every bad token gets.
+pub fn unauthorized() -> Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        [(header::WWW_AUTHENTICATE, "Bearer realm=\"api\"")],
+        Json(serde_json::json!({ "error": "unauthorized" })),
+    )
+        .into_response()
+}
+
+impl FromRequestParts<AppState> for ApiUser {
+    type Rejection = Response;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Response> {
+        let raw = parts
+            .headers
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .map(str::trim)
+            .filter(|t| !t.is_empty());
+        let Some(raw) = raw else {
+            return Err(unauthorized());
+        };
+        match api_token::authenticate(&state.db, raw, Utc::now()).await {
+            Ok(Some((token, user))) => {
+                // SECURITY: one bucket per token (api.md#rate-limits).
+                state
+                    .rate_limit
+                    .check(
+                        &format!("api_token:{}", token.id),
+                        TOKEN_RATE_LIMIT,
+                        std::time::Duration::from_secs(60),
+                    )
+                    .await
+                    .map_err(IntoResponse::into_response)?;
+                Ok(Self { user, token })
+            }
+            Ok(None) => Err(unauthorized()),
+            Err(e) => Err(e.into_response()),
+        }
+    }
+}
+
+/// The caller, as the API shows them.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct MeJson {
+    pub id: i64,
+    pub email: String,
+    /// The token's scopes: `read`, and `write` unless it's read-only.
+    pub scopes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct MeBody {
+    pub data: MeJson,
+}
+
+/// `GET /api/v1/me`: who the token belongs to.
+#[utoipa::path(
+    get,
+    path = "/api/v1/me",
+    tag = "me",
+    security(("bearer" = [])),
+    responses((status = 200, body = MeBody), (status = 401, body = ErrorBody))
+)]
+#[tracing::instrument(skip_all)]
+pub async fn me(me: ApiUser) -> Result<Json<MeBody>, AppError> {
+    Ok(Json(MeBody {
+        data: MeJson {
+            id: me.user.id,
+            email: me.user.email.clone(),
+            scopes: me.token.scope_list(),
+        },
+    }))
+}
+
+struct BearerSecurity;
+
+impl Modify for BearerSecurity {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        // WHY: utoipa fills the license from Cargo metadata with an empty name: invalid OpenAPI.
+        openapi.info.license = None;
+        if let Some(components) = openapi.components.as_mut() {
+            components.add_security_scheme(
+                "bearer",
+                utoipa::openapi::security::SecurityScheme::Http(
+                    utoipa::openapi::security::HttpBuilder::new()
+                        .scheme(utoipa::openapi::security::HttpAuthScheme::Bearer)
+                        .bearer_format("token")
+                        .build(),
+                ),
+            );
+        }
+    }
+}
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        me,
+        // samples: api paths
+    ),
+    components(schemas(
+        ErrorBody,
+        InvalidBody,
+        PageInfo,
+        MeBody,
+        MeJson,
+        // samples: api schemas
+    )),
+    modifiers(&BearerSecurity)
+)]
+pub struct ApiDoc;
+
+/// `GET /api/openapi.json`: the document (public: it's documentation).
+#[tracing::instrument(skip_all)]
+pub async fn openapi_json() -> Response {
+    Json(ApiDoc::openapi()).into_response()
+}
