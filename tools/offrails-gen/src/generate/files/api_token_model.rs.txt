@@ -145,3 +145,10 @@ pub async fn revoke_for(db: &impl ConnectionTrait, user: &User, id: i64) -> Resu
     }
     Ok(())
 }
+
+/// Revokes any token by id (`app task tokens revoke`, operators). Returns whether it existed.
+#[tracing::instrument(skip_all, fields(id))]
+pub async fn revoke_system(db: &impl ConnectionTrait, id: i64) -> Result<bool, AppError> {
+    let res = Entity::delete_by_id(id).exec(db).await?;
+    Ok(res.rows_affected > 0)
+}

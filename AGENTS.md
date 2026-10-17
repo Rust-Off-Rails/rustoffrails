@@ -5,13 +5,14 @@ You are building (or maintaining) a **Rust off Rails** application. This file is
 ## Prime directives
 
 1. **All code is written by AI: you write all of it, and humans write none.** This is the framework's founding rule ([doctrine §0](doctrine.md#0-all-code-is-written-by-ai)). Humans supply intent as Markdown in `product/`. If you find code a human edited by hand, keep it working, record the intent it expresses in the relevant spec, and continue. Never ask a human to write or paste code.
-2. **Do not deliberate on settled questions.** If these docs answer it, follow the answer. Do not compare alternatives, propose other crates, or "consider" a different layout. Opinions here beat your priors. When a guide gives a template or a whole file, copy it and change only the parts it marks.
-3. **The compiler is your reviewer, and the test suite is the second one.** Prefer designs where mistakes become compile errors: typed SeaORM queries over SQL strings, Askama over runtime templates, `ts-rs` types over hand-written TS, enums over strings. What types can't prove, tests prove on **both** SQLite and Postgres.
-4. **Never type a crate version from memory.** Use `cargo add`. Before using a crate API you are not certain of, check the resolved version in `Cargo.lock` and read its docs (`cargo doc --open` or docs.rs for that exact version). API drift between versions is the main way agents break this stack.
-5. **Explicit beats magic.** You don't pay for boilerplate, so write it. No proc-macro frameworks, no reflection, no hidden callbacks.
-6. **Green or it didn't happen.** A task is done only when the [Definition of Done](workflow.md#definition-of-done) passes, starting with `sh .offrails/tools/offrails-check`. Every item has a command; run it, don't eyeball it.
-7. **Leave a trail.** Every non-obvious decision goes in `docs/decisions.md` in the app (one dated line each). The next agent has no memory but yours.
-8. **Copy what's built; write what's yours.** New apps start from the tested [template](template/README.md) (`offrails-gen new`), and kernel needs are met by its parts (`cargo offrails add-part <name>`), never retyped from a guide. Once copied, the code is the app's: you adapt it and own it. You write the app-specific code (models, controllers, views, jobs) from the guides.
+2. **Generate before you hand-write.** Migrations, models, CRUD resources, controllers, pages, APIs, jobs, mailers, channels and tests come from `cargo offrails generate <kind> …` (`cargo offrails g --help`); kernel pieces (mail, jobs, sign-in, sockets) from parts (`cargo offrails parts`, `cargo offrails add <part>`). Then customize the `// APP:` lines. Hand-write only what no generator or part covers ([generators](generators/README.md)).
+3. **Do not deliberate on settled questions.** If these docs answer it, follow the answer. Do not compare alternatives, propose other crates, or "consider" a different layout. Opinions here beat your priors. When a guide gives a template or a whole file, copy it and change only the parts it marks.
+4. **The compiler is your reviewer, and the test suite is the second one.** Prefer designs where mistakes become compile errors: typed SeaORM queries over SQL strings, Askama over runtime templates, `ts-rs` types over hand-written TS, enums over strings. What types can't prove, tests prove on **both** SQLite and Postgres.
+5. **Never type a crate version from memory.** Use `cargo add`. Before using a crate API you are not certain of, check the resolved version in `Cargo.lock` and read its docs (`cargo doc --open` or docs.rs for that exact version). API drift between versions is the main way agents break this stack.
+6. **Explicit beats magic.** You don't pay for boilerplate, so write it. No proc-macro frameworks, no reflection, no hidden callbacks.
+7. **Green or it didn't happen.** A task is done only when the [Definition of Done](workflow.md#definition-of-done) passes, starting with `sh .offrails/tools/offrails-check`. Every item has a command; run it, don't eyeball it.
+8. **Leave a trail.** Every non-obvious decision goes in `docs/decisions.md` in the app (one dated line each). The next agent has no memory but yours.
+9. **Copy what's built; write what's yours.** New apps start from the tested [template](template/README.md) (`offrails-gen new`), and kernel needs are met by its parts (`cargo offrails add <name>`), never retyped from a guide. App-specific code (models, controllers, views, jobs) starts from a generator (directive 2), shaped by the guides. Once copied or generated, the code is the app's: you adapt it and own it.
 
 ## Check the frontend mode first
 
@@ -55,7 +56,7 @@ Read on demand:
 | Errors, logging, observability             | [`guides/errors-and-logging.md`](guides/errors-and-logging.md) |
 | Tests                                      | [`guides/testing.md`](guides/testing.md) |
 | Shipping it, `docker compose`, direct TLS  | [`guides/deployment.md`](guides/deployment.md) |
-| Running a `rails generate` equivalent      | [`generators/`](generators/)            |
+| Running a `rails generate` equivalent: `cargo offrails g <kind>` | [`generators/README.md`](generators/README.md) |
 | Upgrading the app to a newer framework release | [`generators/upgrade.md`](generators/upgrade.md) |
 | Starting an app from the template; parts (mailer, jobs, auth, realtime, dev dashboard): proposing, adding, anchors | [`template/README.md`](template/README.md), [`guides/samples.md`](guides/samples.md) |
 | Commands (`rails s`, `db:migrate`, …)      | [`cli.md`](cli.md)                      |

@@ -1,7 +1,7 @@
 # Generator: `job` (`rails generate job`) and `task`
 
 > **TL;DR**
-> - `job SendWeeklyDigest user_id:bigint [--queue] [--priority] [--every cron] [--unique key:ttl]` → a `Worker` struct with id-only args, registered in `dispatch` and `worker_config`.
+> - `cargo offrails g job SendWeeklyDigest user_id:bigint [--queue mailers]` writes `src/jobs/send_weekly_digest.rs` (a `Worker` with id-only args, `MAX_ATTEMPTS = 5`), its arms in `dispatch`, `worker_config` and `WORKERS`, and `tests/app/send_weekly_digest_job_test.rs`; it needs the `jobs` part (`cargo offrails add jobs`). Priority, uniqueness and cron (steps 1 and 7) are yours, in that file and `src/jobs/recurring.rs`.
 > - Choose outcomes deliberately (`Done`, `Err` → retry, `Snooze`, `Discard`, `Cancel`); make jobs idempotent; enqueue from the model fn in the same transaction.
 > - A new queue goes into `APP_QUEUES`, `.env.example` and every worker role; `--every` adds a `Recurring` entry.
 >
@@ -10,14 +10,15 @@
 ## Job
 
 ```
-job SendWeeklyDigest user_id:bigint [--queue mailers] [--priority 3] [--every "0 8 * * MON"] [--unique user_id:24h]
+cargo offrails g job SendWeeklyDigest user_id:bigint --queue mailers
+# by hand after it: PRIORITY, unique(), a Recurring entry for "0 8 * * MON", the perform body
 ```
 
 1. `src/jobs/<verb>_<noun>.rs`: a `#[derive(Debug, Clone, Serialize, Deserialize)] pub struct SendWeeklyDigestJob { pub user_id: i64 }` with `impl Worker` (`NAME = "send_weekly_digest"`, plus `QUEUE`/`PRIORITY`/`MAX_ATTEMPTS`/`TIMEOUT` only if they differ from the defaults, and `fn unique() -> Option<Unique> { Some(Unique::args_keys(&["user_id"]).period(chrono::Duration::hours(24))) }` for `--unique user_id:24h`). Size `MAX_ATTEMPTS` to the work: the default 20 (~3 weeks) is for syncs and imports, not for anything time-limited. See [guides/jobs.md](../guides/jobs.md).
 2. **Args = ids, not records.** Load fresh data in `perform`. If the record is gone, return `Ok(Outcome::Cancel(...))`.
 3. **Pick the outcome deliberately:** `Done` normally; `Err` (via `?`) for transient failures you want retried; `Snooze` for "not yet"; `Discard` for inputs that will never work. Add `.context(...)` to errors so the dashboard's error history explains them.
 4. **Idempotent:** a job may run twice (crash after the side effect, before completion). Guard side effects (for example, record `sent_at` and skip if it's set).
-5. Register it in `dispatch` **and** `worker_config` in `src/jobs/mod.rs` (`pub mod` + `pub use` too).
+5. Register it in `dispatch` **and** `worker_config` in `src/jobs/mod.rs` (`pub mod` + `pub use` too), and in `WORKERS`. The generator does this.
 6. A new queue (`--queue digests`) must be added to the `APP_QUEUES` default in `config.rs`, to `.env.example`, and to every worker role in the deploy config. Otherwise its jobs wait forever (the dashboard shows "no nodes").
 7. `--every`: add `Recurring { key: "weekly_digest", cron: "0 8 * * MON", job: || FanOutWeeklyDigestJob.into_job() }` to `SCHEDULE` in `src/jobs/recurring.rs` (unique key, UTC, croner syntax). The Cron plugin tags the job `cron` and sets `meta.cron = key`; don't add those yourself. A recurring job that fans out over many records is a `FanOut…Job` that `kernel::jobs::insert_all`s one `JobBuilder` per record.
 8. Enqueue from the owning model fn, in the same transaction as the data change. Add tags an operator would search for (`user:{id}`).

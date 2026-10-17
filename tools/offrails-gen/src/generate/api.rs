@@ -3,7 +3,7 @@
 //! `{"data": …}` envelopes with `page` info, 201/204, another user's record 404, OpenAPI entries
 //! (utoipa) checked against docs/openapi.json, and request tests. The first run also writes the
 //! API kernel: the `api_tokens` table and model, `controllers/api.rs`, `GET /api/v1/me`,
-//! `GET /api/openapi.json`, `app task api_token`, and its tests. The model is generated too,
+//! `GET /api/openapi.json`, `app task tokens`, and its tests. The model is generated too,
 //! unless `generate model|resource` already made it (then its fields are reused).
 
 use super::Flags;
@@ -87,14 +87,14 @@ fn kernel(info: &AppInfo, plan: &mut Plan, flags: &Flags) {
             routes_table(&[("GET".into(), "/api/v1/me".into(), "api::me".into())], "User")
         ),
     );
-    let task = "src/tasks/api_token.rs";
+    let task = "src/tasks/tokens.rs";
     plan.shared(task, TOKEN_TASK);
-    plan.insert_for(task, "src/tasks/mod.rs", "task mods", "pub mod api_token;\n");
+    plan.insert_for(task, "src/tasks/mod.rs", "task mods", "pub mod tokens;\n");
     plan.insert_for(
         task,
         "src/tasks/mod.rs",
         "tasks",
-        "\"api_token\" => api_token::run(state, args).await,\n",
+        "\"tokens\" => tokens::run(state, args).await,\n",
     );
     let tests = "tests/app/api_test.rs";
     plan.shared(tests, TESTS.replace("__CRATE__", k));
@@ -429,7 +429,7 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
         "UPDATE_SCHEMAS=1 cargo nextest run openapi   # writes docs/openapi.json; commit it (the contract)".into(),
     );
     plan.next.push(
-        "a token: cargo run -q -- task api_token <email> [name] [--read-only]; then curl -H \"Authorization: Bearer <token>\" localhost:3000/api/v1/…".into(),
+        "a token: cargo run -q -- task tokens create <email> [name] [--read-only]; then curl -H \"Authorization: Bearer <token>\" localhost:3000/api/v1/…".into(),
     );
     if !info.read("AGENTS.md").unwrap_or_default().contains("API:            rest") {
         plan.next.push("AGENTS.md: set `API: rest` (the app now has a public API)".into());

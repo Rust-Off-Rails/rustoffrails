@@ -12,5 +12,5 @@ Request: $ARGUMENTS
 
 1. If not already done this session, read `.offrails/AGENTS.md` and its load order, and note `FRONTEND_MODE` from the app's `AGENTS.md`.
 2. Ask the feature-level questions from `.offrails/interview.md` that the request leaves open (ownership, deletion, who can see it), and only those.
-3. Execute `.offrails/generators/scaffold.md` exactly, following only the app's `FRONTEND_MODE` branch.
+3. `htmx` mode: run `cargo offrails g resource <plural> field:type…` (`--dry-run` first; field syntax: `.offrails/generators/README.md#fields`), then do what it printed and what `.offrails/generators/scaffold.md` leaves to you (spec ACs into the tests, the `// APP:` lines, seeds, the browser smoke). Other modes: `cargo offrails g model …` (and `g api …` for a public API), then the rest of `scaffold.md` for the app's `FRONTEND_MODE` by hand.
 4. Finish with `cargo offrails verify` (`--full` if this is the last slice; `.offrails/workflow.md#definition-of-done`), then report per "Talking to the human".

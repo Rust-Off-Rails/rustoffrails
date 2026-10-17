@@ -53,11 +53,11 @@ Design: follow any references from the interview. Otherwise keep the template's 
 The parts were chosen in the plan ([template](../template/README.md#choosing-parts)). If you generated with `--parts`, they're in. Otherwise, or for one the plan added later:
 
 ```sh
-cargo offrails list-parts                  # installed vs available, what each adds
-cargo offrails add-part <name> [<name>…]   # dependencies first; prints what it changed and what to run next
+cargo offrails parts                       # installed vs available, what each adds
+cargo offrails add <name> [<name>…]        # dependencies first; prints what it changed and what to run next
 ```
 
-Then `cargo run -q -- db migrate` (parts with tables), `cargo run -q -- routes`, and read each part's `README.md` ("After installing", "Adapting it") and `CHECKS.md` in `.offrails/template/parts/<name>/`. Adapt the `// APP:` lines (names, copy, limits) to this app; keep every `// SECURITY:` and `// INVARIANT:` line and the tests they name ([samples](../guides/samples.md#rules)).
+Then `cargo run -q -- db migrate` (parts with tables; docs/routes.md is already refreshed), and read each part's `README.md` ("After installing", "Adapting it") and `CHECKS.md` in `.offrails/template/parts/<name>/`. Adapt the `// APP:` lines (names, copy, limits) to this app; keep every `// SECURITY:` and `// INVARIANT:` line and the tests they name ([samples](../guides/samples.md#rules)).
 
 `ACCOUNTS` isn't `none`: after the auth parts are in, run [`authentication.md`](authentication.md) for what is app-specific (roles, tenancy, the guard and tenancy suites).
 
@@ -83,7 +83,8 @@ Then `cargo run -q -- db migrate` (parts with tables), `cargo run -q -- routes`,
 5. Optional, when Node ≥ 22.12 and Chrome are installed: `BASE=http://localhost:3000 bash .offrails/tools/browser-smoke/run.sh` ([dev-tools](../guides/dev-tools.md#browser-smoke)).
 6. If Docker is available: `docker compose up --build` from a clean checkout brings `app` and `db` to `healthy`, `curl localhost:3000/up` answers `ok`, then `docker compose down -v`.
 7. `git add -A && git commit -m "new: <app_name> skeleton"`. This is the one commit you make unprompted, because it's the baseline.
-8. Tell the human, in product terms: what exists, which parts are in (and that more can be added any time), how to run it (`bin/setup && bin/dev`), that http://localhost:3000/dev has the dev tools (and the mailbox, jobs dashboard and dev dashboard when those parts are in), and what you'll build next from the plan.
+8. **Then build the features with generators**, one vertical slice at a time, after the spec: `cargo offrails g resource …` (or `model`, `controller`, `page`, `api`, `job`, `mailer`, `channel`; `cargo offrails g --help`), then the `// APP:` lines and the spec's tests ([generators](README.md)). Hand-write only what no generator or part covers.
+9. Tell the human, in product terms: what exists, which parts are in (and that more can be added any time), how to run it (`bin/setup && bin/dev`), that http://localhost:3000/dev has the dev tools (and the mailbox, jobs dashboard and dev dashboard when those parts are in), and what you'll build next from the plan.
 
 ## What the template contains
 
@@ -151,6 +152,8 @@ Shared files carry one-line comments where a part inserts its wiring: `// sample
 | `tests/app/main.rs`, `support.rs`, `factories.rs` | `test mods`; `test support` (end of `impl TestApp`); `factories` |
 | `tests/app/security_test.rs`, `kernel_web_test.rs`, `theme_switch_test.rs` | `router sources`; `no-store paths`; `kernel pages` |
 | `.env.example`, `compose.yaml` | `env` (end of file); `compose env` (end of the app's `environment`) |
+
+Generators add their own anchors to the files they write (`samples: columns`, `relations`, `related` in a generated model; `model test mods` in `tests/app/models/mod.rs`; `tenant fields`, `tenant records`, `tenant init`, `tenant fill`, `tenant unchanged`, `tenant expected`, `not tenant ids` in a generated `tests/app/tenancy_test.rs`; `page actions`, `page views`, `page tests` in the shared page files; `api paths`, `api schemas` in `src/controllers/api.rs`), and use the template's for the rest ([generators](README.md#what-the-generators-decide-so-you-dont)).
 
 After `cargo fmt --all`, none may trail code: `grep -rnE '[^[:space:]].*(//|\{#|#) samples: ' src templates migration tests | grep -vE ':[[:space:]]*(//|\{#|#) samples: '` prints nothing.
 

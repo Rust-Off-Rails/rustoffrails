@@ -143,7 +143,7 @@ myapp/
 | Booleans              | prefer a nullable timestamp (`published_at`) over `is_published` | |
 | Job struct            | `<Verb><Noun>Job`                  | `SendWelcomeEmailJob` |
 | Mailer fn             | `<mailer>::<action>`               | `user_mailer::welcome` |
-| Migration             | `m<YYYYMMDD_HHMMSS>_<verb>_<noun>.rs` (via `sea-orm-cli migrate generate`) | `m20261012_120000_create_blog_posts.rs` |
+| Migration             | `m<YYYYMMDD_HHMMSS>_<verb>_<noun>.rs` (via `cargo offrails g migration`) | `m20261012_120000_create_blog_posts.rs` |
 | Env vars              | `SCREAMING_SNAKE`; app-specific ones prefixed `APP_` | `DATABASE_URL`, `APP_URL` |
 
 ## Module rules

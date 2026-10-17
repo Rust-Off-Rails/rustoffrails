@@ -66,7 +66,17 @@ List each change with its classification and what it means for this app: files a
 
 Non-interactive runs (a headless agent, or a request relayed by another agent): proceed only if the human's request explicitly asked for the upgrade and nothing in the plan is outward-facing (no deploys, no production data). Write the plan to `docs/decisions.md` first, so the human can review what was decided.
 
-## 6. Re-vendor the framework
+## 6. Update the parts, then re-vendor the framework
+
+**First, while `.offrails/` is still the old release** (it is the base of the merge), bring each installed part to the new version:
+
+```sh
+cargo offrails update-part <part>… --framework "$FW" --dry-run   # the plan: take / keep / merge / CONFLICT per file and wire
+cargo offrails update-part <part>… --framework "$FW"
+```
+
+Per file it is a three-way merge: the part as installed (`.offrails/`), the new part (`$FW`), the app's copy. A file only the part changed is taken; one only the app changed is kept; both changed merges line by line, and overlapping edits are written with `<<<<<<< app` / `||||||| <part> <old>` / `=======` / `>>>>>>> <part> <new>` markers (exit 1). Wiring the part changed is swapped where the old text still stands. It never overwrites an app change silently. Resolve every marker (`grep -rn '<<<<<<<' src templates tests migration`), then `cargo fmt --all`, `cargo run -q -- db migrate`, and the part's CHECKS.md. `update-part` logs `updated sample <name> <old> -> <new>` in `docs/decisions.md`.
+
 
 Replace `.offrails/` with the release, with the same exclusions as [`new.md` step 1](new.md#1-generate), and write `.offrails/VERSION` (framework version, then `vendored <date>`). On any OS:
 

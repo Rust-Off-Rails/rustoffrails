@@ -46,7 +46,9 @@ When a human (or your training data) says "the Rails way", look it up here.
 | Minitest / system tests   | `TestApp` integration tests via `oneshot`, on SQLite + Postgres | [testing](guides/testing.md) |
 | Fixtures / FactoryBot     | `tests/app/factories.rs`                                | [testing](guides/testing.md) |
 | `rails new` (+ its flags) | [interview.md](interview.md) → [generators/new.md](generators/new.md) | |
-| `rails generate …`        | [generators/](generators/)                             | |
+| `rails generate <kind> …` | `cargo offrails generate <kind> …` (`g`): migration, model, scaffold (`resource`), controller, page, api, job, mailer, channel, test | [generators](generators/README.md) |
+| `rails destroy <kind> …`  | `cargo offrails destroy <kind> <name>` (`d`): only files nobody changed | [generators](generators/README.md) |
+| Engines / gems that add features | parts: `cargo offrails parts`, `add <part>`, `update-part <part>` | [template](template/README.md#choosing-parts) |
 | `bin/rails` commands      | the `app` binary + cargo                               | [cli](cli.md) |
 | Rack middleware           | `tower` layers in `routes.rs`                          | [routing](guides/routing.md#middleware) |
 | I18n                      | English-only by default. If a spec requires locales, add `rust-i18n` and log the decision | |

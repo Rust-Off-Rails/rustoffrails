@@ -1,6 +1,7 @@
 # Generator: `channel` (live updates, rooms, presence)
 
 > **TL;DR**
+> - With the `realtime` part: `cargo offrails g channel post` writes `src/channels/post.rs` (topic `post:<id>`, `authorize` on every join and push: the post's owner when `post` is a scoped model, else only the person's own `post:<their id>`; `broadcast(&s, id, event, &data)`), its arm in `Channels::authorize`, and `tests/app/post_channel_test.rs`. Broadcast after the commit; subscribe the page with `static/channels.js`.
 > - Signal (the default): `channel book:{id} reviews-changed` → a broadcast in the model fn, the stream's authorization, and a live region that re-fetches.
 > - Room (`--room [--presence]`) → an `offrails.v1` channel with typed `In`/`Out` messages, join/push authorization and resume.
 > - Use a room only when the client talks back or needs presence; otherwise a signal.
