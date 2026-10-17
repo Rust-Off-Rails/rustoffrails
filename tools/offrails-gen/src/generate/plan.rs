@@ -47,16 +47,28 @@ pub struct Insert {
 #[derive(Debug, Clone)]
 pub enum Action {
     /// A file this generator owns: destroy removes it when unchanged.
-    Create { path: String, content: String },
+    Create {
+        path: String,
+        content: String,
+    },
     /// A file several generators add to (`controllers/pages.rs`): created when missing, removed
     /// when the last of them is destroyed and nothing else was added.
-    Shared { path: String, content: String },
+    Shared {
+        path: String,
+        content: String,
+    },
     Insert(Insert),
     /// `cargo add <args>`, unless Cargo.toml already has `present`. Never undone.
-    Crate { args: String, present: String },
+    Crate {
+        args: String,
+        present: String,
+    },
     /// A file the app writes when it runs (docs/openapi.json from its test), removed with the
     /// shared file `owner`.
-    Byproduct { owner: String, path: String },
+    Byproduct {
+        owner: String,
+        path: String,
+    },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -154,9 +166,13 @@ impl Plan {
             .collect()
     }
     pub fn command(&self) -> String {
-        format!("cargo offrails generate {} {}", self.kind, self.args.join(" "))
-            .trim_end()
-            .to_owned()
+        format!(
+            "cargo offrails generate {} {}",
+            self.kind,
+            self.args.join(" ")
+        )
+        .trim_end()
+        .to_owned()
     }
 }
 
@@ -309,7 +325,10 @@ fn insert_text(file: &str, anchor: &Anchor, text: &str) -> std::result::Result<O
         Anchor::Before { after, pattern } => {
             let lines: Vec<&str> = file.split_inclusive('\n').collect();
             let from = match after {
-                Some(a) => lines.iter().position(|l| l.contains(a.as_str())).ok_or(())?,
+                Some(a) => lines
+                    .iter()
+                    .position(|l| l.contains(a.as_str()))
+                    .ok_or(())?,
                 None => 0,
             };
             let at = lines
@@ -378,20 +397,25 @@ pub struct Rendered {
 
 /// Renders `plan` onto the app. `owned`: paths the plan may overwrite (files of the same
 /// generation, unchanged, when re-generating with `--force`).
-pub fn render(app: &Path, plan: &Plan, owned: &BTreeSet<String>) -> std::result::Result<Rendered, Vec<String>> {
+pub fn render(
+    app: &Path,
+    plan: &Plan,
+    owned: &BTreeSet<String>,
+) -> std::result::Result<Rendered, Vec<String>> {
     let mut files: BTreeMap<String, (Option<String>, String)> = BTreeMap::new();
     let mut problems = Vec::new();
     let mut crates = Vec::new();
     let mut notes = Vec::new();
     let cargo_toml = fs::read_to_string(app.join("Cargo.toml")).unwrap_or_default();
-    let load = |files: &mut BTreeMap<String, (Option<String>, String)>, path: &str| -> Option<String> {
-        if let Some((_, now)) = files.get(path) {
-            return Some(now.clone());
-        }
-        let text = fs::read_to_string(rel(app, path)).ok()?;
-        files.insert(path.to_owned(), (Some(text.clone()), text.clone()));
-        Some(text)
-    };
+    let load =
+        |files: &mut BTreeMap<String, (Option<String>, String)>, path: &str| -> Option<String> {
+            if let Some((_, now)) = files.get(path) {
+                return Some(now.clone());
+            }
+            let text = fs::read_to_string(rel(app, path)).ok()?;
+            files.insert(path.to_owned(), (Some(text.clone()), text.clone()));
+            Some(text)
+        };
     for action in &plan.actions {
         match action {
             Action::Crate { args, present } => {
@@ -509,7 +533,9 @@ pub fn undo(app: &Path, plan: &Plan, entry: &Entry, others: &BTreeSet<String>) -
         }
     };
     let created: BTreeSet<&str> = plan.created().into_iter().collect();
-    let remove = |files: &mut BTreeMap<String, Option<String>>, kept: &mut Vec<String>, ins: &Insert| {
+    let remove = |files: &mut BTreeMap<String, Option<String>>,
+                  kept: &mut Vec<String>,
+                  ins: &Insert| {
         if created.contains(ins.file.as_str()) {
             return; // the whole file goes
         }
@@ -521,7 +547,11 @@ pub fn undo(app: &Path, plan: &Plan, entry: &Entry, others: &BTreeSet<String>) -
                 files.insert(ins.file.clone(), Some(new));
             }
             None => {
-                let first = ins.text.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
+                let first = ins
+                    .text
+                    .lines()
+                    .find(|l| !l.trim().is_empty())
+                    .unwrap_or("");
                 kept.push(format!(
                     "{} ({}): `{}` isn't there as generated (edited?); remove it by hand if it's still wanted gone",
                     ins.file,
@@ -549,7 +579,9 @@ pub fn undo(app: &Path, plan: &Plan, entry: &Entry, others: &BTreeSet<String>) -
                 if recorded.is_some_and(|h| *h == hash(&text)) || same_content(&text, content) {
                     files.insert(path.clone(), None);
                 } else {
-                    kept.push(format!("{path}: changed since it was generated, so it stays"));
+                    kept.push(format!(
+                        "{path}: changed since it was generated, so it stays"
+                    ));
                 }
             }
             Action::Shared { path, content } => {
@@ -576,7 +608,9 @@ pub fn undo(app: &Path, plan: &Plan, entry: &Entry, others: &BTreeSet<String>) -
                     }
                 } else {
                     if std::env::var_os("OFFRAILS_GEN_DEBUG").is_some() {
-                        eprintln!("--- {path} after unwiring:\n{text}\n--- as first generated:\n{content}");
+                        eprintln!(
+                            "--- {path} after unwiring:\n{text}\n--- as first generated:\n{content}"
+                        );
                     }
                     kept.push(format!(
                         "{path}: shared, and it holds more than this generator put there, so it stays"
@@ -647,7 +681,6 @@ pub fn claimed_elsewhere(plan: &Plan, manifest: &Manifest) -> Vec<String> {
     out
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -657,7 +690,10 @@ mod tests {
         let file = "fn router() {\n    let x = 1;\n    app = app\n        .route(\"/posts\", get(posts::index).post(posts::create))\n        .route(\n            \"/posts/{id}\",\n            get(posts::show),\n        );\n\n    // samples: routes\n}\n";
         let text = "app = app\n    .route(\"/posts\", get(posts::index).post(posts::create))\n    .route(\"/posts/{id}\", get(posts::show));\n\n";
         let out = remove_block(file, text).unwrap();
-        assert_eq!(out, "fn router() {\n    let x = 1;\n    // samples: routes\n}\n");
+        assert_eq!(
+            out,
+            "fn router() {\n    let x = 1;\n    // samples: routes\n}\n"
+        );
         assert!(remove_block(&out, text).is_none());
     }
 
@@ -678,7 +714,8 @@ mod tests {
             after: Some("fn dispatch".into()),
             pattern: "other =>".into(),
         };
-        let f = "fn dispatch() {\n    match w {\n        A => a(),\n        other => b(),\n    }\n}\n";
+        let f =
+            "fn dispatch() {\n    match w {\n        A => a(),\n        other => b(),\n    }\n}\n";
         assert_eq!(
             insert_text(f, &before, "B => c(),\n").unwrap().unwrap(),
             "fn dispatch() {\n    match w {\n        A => a(),\n        B => c(),\n        other => b(),\n    }\n}\n"
@@ -697,7 +734,9 @@ mod tests {
         let lib = "pub use sea_orm_migration::prelude::*;\n\nmod m1_a;\nmod m2_b;\n\npub struct Migrator;\n\nimpl MigratorTrait for Migrator {\n    fn migrations() -> Vec<Box<dyn MigrationTrait>> {\n        vec![\n            Box::new(m1_a::Migration),\n            Box::new(m2_b::Migration),\n        ]\n    }\n}\n";
         let healed = heal_migration_lib(lib).unwrap();
         assert!(healed.contains("mod m2_b;\n// samples: migration mods\n"));
-        assert!(healed.contains("Box::new(m2_b::Migration),\n            // samples: migrations\n"));
+        assert!(
+            healed.contains("Box::new(m2_b::Migration),\n            // samples: migrations\n")
+        );
         assert!(heal_migration_lib(&healed).is_none());
     }
 

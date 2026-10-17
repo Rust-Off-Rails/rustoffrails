@@ -16,7 +16,10 @@ pub enum Kind {
     Integer,
     BigInt,
     Boolean,
-    Decimal { precision: u32, scale: u32 },
+    Decimal {
+        precision: u32,
+        scale: u32,
+    },
     /// Integer cents in `<name>_cents` (models.md#enums-money-time-ids): never floats.
     Money,
     DateTime,
@@ -24,7 +27,9 @@ pub enum Kind {
     Uuid,
     Json,
     /// A `<name>_id` foreign key to `target`'s table, indexed.
-    References { target: Box<Names> },
+    References {
+        target: Box<Names>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,9 +121,17 @@ impl Field {
                         match nums.as_slice() {
                             [p, s] => match (p.parse::<u32>(), s.parse::<u32>()) {
                                 (Ok(p), Ok(s)) if (1..=28).contains(&p) && s <= p => (p, s),
-                                _ => return Err(usage("decimal{precision,scale}: 1 <= precision <= 28, scale <= precision")),
+                                _ => {
+                                    return Err(usage(
+                                        "decimal{precision,scale}: 1 <= precision <= 28, scale <= precision",
+                                    ));
+                                }
                             },
-                            _ => return Err(usage("decimal takes {precision,scale}, e.g. decimal{10,2}")),
+                            _ => {
+                                return Err(usage(
+                                    "decimal takes {precision,scale}, e.g. decimal{10,2}",
+                                ));
+                            }
                         }
                     }
                 };
@@ -315,7 +328,9 @@ pub fn parse_all(raw: &[String], reserved: &[&str]) -> Result<Vec<Field>> {
                 .iter()
                 .any(|o| o.name == taken || o.column() == taken || o.param() == taken)
             {
-                return Err(Fail::usage(format!("field '{r}': '{taken}' is given twice")));
+                return Err(Fail::usage(format!(
+                    "field '{r}': '{taken}' is given twice"
+                )));
             }
         }
         out.push(f);
@@ -341,11 +356,20 @@ mod tests {
         let f = Field::parse("published_at:datetime:optional").unwrap();
         assert!(f.nullable);
         let f = Field::parse("price:money").unwrap();
-        assert_eq!((f.column(), f.param()), ("price_cents".into(), "price".into()));
+        assert_eq!(
+            (f.column(), f.param()),
+            ("price_cents".into(), "price".into())
+        );
         assert_eq!(f.migration_col("Items"), "big_integer(Items::PriceCents)");
-        assert_eq!(Field::parse("w:decimal{8.3}").unwrap().migration_col("I"), "decimal_len(I::W, 8, 3)");
+        assert_eq!(
+            Field::parse("w:decimal{8.3}").unwrap().migration_col("I"),
+            "decimal_len(I::W, 8, 3)"
+        );
         let f = Field::parse("weight:decimal{8,3}?").unwrap();
-        assert_eq!(f.migration_col("Items"), "decimal_len_null(Items::Weight, 8, 3)");
+        assert_eq!(
+            f.migration_col("Items"),
+            "decimal_len_null(Items::Weight, 8, 3)"
+        );
         let f = Field::parse("author:references{users}").unwrap();
         assert_eq!(f.column(), "author_id");
         assert_eq!(f.target().unwrap().singular, "user");

@@ -58,7 +58,12 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
         ),
     );
     plan.shared("src/views/pages.rs", VIEWS);
-    plan.insert_for("src/views/pages.rs", "src/views/mod.rs", "view mods", "pub mod pages;\n");
+    plan.insert_for(
+        "src/views/pages.rs",
+        "src/views/mod.rs",
+        "view mods",
+        "pub mod pages;\n",
+    );
     plan.insert(
         "src/views/pages.rs",
         "page views",
@@ -93,11 +98,19 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
             "Public",
         ),
     );
-    plan.insert("src/controllers/meta.rs", "sitemap paths", format!("paths::{name}(),\n"));
+    plan.insert(
+        "src/controllers/meta.rs",
+        "sitemap paths",
+        format!("paths::{name}(),\n"),
+    );
     let nav = flags.nav || flags.recorded("nav").as_deref() == Some("yes");
     plan.option("nav", if nav { "yes" } else { "no" });
     if nav {
-        plan.insert("templates/shared/_nav.html", "nav links", nav_link(name, &title));
+        plan.insert(
+            "templates/shared/_nav.html",
+            "nav links",
+            nav_link(name, &title),
+        );
     }
     plan.shared(
         "tests/app/pages_test.rs",
@@ -105,7 +118,12 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
             "//! The static pages (`generate page`): each renders, publicly, and is in the sitemap.\n\nuse {k}::routes::paths;\n\nuse crate::support::TestApp;\n\n// samples: page tests\n"
         ),
     );
-    plan.insert_for("tests/app/pages_test.rs", "tests/app/main.rs", "test mods", "mod pages_test;\n");
+    plan.insert_for(
+        "tests/app/pages_test.rs",
+        "tests/app/main.rs",
+        "test mods",
+        "mod pages_test;\n",
+    );
     plan.insert(
         "tests/app/pages_test.rs",
         "page tests",

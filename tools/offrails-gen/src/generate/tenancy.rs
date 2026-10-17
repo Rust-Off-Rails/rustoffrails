@@ -82,7 +82,12 @@ pub fn plan_into(info: &AppInfo, plan: &mut Plan, spec: &ModelSpec, flags: &Flag
     let path = "tests/app/tenancy_test.rs";
     if tenancy == "gen" {
         plan.shared(path, tenancy_file(info, &own));
-        plan.insert_for(path, "tests/app/main.rs", "test mods", "mod tenancy_test;\n");
+        plan.insert_for(
+            path,
+            "tests/app/main.rs",
+            "test mods",
+            "mod tenancy_test;\n",
+        );
     }
     let s = &n.singular;
     plan.insert(

@@ -191,7 +191,9 @@ pub fn generate(app: &Path, kind: &str, args: &[String], mut flags: Flags) -> Re
         return Err(Fail::usage(format!("unknown kind '{kind}'\n\n{USAGE}")));
     };
     if args.is_empty() {
-        return Err(Fail::usage(format!("generate {kind} needs a name\n\n{USAGE}")));
+        return Err(Fail::usage(format!(
+            "generate {kind} needs a name\n\n{USAGE}"
+        )));
     }
     let info = AppInfo::load(app)?;
     let mut manifest = Manifest::load(app)?;
@@ -284,8 +286,16 @@ pub fn generate(app: &Path, kind: &str, args: &[String], mut flags: Flags) -> Re
     };
     println!(
         "{} {kind} {name}{}",
-        if flags.dry_run { "plan for" } else { "generate" },
-        if flags.dry_run { " (--dry-run: nothing written)" } else { "" }
+        if flags.dry_run {
+            "plan for"
+        } else {
+            "generate"
+        },
+        if flags.dry_run {
+            " (--dry-run: nothing written)"
+        } else {
+            ""
+        }
     );
     for a in &plan.actions {
         if let Action::Crate { args, .. } = a
@@ -294,7 +304,10 @@ pub fn generate(app: &Path, kind: &str, args: &[String], mut flags: Flags) -> Re
             continue;
         }
         if let Action::Shared { path, .. } = a
-            && rendered.files.get(path).is_some_and(|(before, _)| before.is_some())
+            && rendered
+                .files
+                .get(path)
+                .is_some_and(|(before, _)| before.is_some())
         {
             continue;
         }
@@ -302,7 +315,11 @@ pub fn generate(app: &Path, kind: &str, args: &[String], mut flags: Flags) -> Re
             && let Some((Some(before), _)) = rendered.files.get(&i.file)
             && plan::find_block(before, &i.text).is_some()
         {
-            println!("  ok     {} @ {} (already there)", i.file, i.anchor.describe());
+            println!(
+                "  ok     {} @ {} (already there)",
+                i.file,
+                i.anchor.describe()
+            );
             continue;
         }
         println!("{}", describe(a));
@@ -342,7 +359,10 @@ pub fn generate(app: &Path, kind: &str, args: &[String], mut flags: Flags) -> Re
     if routes_md::refresh(app)? {
         println!("  routes docs/routes.md (from ROUTES)");
     }
-    println!("\ndone: {} (recorded in docs/generated.toml).", plan.command());
+    println!(
+        "\ndone: {} (recorded in docs/generated.toml).",
+        plan.command()
+    );
     print_next(&plan, app);
     Ok(())
 }
@@ -352,7 +372,9 @@ fn print_next(plan: &Plan, app: &Path) {
     for n in &plan.next {
         println!("  {n}");
     }
-    println!("  cargo offrails verify --fast                # fmt, clippy, tests while iterating; --full before calling it done");
+    println!(
+        "  cargo offrails verify --fast                # fmt, clippy, tests while iterating; --full before calling it done"
+    );
 }
 
 /// `destroy <kind> <name>`.
@@ -361,7 +383,9 @@ pub fn destroy(app: &Path, kind: &str, args: &[String], mut flags: Flags) -> Res
         return Err(Fail::usage(format!("unknown kind '{kind}'\n\n{USAGE}")));
     };
     if args.is_empty() {
-        return Err(Fail::usage(format!("destroy {kind} needs the name it was generated with")));
+        return Err(Fail::usage(format!(
+            "destroy {kind} needs the name it was generated with"
+        )));
     }
     let info = AppInfo::load(app)?;
     let mut manifest = Manifest::load(app)?;
@@ -392,8 +416,16 @@ pub fn destroy(app: &Path, kind: &str, args: &[String], mut flags: Flags) -> Res
     let undo = plan::undo(app, &plan, &entry, &others);
     println!(
         "{} {kind} {name}{}",
-        if flags.dry_run { "plan to destroy" } else { "destroy" },
-        if flags.dry_run { " (--dry-run: nothing removed)" } else { "" }
+        if flags.dry_run {
+            "plan to destroy"
+        } else {
+            "destroy"
+        },
+        if flags.dry_run {
+            " (--dry-run: nothing removed)"
+        } else {
+            ""
+        }
     );
     if plan.migrations {
         println!(
@@ -411,7 +443,9 @@ pub fn destroy(app: &Path, kind: &str, args: &[String], mut flags: Flags) -> Res
     }
     for a in &plan.actions {
         if let Action::Crate { args, .. } = a {
-            println!("  keep   Cargo.toml: `cargo add {args}` stays (cargo remove it if nothing else uses it)");
+            println!(
+                "  keep   Cargo.toml: `cargo add {args}` stays (cargo remove it if nothing else uses it)"
+            );
         }
     }
     if flags.dry_run {
@@ -429,7 +463,10 @@ pub fn destroy(app: &Path, kind: &str, args: &[String], mut flags: Flags) -> Res
         if undo.kept.is_empty() {
             String::new()
         } else {
-            format!("; {} thing(s) kept because they changed (listed above)", undo.kept.len())
+            format!(
+                "; {} thing(s) kept because they changed (listed above)",
+                undo.kept.len()
+            )
         }
     );
     Ok(())

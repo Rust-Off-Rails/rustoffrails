@@ -202,7 +202,8 @@ mod tests {
         };
         e.options.insert("scope".into(), "user".into());
         e.options.insert("stamp".into(), "20261017_101500".into());
-        e.files.insert("src/models/post.rs".into(), "0123456789abcdef".into());
+        e.files
+            .insert("src/models/post.rs".into(), "0123456789abcdef".into());
         e.shared.insert("src/controllers/pages.rs".into());
         m.upsert(e.clone());
         let back = Manifest::parse(&m.render());

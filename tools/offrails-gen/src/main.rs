@@ -276,7 +276,9 @@ fn real_main() -> Result<()> {
         "update-part" | "update-parts" => {
             args.reject_unknown(&["--app", "--dry-run", "--no-fmt", "--framework", "--base"])?;
             if args.positional.is_empty() {
-                return Err(Fail::usage(format!("update-part needs a part name\n\n{USAGE}")));
+                return Err(Fail::usage(format!(
+                    "update-part needs a part name\n\n{USAGE}"
+                )));
             }
             let app = args.app()?;
             let Some(newer) = args.value("--framework") else {

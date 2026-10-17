@@ -29,14 +29,16 @@ fn kernel_stamp(info: &AppInfo, flags: &Flags) -> String {
     if let Some(s) = flags.recorded("api_stamp") {
         return s;
     }
-    let found = std::fs::read_dir(info.path("migration/src")).ok().and_then(|d| {
-        d.flatten().find_map(|e| {
-            let n = e.file_name().to_string_lossy().into_owned();
-            n.strip_suffix("_create_api_tokens.rs")
-                .and_then(|r| r.strip_prefix('m'))
-                .map(str::to_owned)
-        })
-    });
+    let found = std::fs::read_dir(info.path("migration/src"))
+        .ok()
+        .and_then(|d| {
+            d.flatten().find_map(|e| {
+                let n = e.file_name().to_string_lossy().into_owned();
+                n.strip_suffix("_create_api_tokens.rs")
+                    .and_then(|r| r.strip_prefix('m'))
+                    .map(str::to_owned)
+            })
+        });
     found.unwrap_or_else(|| migration::stamp(info))
 }
 
@@ -49,7 +51,12 @@ fn kernel(info: &AppInfo, plan: &mut Plan, flags: &Flags) {
     let module = format!("m{stamp}_create_api_tokens");
     let mig = format!("migration/src/{module}.rs");
     plan.shared(&mig, TOKEN_MIGRATION);
-    plan.insert_for(&mig, "migration/src/lib.rs", "migration mods", format!("mod {module};\n"));
+    plan.insert_for(
+        &mig,
+        "migration/src/lib.rs",
+        "migration mods",
+        format!("mod {module};\n"),
+    );
     plan.insert_for(
         &mig,
         "migration/src/lib.rs",
@@ -59,9 +66,19 @@ fn kernel(info: &AppInfo, plan: &mut Plan, flags: &Flags) {
     plan.migrations = true;
     let model = "src/models/api_token.rs";
     plan.shared(model, TOKEN_MODEL);
-    plan.insert_for(model, "src/models/mod.rs", "model mods", "pub mod api_token;\n");
+    plan.insert_for(
+        model,
+        "src/models/mod.rs",
+        "model mods",
+        "pub mod api_token;\n",
+    );
     plan.shared(KERNEL, MOD);
-    plan.insert_for(KERNEL, "src/controllers/mod.rs", "controller mods", "pub mod api;\n");
+    plan.insert_for(
+        KERNEL,
+        "src/controllers/mod.rs",
+        "controller mods",
+        "pub mod api;\n",
+    );
     plan.insert_for(
         KERNEL,
         "src/routes.rs",
@@ -81,10 +98,17 @@ fn kernel(info: &AppInfo, plan: &mut Plan, flags: &Flags) {
         format!(
             "{}{}",
             routes_table(
-                &[("GET".into(), "/api/openapi.json".into(), "api::openapi_json".into())],
+                &[(
+                    "GET".into(),
+                    "/api/openapi.json".into(),
+                    "api::openapi_json".into()
+                )],
                 "Public"
             ),
-            routes_table(&[("GET".into(), "/api/v1/me".into(), "api::me".into())], "User")
+            routes_table(
+                &[("GET".into(), "/api/v1/me".into(), "api::me".into())],
+                "User"
+            )
         ),
     );
     let task = "src/tasks/tokens.rs";
@@ -119,7 +143,9 @@ fn kernel(info: &AppInfo, plan: &mut Plan, flags: &Flags) {
     plan.option("json_helper", if helper { "inserted" } else { "template" });
     if helper {
         let template = include_str!("../../../../template/app/tests/app/support.rs");
-        let start = template.find("    /// A JSON request (`body` serialized").unwrap_or(0);
+        let start = template
+            .find("    /// A JSON request (`body` serialized")
+            .unwrap_or(0);
         let end = template[start..]
             .find("    /// Status and headers without reading")
             .map_or(template.len(), |e| start + e);
@@ -255,7 +281,9 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
             &[format!("/api/v1/{kb}")],
         )?;
     }
-    let stamp = flags.recorded("stamp").unwrap_or_else(|| migration::stamp(info));
+    let stamp = flags
+        .recorded("stamp")
+        .unwrap_or_else(|| migration::stamp(info));
     plan.option("stamp", stamp.clone());
     plan.option("scope", "user");
     if !reuse {
@@ -279,7 +307,9 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
             Kind::Decimal { .. } => "    /// A decimal as a string: \"12.50\".\n",
             _ => "",
         };
-        input_fields.push_str(&format!("{doc}    #[serde(default)]\n    pub {pa}: {ty},\n"));
+        input_fields.push_str(&format!(
+            "{doc}    #[serde(default)]\n    pub {pa}: {ty},\n"
+        ));
         overlay.push_str(&format!(
             "        if let Some(v) = self.{pa} {{\n            p.{pa} = {conv};\n        }}\n"
         ));
@@ -295,7 +325,11 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
             lower = n.lower
         ),
     );
-    plan.insert("src/views/mod.rs", "view mods", format!("pub mod {p}_json;\n"));
+    plan.insert(
+        "src/views/mod.rs",
+        "view mods",
+        format!("pub mod {p}_json;\n"),
+    );
 
     // ---------- the controller ----------
     let base = format!("/api/v1/{kb}");
@@ -306,7 +340,11 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
             lower_p = n.lower_plural
         ),
     );
-    plan.insert("src/controllers/mod.rs", "controller mods", format!("pub mod api_v1_{p};\n"));
+    plan.insert(
+        "src/controllers/mod.rs",
+        "controller mods",
+        format!("pub mod api_v1_{p};\n"),
+    );
     let h = format!("crate::controllers::api_v1_{p}");
     plan.insert(
         KERNEL,
@@ -341,16 +379,30 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
             &[
                 ("GET".into(), base.clone(), format!("api_v1_{p}::index")),
                 ("POST".into(), base.clone(), format!("api_v1_{p}::create")),
-                ("GET".into(), format!("{base}/{{id}}"), format!("api_v1_{p}::show")),
-                ("PATCH".into(), format!("{base}/{{id}}"), format!("api_v1_{p}::update")),
-                ("DELETE".into(), format!("{base}/{{id}}"), format!("api_v1_{p}::destroy")),
+                (
+                    "GET".into(),
+                    format!("{base}/{{id}}"),
+                    format!("api_v1_{p}::show"),
+                ),
+                (
+                    "PATCH".into(),
+                    format!("{base}/{{id}}"),
+                    format!("api_v1_{p}::update"),
+                ),
+                (
+                    "DELETE".into(),
+                    format!("{base}/{{id}}"),
+                    format!("api_v1_{p}::destroy"),
+                ),
             ],
             "User",
         ),
     );
     // The tenancy sweep signs in with a cookie; API routes take a token and test their own 404s.
     let tenancy = info.read("tests/app/tenancy_test.rs");
-    let tenancy_ours = tenancy.as_deref().is_some_and(|t| t.contains("// samples: not tenant ids"))
+    let tenancy_ours = tenancy
+        .as_deref()
+        .is_some_and(|t| t.contains("// samples: not tenant ids"))
         || flags.manifest_shared.contains("tests/app/tenancy_test.rs");
     if tenancy_ours || flags.recorded("tenancy_row").is_some() {
         plan.option("tenancy_row", "yes");
@@ -379,7 +431,9 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
                 }
                 Kind::Boolean if f.nullable => format!("params.{pa}.parse::<bool>().ok()"),
                 Kind::Boolean => format!("params.{pa} == \"true\""),
-                Kind::Json => format!("serde_json::from_str::<serde_json::Value>(&params.{pa}).ok()"),
+                Kind::Json => {
+                    format!("serde_json::from_str::<serde_json::Value>(&params.{pa}).ok()")
+                }
                 _ => format!("params.{pa}.clone()"),
             };
             format!("        \"{pa}\": {v},\n")
@@ -419,11 +473,18 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
         lower = n.lower
     ));
     plan.create(format!("tests/app/api_{p}_test.rs"), tests);
-    plan.insert("tests/app/main.rs", "test mods", format!("mod api_{p}_test;\n"));
+    plan.insert(
+        "tests/app/main.rs",
+        "test mods",
+        format!("mod api_{p}_test;\n"),
+    );
     if !reuse {
-        plan.next.push("cargo run -q -- db migrate   # then prove down(): db rollback && db migrate".into());
+        plan.next.push(
+            "cargo run -q -- db migrate   # then prove down(): db rollback && db migrate".into(),
+        );
     } else {
-        plan.next.push("cargo run -q -- db migrate   # the api_tokens table, if it's new".into());
+        plan.next
+            .push("cargo run -q -- db migrate   # the api_tokens table, if it's new".into());
     }
     plan.next.push(
         "UPDATE_SCHEMAS=1 cargo nextest run openapi   # writes docs/openapi.json; commit it (the contract)".into(),
@@ -431,10 +492,19 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
     plan.next.push(
         "a token: cargo run -q -- task tokens create <email> [name] [--read-only]; then curl -H \"Authorization: Bearer <token>\" localhost:3000/api/v1/…".into(),
     );
-    if !info.read("AGENTS.md").unwrap_or_default().contains("API:            rest") {
-        plan.next.push("AGENTS.md: set `API: rest` (the app now has a public API)".into());
+    if !info
+        .read("AGENTS.md")
+        .unwrap_or_default()
+        .contains("API:            rest")
+    {
+        plan.next
+            .push("AGENTS.md: set `API: rest` (the app now has a public API)".into());
     }
-    if !info.read("tests/app/smoke_test.rs").unwrap_or_default().contains("request_method") {
+    if !info
+        .read("tests/app/smoke_test.rs")
+        .unwrap_or_default()
+        .contains("request_method")
+    {
         plan.next.push(
             "tests/app/smoke_test.rs and security_test.rs sweep ROUTES with POST: send each row's own method (TestApp::request_method; CHANGELOG 0.7.2 App migration)".into(),
         );

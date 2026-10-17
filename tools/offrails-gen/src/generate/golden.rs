@@ -28,7 +28,10 @@ fn render(plan: &Plan) -> String {
                     "\n=== wire {} @ {}{}\n{}",
                     i.file,
                     i.anchor.describe(),
-                    i.owner.as_ref().map(|o| format!(" (for {o})")).unwrap_or_default(),
+                    i.owner
+                        .as_ref()
+                        .map(|o| format!(" (for {o})"))
+                        .unwrap_or_default(),
                     i.text
                 ));
             }
@@ -45,7 +48,9 @@ fn check(case: &str, kind: &str, args: &[&str], public: bool) {
         public,
         ..Flags::default()
     };
-    flags.recorded.insert("stamp".into(), "20261017_120000".into());
+    flags
+        .recorded
+        .insert("stamp".into(), "20261017_120000".into());
     let args: Vec<String> = args.iter().map(|s| (*s).to_owned()).collect();
     let plan = plan_for(kind, &info, &args, &flags).expect("a plan");
     let got = render(&plan);
@@ -58,7 +63,12 @@ fn check(case: &str, kind: &str, args: &[&str], public: bool) {
         return;
     }
     let want = std::fs::read_to_string(&path)
-        .unwrap_or_else(|_| panic!("{} missing: UPDATE_GOLDEN=1 cargo test golden", path.display()))
+        .unwrap_or_else(|_| {
+            panic!(
+                "{} missing: UPDATE_GOLDEN=1 cargo test golden",
+                path.display()
+            )
+        })
         .replace("\r\n", "\n");
     if want != got {
         let line = want
@@ -93,7 +103,12 @@ fn golden_migration() {
 
 #[test]
 fn golden_model() {
-    check("model_note", "model", &["Note", "title:string:unique", "body:text"], true);
+    check(
+        "model_note",
+        "model",
+        &["Note", "title:string:unique", "body:text"],
+        true,
+    );
 }
 
 #[test]
@@ -123,7 +138,12 @@ fn golden_resource_every_field_type() {
 #[test]
 fn golden_page_and_controller() {
     check("page_about", "page", &["about"], false);
-    check("controller_reports", "controller", &["reports", "index", "summary"], false);
+    check(
+        "controller_reports",
+        "controller",
+        &["reports", "index", "summary"],
+        false,
+    );
 }
 
 #[test]
