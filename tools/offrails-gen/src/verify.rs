@@ -106,22 +106,16 @@ pub fn run(app: &Path, opts: &VerifyOptions) -> Result<()> {
     let mut done = execute(app, &logs, steps);
     done.extend(skipped);
 
+    // The live lines above showed each step as it finished; add the ones that never ran.
     let mut failed = 0;
     for d in &done {
-        let (tag, extra) = match &d.outcome {
-            Outcome::Passed => ("ok  ", String::new()),
-            Outcome::Failed(_) => {
-                failed += 1;
-                ("FAIL", String::new())
+        match &d.outcome {
+            Outcome::Failed(_) => failed += 1,
+            Outcome::Skipped(why) if d.took.is_zero() && !why.ends_with(" failed") => {
+                println!("  skip  {:<22} {why}", d.name);
             }
-            Outcome::Skipped(why) => ("skip", format!(" ({why})")),
-        };
-        println!(
-            "  {tag}  {:<22} {:>6.1}s  {}{extra}",
-            d.name,
-            d.took.as_secs_f64(),
-            d.note
-        );
+            _ => {}
+        }
     }
     for d in &done {
         if let Outcome::Failed(tail) = &d.outcome {
@@ -413,6 +407,7 @@ fn execute(app: &Path, logs: &Path, steps: Vec<Step>) -> Vec<Done> {
             if let Some(dep) = blocked {
                 let s = pending.remove(i);
                 status.insert(s.name, false);
+                println!("  skip  {:<22}         ({dep} failed)", s.name);
                 results.push(Done {
                     name: s.name,
                     outcome: Outcome::Skipped(format!("{dep} failed")),
@@ -467,7 +462,6 @@ fn execute(app: &Path, logs: &Path, steps: Vec<Step>) -> Vec<Done> {
             note: String::new(),
         });
     }
-    println!();
     results
 }
 
