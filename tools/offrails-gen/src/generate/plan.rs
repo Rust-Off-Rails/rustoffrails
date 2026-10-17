@@ -523,7 +523,15 @@ pub struct Undo {
 
 /// Undoes `plan` (re-planned from `entry`): removes its unchanged files and its wiring.
 /// `others`: shared files other generations still use.
-pub fn undo(app: &Path, plan: &Plan, entry: &Entry, others: &BTreeSet<String>) -> Undo {
+/// `foreign`: wiring other generations put into files (a `has_many` in a parent model): it doesn't
+/// count as a change to the file.
+pub fn undo(
+    app: &Path,
+    plan: &Plan,
+    entry: &Entry,
+    others: &BTreeSet<String>,
+    foreign: &[Insert],
+) -> Undo {
     let mut files: BTreeMap<String, Option<String>> = BTreeMap::new();
     let mut kept = Vec::new();
     let current = |files: &BTreeMap<String, Option<String>>, path: &str| -> Option<String> {
@@ -575,8 +583,15 @@ pub fn undo(app: &Path, plan: &Plan, entry: &Entry, others: &BTreeSet<String>) -
                     continue;
                 };
                 let recorded = entry.files.get(path);
-                // The hash of the file as formatted; or, formatted later (`--no-fmt`), the same code.
-                if recorded.is_some_and(|h| *h == hash(&text)) || same_content(&text, content) {
+                let mut own = text.clone();
+                for f in foreign.iter().filter(|f| f.file == *path) {
+                    while let Some(without) = remove_block(&own, &f.text) {
+                        own = without;
+                    }
+                }
+                // The hash of the file as formatted; or, formatted later (`--no-fmt`) or wired into
+                // by other generators since, the same code.
+                if recorded.is_some_and(|h| *h == hash(&text)) || same_content(&own, content) {
                     files.insert(path.clone(), None);
                 } else {
                     kept.push(format!(
@@ -738,6 +753,32 @@ mod tests {
             healed.contains("Box::new(m2_b::Migration),\n            // samples: migrations\n")
         );
         assert!(heal_migration_lib(&healed).is_none());
+    }
+
+    #[test]
+    fn undo_removes_unchanged_files_and_wiring_and_keeps_edited_ones() {
+        let dir = std::env::temp_dir().join(format!("offrails-gen-undo-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(dir.join("src/a.rs"), "fn a() {}\n").unwrap();
+        fs::write(dir.join("src/b.rs"), "fn b() {}\n// edited\n").unwrap();
+        fs::write(dir.join("src/mod.rs"), "pub mod a;\npub mod b;\n// samples: mods\n").unwrap();
+        let mut plan = Plan::new("x", "y", &[]);
+        plan.create("src/a.rs", "fn a() {}\n");
+        plan.create("src/b.rs", "fn b() {}\n");
+        plan.insert("src/mod.rs", "mods", "pub mod a;\n");
+        let mut entry = Entry::default();
+        entry.files.insert("src/a.rs".into(), hash("fn a() {}\n"));
+        entry.files.insert("src/b.rs".into(), hash("fn b() {}\n"));
+        let u = undo(&dir, &plan, &entry, &BTreeSet::new(), &[]);
+        assert_eq!(u.files.get("src/a.rs"), Some(&None));
+        assert!(!u.files.contains_key("src/b.rs"));
+        assert!(u.kept.iter().any(|k| k.starts_with("src/b.rs")));
+        assert_eq!(
+            u.files.get("src/mod.rs"),
+            Some(&Some("pub mod b;\n// samples: mods\n".to_owned()))
+        );
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

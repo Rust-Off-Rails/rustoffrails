@@ -142,6 +142,34 @@ fn entry_name(kind: &str, raw: &[String]) -> Result<String> {
     })
 }
 
+/// The wiring every other recorded generation put into the app (re-planned from the record),
+/// with the generation it belongs to.
+fn foreign_inserts(
+    info: &AppInfo,
+    manifest: &Manifest,
+    kind: &str,
+    name: &str,
+    flags: &Flags,
+) -> Vec<(String, plan::Insert)> {
+    let mut out = Vec::new();
+    for e in &manifest.entries {
+        if e.kind == kind && e.name == name {
+            continue;
+        }
+        let mut f = flags.clone();
+        f.recorded = e.options.clone();
+        f.force = false;
+        if let Ok(p) = plan_for(&e.kind, info, &e.args, &f) {
+            for a in p.actions {
+                if let Action::Insert(i) = a {
+                    out.push((format!("{} {}", e.kind, e.name), i));
+                }
+            }
+        }
+    }
+    out
+}
+
 fn describe(action: &Action) -> String {
     match action {
         Action::Create { path, .. } => format!("  create {path}"),
@@ -210,7 +238,11 @@ pub fn generate(app: &Path, kind: &str, args: &[String], mut flags: Flags) -> Re
         old_flags.recorded = entry.options.clone();
         let old = plan_for(kind, &info, &entry.args, &old_flags)?;
         let others = manifest.shared_by_others(kind, &name);
-        let undo = plan::undo(app, &old, &entry, &others);
+        let foreign: Vec<plan::Insert> = foreign_inserts(&info, &manifest, kind, &name, &flags)
+            .into_iter()
+            .map(|(_, i)| i)
+            .collect();
+        let undo = plan::undo(app, &old, &entry, &others, &foreign);
         let unchanged = undo.kept.is_empty();
         if entry.args == args && !flags.force {
             let missing: Vec<&str> = old
@@ -413,7 +445,30 @@ pub fn destroy(app: &Path, kind: &str, args: &[String], mut flags: Flags) -> Res
     flags.recorded = entry.options.clone();
     let plan = plan_for(kind, &info, &entry.args, &flags)?;
     let others = manifest.shared_by_others(kind, &name);
-    let undo = plan::undo(app, &plan, &entry, &others);
+    let foreign = foreign_inserts(&info, &manifest, kind, &name, &flags);
+    // A later generation wired into a file this one wrote (`books` → `has_many` in author.rs):
+    // destroying this first would break it.
+    let created: Vec<&str> = plan.created();
+    let mut blockers: Vec<String> = Vec::new();
+    for (owner, ins) in &foreign {
+        if created.contains(&ins.file.as_str())
+            && info
+                .read(&ins.file)
+                .is_some_and(|t| plan::find_block(&t, &ins.text).is_some())
+            && !blockers.contains(owner)
+        {
+            blockers.push(owner.clone());
+        }
+    }
+    if !blockers.is_empty() {
+        return Err(Fail::new(format!(
+            "`{}` wired into files `{kind} {name}` wrote; destroy {} first (cargo offrails destroy …), then this. Nothing changed",
+            blockers.join("`, `"),
+            if blockers.len() == 1 { "it" } else { "them" }
+        )));
+    }
+    let foreign: Vec<plan::Insert> = foreign.into_iter().map(|(_, i)| i).collect();
+    let undo = plan::undo(app, &plan, &entry, &others, &foreign);
     println!(
         "{} {kind} {name}{}",
         if flags.dry_run {
