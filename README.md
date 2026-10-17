@@ -136,11 +136,12 @@ workflow.md        how an agent works: spec → code → green → done
 guides/            one guide per framework component
 generators/        recipes that replace `rails generate`
 blueprints/        files copied into every new app (AGENTS.md, spec template…)
+template/          the app template (app/: a complete, tested blank app) and its parts (parts/: the samples), copied by offrails-gen
 .claude-plugin/    Claude Code plugin + marketplace manifests
 skills/            /offrails:* skills (thin entry points into the docs above)
 hooks/             convention guards (no-ops outside Off Rails apps)
 evals/             `claude plugin eval` cases: does the framework steer agents right?
-tools/             helper scripts: offrails (the CLI), brand/ (favicons + social card), browser-smoke/ (kernel pages), release/, ci/
+tools/             offrails-gen/ (new, add-part, list-parts: Rust, any OS), offrails (the CLI), brand/ (favicons + social card), browser-smoke/ (kernel pages), release/, ci/
 install.sh         the one-line installer (served at rustoffrails.org/install.sh); INSTALL.md explains it
 VERSION, CHANGELOG.md   framework version; apps record theirs in .offrails/VERSION
 ```
@@ -163,6 +164,8 @@ Releasing:
 5. `claude plugin tag --push` for the plugin marketplace.
 
 Installer tests: `tools/ci/test-install.sh` (local shells + clean Linux containers; `--full` also runs the real rustup + cargo-binstall path).
+
+Template tests: `TEST_DATABASE_URL=postgres://… tools/ci/test-template.sh` (generates the bare app, every part, and parts added one by one; the Definition of Done on SQLite and Postgres and the memory budget). Parts come from the samples repo: `tools/sync-parts.sh <samples checkout> <ref>`, never edited here.
 
 Installed plugins update only when the version changes.
 
