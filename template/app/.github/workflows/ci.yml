@@ -10,43 +10,43 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
-  sqlite:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with: { fetch-depth: 0 }                  # the migration guard diffs against main
-      - uses: dtolnay/rust-toolchain@stable
-        with: { components: "rustfmt, clippy" }
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@nextest
-      - name: Committed migrations are append-only (guides/migrations.md rule 1)
-        if: github.event_name == 'pull_request'
-        run: test -z "$(git diff --name-only --diff-filter=M origin/${{ github.base_ref }}... -- 'migration/src/m*.rs')"
-      - name: Mechanical gates (header, every AC cited, Security-table tests, tenancy suites, scoped lookups, .env.example)
-        run: sh .offrails/tools/offrails-check
-      - run: cargo fmt --all --check
-      - run: cargo clippy --all-targets --locked
-      - name: Build the app CSS (static/app.css is git-ignored; the theme guard reads it)
-        run: bin/setup-tailwind && bin/tailwindcss -i assets/app.css -o static/app.css --minify
-      - run: cargo nextest run --locked
-
-  postgres:
+  # One build, everything at once (`cargo offrails verify`, workflow.md#definition-of-done): fmt,
+  # the CSS, clippy (its own target dir, beside the test build), then the SQLite and Postgres
+  # suites side by side. Two jobs used to compile the tests twice.
+  test:
     runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:17                      # match the production major (Fly MPG: 16/17)
         env: { POSTGRES_PASSWORD: postgres }
         ports: ["5432:5432"]
+        # A throwaway database on tmpfs: nothing waits for a disk (testing.md#postgres-test-databases).
         options: >-
-          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+          --tmpfs /var/lib/postgresql/data
+          --health-cmd pg_isready --health-interval 2s --health-timeout 5s --health-retries 30
     env:
       TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v7
+        with: { fetch-depth: 0 }                  # the migration guard diffs against main
       - uses: dtolnay/rust-toolchain@stable
+        with: { components: "rustfmt, clippy" }
       - uses: Swatinem/rust-cache@v2
+        with:                                   # the build and clippy's own target dir (verify)
+          workspaces: |
+            . -> target
+            . -> target/clippy
       - uses: taiki-e/install-action@nextest
-      - run: cargo nextest run --locked
+      - name: Committed migrations are append-only (guides/migrations.md rule 1)
+        if: github.event_name == 'pull_request'
+        run: test -z "$(git diff --name-only --diff-filter=M origin/${{ github.base_ref }}... -- 'migration/src/m*.rs')"
+      - name: Mechanical gates (header, every AC cited, Security-table tests, tenancy suites, scoped lookups, .env.example)
+        run: sh .offrails/tools/offrails-check
+      - name: Cargo.lock is current (verify's cargo commands don't take --locked)
+        run: cargo metadata --locked --format-version 1 > /dev/null
+      - run: bin/setup-tailwind                 # verify builds static/app.css (git-ignored; the theme guard reads it)
+      - name: fmt, CSS, clippy, one test build, then SQLite and Postgres at once
+        run: cargo offrails verify --fast
 
   security:                     # security.md#automated-enforcement
     runs-on: ubuntu-latest

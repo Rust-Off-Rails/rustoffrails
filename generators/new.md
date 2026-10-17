@@ -69,7 +69,7 @@ Then `cargo run -q -- db migrate` (parts with tables), `cargo run -q -- routes`,
 ## 5. Verify & report
 
 1. `bin/setup` (creates `.env`, builds the CSS, migrates and seeds the dev DB). Windows: [template → Windows](../template/README.md#windows).
-2. `sh .offrails/tools/offrails-check` exits 0, then the [Definition of Done](../workflow.md#definition-of-done), on SQLite **and** Postgres. Without a local Postgres, run `docker run -d --name pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:<major>`, then `TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres cargo nextest run`.
+2. `cargo offrails verify --full` is green: the [Definition of Done](../workflow.md#definition-of-done), with `offrails-check`, on SQLite **and** Postgres at once. Without a local Postgres, run `docker run -d --name pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:<major>` first (verify finds it on 5432), or set `TEST_DATABASE_URL`. The first build compiles the whole stack (2–4 min on an M2; a second app on the same machine is no faster unless you opted into sccache, [testing](../guides/testing.md#build-speed)); after that, `cargo offrails verify` takes seconds.
 3. Prove the migrations are reversible on both databases: `cargo run -- db rollback --steps <n>` then `cargo run -- db migrate`. For Postgres, set `DATABASE_URL` to a scratch database.
 4. Run the app: `cargo run -- serve`, then:
    - `curl -i localhost:3000/up` returns 200;
@@ -91,7 +91,7 @@ Read this when you change a kernel file, port a fix from a newer template, or co
 
 ### Workspace & dependencies
 
-- `Cargo.toml`: the app plus the `migration` crate as a workspace, `publish = false`, `[profile.dev.package."*"] opt-level = 1`, `[profile.dev] debug = "line-tables-only"` + `split-debuginfo = "unpacked"` (faster rebuilds; `CARGO_PROFILE_DEV_DEBUG=true` for a debugging session). `Cargo.lock` is the tested resolution; `cargo update` is an ordinary change.
+- `Cargo.toml`: the app plus the `migration` crate as a workspace, `publish = false`, `[profile.dev.package."*"] opt-level = 1`, `[profile.dev] debug = "line-tables-only"` (faster rebuilds; `CARGO_PROFILE_DEV_DEBUG=true` for a debugging session; Linux's `split-debuginfo` is in `.cargo/config.toml`). `Cargo.lock` is the tested resolution; `cargo update` is an ordinary change.
 - `migration/`: `sea-orm-migration` with `default-features = false` and `["runtime-tokio-rustls", "sqlx-sqlite", "sqlx-postgres"]` (no CLI runner: the app binary has `db migrate|rollback|status`), no `rust-version` line (the MSRV-aware resolver would downgrade dependencies), and the migrations list as a **multi-line** `vec![` … `]`, the only shape `sea-orm-cli migrate generate` registers into. One migration: `create_cache_entries` ([caching](../guides/caching.md)). Parts bring their own tables.
 - Crates: the htmx set from [stack](../stack.md#blessed-crates), added with `cargo add`. More arrive with the feature or part that needs them. For other modes and APIs:
 

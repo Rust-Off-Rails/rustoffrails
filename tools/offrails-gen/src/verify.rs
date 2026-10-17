@@ -258,7 +258,9 @@ fn plan(
     match pg {
         Ok(url) => steps.push(
             Step::new("tests (Postgres)", "cargo", &[])
-                .args(&nextest(&["--test-threads", &threads.clone()]))
+                // The integration tests (tests/): unit tests in src/ never read
+                // TEST_DATABASE_URL, so the SQLite run covers them.
+                .args(&nextest(&["--test-threads", &threads, "-E", "kind(test)"]))
                 .env("TEST_DATABASE_URL", Some(url))
                 .after(&test_after),
         ),

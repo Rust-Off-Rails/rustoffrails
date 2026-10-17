@@ -30,14 +30,10 @@ migration/   templates/   static/   web/ (TS modes)   tests/app/ (ONE test binar
 ## Definition of Done ([workflow.md](workflow.md#definition-of-done))
 
 ```sh
-sh .offrails/tools/offrails-check                        # header, ACs cited, Security tests, tenancy suites, scoped lookups, .env.example
-cargo fmt --all && cargo clippy --all-targets -- -D warnings
-cargo nextest run                                         # SQLite
-TEST_DATABASE_URL=postgres://postgres:postgres@localhost:${DB_PORT:-5432}/postgres cargo nextest run   # Postgres (docker compose up -d db)
-cargo llvm-cov nextest --fail-under-lines 80 …            # ≥80% total, ≥90% models + policies
-cargo deny check && gitleaks git . --redact --no-banner   # + pnpm audit --prod in TS modes
-# htmx: bin/tailwindcss -i assets/app.css -o static/app.css --minify
-# TS:   pnpm --dir web exec biome check --write . && pnpm --dir web typecheck && pnpm --dir web test --run && pnpm --dir web build
+cargo offrails verify          # after every slice: fmt --check, CSS, clippy, one test build, SQLite + Postgres at once (seconds)
+cargo offrails verify --full   # once, at the end: + offrails-check, coverage ≥80% (≥90% models + policies), cargo deny,
+                               #   gitleaks, no-unwrap review, routes, TS checks (web/), browser smoke (BASE=…)
+cargo nextest run <name>       # while a test is red: just that test (never the full DoD per edit)
 ```
 
 Plus (each has its command in the DoD table): every `AC-<feature>-<n>` cited by a test · rollback then migrate works · no `unwrap`/`expect` outside tests and startup · no raw SQL outside `src/kernel/` · axe a11y suite in light **and** dark ([§10](guides/test-standards.md#10-accessibility-wcag-22-aa-in-every-theme)) · `theme_test` green ([§11](guides/test-standards.md#11-theme-and-css-guards)) · UI changes checked in a real browser, login with no certificate overrides ([§9](guides/test-standards.md#9-real-browser-smoke)) · decisions logged.

@@ -3,3 +3,14 @@
 # Windows; run it from the app root. Its build output stays in target/offrails-gen.
 [alias]
 offrails = "run -q --manifest-path .offrails/tools/offrails-gen/Cargo.toml --target-dir target/offrails-gen --"
+
+# Linux: debug info stays in the object files instead of passing through the linker (macOS does
+# this by default). A RUSTFLAGS environment variable replaces this list (CI sets one).
+[target.'cfg(target_os = "linux")']
+rustflags = ["-C", "split-debuginfo=unpacked"]
+
+# Faster linking is opt-in, per machine, in ~/.cargo/config.toml (never here: a missing linker
+# would break the build). x86_64 Linux already links with rust-lld (Rust 1.90+); macOS's ld is
+# already fast. Elsewhere, with mold installed (testing.md#build-speed):
+#   [target.aarch64-unknown-linux-gnu]
+#   rustflags = ["-C", "link-arg=-fuse-ld=mold", "-C", "split-debuginfo=unpacked"]

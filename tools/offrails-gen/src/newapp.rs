@@ -337,10 +337,11 @@ pub fn run(fw: &Path, o: &NewOptions) -> Result<()> {
 
     println!("\ndone. Next, in {}:", app.display());
     println!(
-        "  cargo build && cargo nextest run           # the first build compiles the stack (minutes)"
+        "  bin/setup-tailwind && cargo offrails verify   # fmt, CSS, clippy, SQLite + Postgres (first build: minutes)"
     );
-    println!("  TEST_DATABASE_URL=postgres://… cargo nextest run   # the same suite on Postgres");
-    println!("  sh .offrails/tools/offrails-check");
+    println!(
+        "  cargo offrails verify --full               # + offrails-check, coverage, deny, gitleaks"
+    );
     println!(
         "  bin/setup && bin/dev                       # Windows: see .offrails/template/README.md#windows"
     );

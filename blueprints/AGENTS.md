@@ -48,16 +48,17 @@ Each line is a mistake an agent shipped. The check that catches it is in parenth
 bin/setup                      # first run
 bin/dev                        # develop: open the URL it prints (https + HTTP/2 with mkcert, else http){{TS modes only: ", or :5173 via Vite"; htmx: nothing}}; tabs reload on save
 sh .offrails/tools/offrails-check   # mechanical gates: header, specs ↔ tests, tenancy, scoped lookups
-cargo nextest run              # tests (SQLite)
+cargo offrails verify          # after each slice: fmt, CSS, clippy, one build, SQLite + Postgres suites at once
+cargo offrails verify --full   # before saying done: + offrails-check, coverage, deny, gitleaks, routes, browser smoke (BASE=…)
+cargo nextest run <name>       # one test while it's red (SQLite)
 docker compose up --build      # the whole app, production-shaped, on Postgres (http://localhost:3000)
-docker compose up -d db && TEST_DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres cargo nextest run   # tests on Postgres
+docker compose up -d db        # a Postgres for verify (or set TEST_DATABASE_URL in .env)
 cargo run -- db migrate        # migrate (any DATABASE_URL)
 cargo run -q -- introspect     # the app's state as JSON (development; live parts: $URL/dev/introspect.json)
 cargo run -- routes            # list routes (with access levels); rewrites docs/routes.md
 cargo offrails list-parts      # parts (mailer, jobs, auth, realtime, dev dashboard): installed or available
 cargo offrails add-part <name> # add one when the product needs it (dependencies first; re-running is a no-op)
 cargo run -- jobs stats        # with the jobs part: job counts per state (dashboard: /admin/jobs; dev tools: /dev)
-cargo llvm-cov nextest --summary-only --ignore-filename-regex 'src/main\.rs$'   # coverage (gate: 80%)
 ```
 
 ## App-specific notes

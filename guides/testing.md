@@ -2,7 +2,8 @@
 
 > **TL;DR**
 > - **How** to test (test-standards.md says **what**): one integration-test binary in `tests/app/`, `TestApp` over the real router, factories, both SQLite and Postgres.
-> - Postgres test databases are namespaced `test_<crate>_<hex>` and dropped on a joined thread; the DDL lives in `kernel::db`.
+> - Postgres tests never run `CREATE DATABASE` or migrations per test: they lock a reusable slot database cloned once from a migrated template, reset to the just-migrated state (§[Postgres test databases](#postgres-test-databases)); the SQL lives in `kernel::db`.
+> - While iterating, `cargo offrails verify` (fmt, clippy, one build, both suites at once); `--full` once at the end ([workflow](../workflow.md#definition-of-done)).
 > - Helpers set Fetch Metadata like a browser; assert on what the user sees (`assert_text` decodes entities), never exact HTML; no sleeps (`drain_jobs`, `wait_until`).
 > - CI runs SQLite, Postgres, security (cargo-deny, gitleaks) and the Docker image with a ZAP baseline.
 >
@@ -50,7 +51,7 @@ pub struct TestApp {
     fetch_metadata: AtomicBool,    // form posts send Sec-Fetch-Site: same-origin unless turned off
     origin: Mutex<Option<String>>, // Origin header for form posts, if set
     queries: Arc<AtomicUsize>,     // SQL statement counter (below)
-    _pg: Option<PgTestDb>,         // per-test Postgres database, dropped with the TestApp
+    db_guard: DbGuard,             // holds the test's Postgres slot (its advisory lock); a no-op on SQLite
 }
 
 impl TestApp {
@@ -112,8 +113,24 @@ impl TestResponse {
 
 - **Default (SQLite):** `sqlite::memory:` with `max_connections(1)`, `min_connections(1)`, built through `kernel::db::connect`, then `Migrator::up(&db, None)`. It's isolated by construction and takes milliseconds.
 - **localhost:5432 taken** (another app's Postgres, a native install): never stop it. Start the compose `db` service on another port, `DB_PORT=54329 docker compose up -d db`, and run `TEST_DATABASE_URL=postgres://postgres:postgres@localhost:54329/postgres cargo nextest run`. Any Postgres you may create databases in works; check the port first with `lsof -nP -iTCP:5432 -sTCP:LISTEN`.
-- **`TEST_DATABASE_URL=postgres://…/postgres` set:** connect to it, `CREATE DATABASE test_<crate>_<uuid-simple>` (the crate name from `env!("CARGO_PKG_NAME")`, `-` → `_`, so apps sharing a Postgres server never touch each other's databases), connect to that database, and migrate. `Drop` runs `DROP DATABASE … WITH (FORCE)` on a **dedicated `std::thread` with its own current-thread runtime, joined** before `Drop` returns. A task spawned on the test's runtime is cancelled when that runtime shuts down, and the database leaks. Anything left over (a killed run) is removed by `app task test_db_cleanup`, which calls `kernel::db::drop_idle_test_databases`: it drops only `test_<crate>_<hex>` databases with **no open connections** (`pg_stat_activity`), so it's safe while another suite is running. All of it lives in `kernel/db.rs`, since raw SQL outside the kernel is a DoD failure, under these names: `create_database(admin, name)`, `drop_database(admin, name)`, `drop_idle_test_databases(admin, prefix)` and `ping(db)`. Database names are interpolated into DDL (Postgres can't bind identifiers), so each helper accepts only `[a-z0-9_]` names and refuses anything else.
-- Measured in the reference app (38 tests): the SQLite suite takes ~0.2–1 s, and the Postgres run (one `CREATE DATABASE` per test) takes 3–30 s, depending on machine load.
+- **`TEST_DATABASE_URL=postgres://…/postgres` set:** a reset slot database per test, below.
+- Measured on an all-parts app (654 tests, Apple M2, other builds running, load 6–35): SQLite 6.5–7.8 s; Postgres 14–17 s, down from 100 s with one `CREATE DATABASE` and a full migration per test. Under heavy load `CREATE DATABASE` alone took 1–4 s (it fsyncs a copy of the template), which is why nothing per test does DDL.
+
+### Postgres test databases
+
+What `test_database()` in `support.rs` does, and why (all SQL in `kernel/db.rs`, since raw SQL outside the kernel is a DoD failure; every database name is checked to be `[a-z0-9_]` before it reaches DDL):
+
+1. **Template, once per migration set.** `<tag>` is a hash of the migration names and every file under `migration/src` (editing an uncommitted migration builds a new one). If `test_<crate>_<tag>_tpl` doesn't exist, the first test takes an advisory lock (`kernel::db::advisory_lock`; concurrent tests wait for it), creates `test_<crate>_<tag>_b<pid>`, migrates it, runs `kernel::db::install_test_reset` (snapshots the rows the migrations seeded and every sequence, and installs `offrails_test.reset()`), then **renames** it to the final name, so a killed build never leaves a half-migrated template. It then drops the idle databases of older tags (`drop_idle_stale_test_databases`).
+2. **Slot per concurrent test.** The test locks the first free slot `n` with `pg_try_advisory_lock` (`try_advisory_lock`) and uses `test_<crate>_<tag>_<n>`. The first time, the slot is cloned from the template (`create_database_from`: `CREATE DATABASE … TEMPLATE …`, a file copy, no migrations) and set to `synchronous_commit = off` (`skip_commit_flush`: commits don't wait for the disk; visibility is unchanged). After that the slot is reused across tests and runs: as many slots exist as tests ever ran at once.
+3. **Reset before every test.** `SELECT offrails_test.reset()` (`reset_test_database`) truncates every table with rows except `seaql_migrations`, puts the migrations' seed rows back (in an order the foreign keys accept) and restores every sequence. The result is the same data, ids and schema a fresh migrated database has. The reset first compares a fingerprint of the schema (tables, columns, defaults, indexes, constraints, types, functions, applied migrations) with the template's; when a test rolled a migration back or created a table, it refuses, and the harness drops that slot and clones it again.
+4. **Release.** A helper thread with its own runtime holds the lock (the test's runtime is gone when `Drop` runs); `DbGuard::drop` tells it to unlock and joins it. A killed run's locks die with its connections; its slots are simply reused.
+
+The `offrails_test` schema (the snapshot and the reset) lives outside `current_schema()`, so the app's queries and the schema pages never see it. `app task test_db_cleanup <admin url>` drops every idle `test_<crate>_*` database (template and slots included: the next run rebuilds them in about a second) and any `test_<crate>_<hex>` database an older harness leaked; it is safe while another suite runs.
+
+Evaluated and not used: **a transaction per test, rolled back** (the app opens its own transactions with `kernel::db::begin`, the job worker and realtime use other connections, so a test would see neither its own commits nor the isolation it gets in production); **`CREATE DATABASE … TEMPLATE` per test** (it removes the migrations but keeps the fsync-bound copy, 1–4 s each under load). **SQLite** stays a fresh in-memory database migrated per test: the migrations take ~5 ms of the ~40 ms median test, below the process start, so a pre-migrated copy (serialize/deserialize) would save under half a second per suite.
+
+**Local Postgres settings (optional, a test-only server, never production):** with the slots, commits already skip the flush. A disposable test server can also run with `fsync=off` and `full_page_writes=off` (`docker compose` `db` service: `command: postgres -c fsync=off -c full_page_writes=off`); it mostly helps the first run, when the template and the slots are created.
+
 - **`TestApp::new` reads `TEST_DATABASE_URL`, always.** A `support.rs` that hard-codes `sqlite::memory:` makes "tests pass on Postgres" impossible to run, and the defects only Postgres has ship: a peer's Kanban had `INT4` ids, so every Postgres write that returned an id was a 500, behind a green SQLite suite ([migrations](migrations.md#ids-are-64-bit)). `offrails-check` fails a `support.rs` that never mentions it (`[postgres]`).
 - Never share a database between tests. Never depend on test order.
 
@@ -223,24 +240,44 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
-  sqlite:                      # Rust on SQLite, plus the frontend (it needs the ts-rs types this job exports)
+  # One build, everything at once (`cargo offrails verify`, workflow.md#definition-of-done): fmt,
+  # the CSS, clippy (its own target dir, beside the test build), then the SQLite and Postgres
+  # suites side by side. Two jobs used to compile the tests twice.
+  test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17                      # match the production major (Fly MPG: 16/17)
+        env: { POSTGRES_PASSWORD: postgres }
+        ports: ["5432:5432"]
+        # A throwaway database on tmpfs: nothing waits for a disk (testing.md#postgres-test-databases).
+        options: >-
+          --tmpfs /var/lib/postgresql/data
+          --health-cmd pg_isready --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v7
         with: { fetch-depth: 0 }                  # the migration guard diffs against main
       - uses: dtolnay/rust-toolchain@stable
         with: { components: "rustfmt, clippy" }
       - uses: Swatinem/rust-cache@v2
+        with:                                   # the build and clippy's own target dir (verify)
+          workspaces: |
+            . -> target
+            . -> target/clippy
       - uses: taiki-e/install-action@nextest
       - name: Committed migrations are append-only (guides/migrations.md rule 1)
         if: github.event_name == 'pull_request'
         run: test -z "$(git diff --name-only --diff-filter=M origin/${{ github.base_ref }}... -- 'migration/src/m*.rs')"
       - name: Mechanical gates (header, every AC cited, Security-table tests, tenancy suites, scoped lookups, .env.example)
         run: sh .offrails/tools/offrails-check
-      - run: cargo fmt --all --check
-      - run: cargo clippy --all-targets --locked
-      - run: cargo nextest run --locked          # also re-exports ts-rs types into web/src/types
-      # ---- inertia / react / ISLANDS: yes only ----
+      - name: Cargo.lock is current (verify's cargo commands don't take --locked)
+        run: cargo metadata --locked --format-version 1 > /dev/null
+      - run: bin/setup-tailwind                 # verify builds static/app.css (git-ignored; the theme guard reads it)
+      - name: fmt, CSS, clippy, one test build, then SQLite and Postgres at once
+        run: cargo offrails verify --fast
+      # ---- inertia / react / ISLANDS: yes only (the suites above exported the ts-rs types) ----
       - run: git diff --exit-code web/src/types   # generated types must be committed and current
       - uses: pnpm/action-setup@v6
         with: { package_json_file: web/package.json }        # reads "packageManager"
@@ -253,24 +290,6 @@ jobs:
       - run: pnpm --dir web build
       - run: pnpm --dir web exec playwright install --with-deps chromium   # E2E (inertia/spa)
       - run: pnpm --dir web e2e                              # webServer: builds web/, serves the app on :3200
-
-  postgres:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:17                      # match the production major (Fly MPG: 16/17)
-        env: { POSTGRES_PASSWORD: postgres }
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
-    env:
-      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@nextest
-      - run: cargo nextest run --locked
 
   security:                     # security.md#automated-enforcement
     runs-on: ubuntu-latest
@@ -312,7 +331,9 @@ jobs:
 
 The security and Docker jobs are actionlint-clean. TS modes add `pnpm --dir web audit --prod` to the frontend job. Run ZAP locally against `app serve` with `APP_ENV=production` and `APP_URL=http://host.docker.internal:$PORT`, adding `--add-host=host.docker.internal:host-gateway` to the ZAP container. Verified: 0 FAIL, 0 WARN, 61 PASS on the reference app.
 
-- In `htmx` mode without islands, delete the frontend steps. Templates are compiled by `cargo`, so CSS isn't needed for tests.
+- In `htmx` mode without islands, delete the frontend steps. The CSS is built because the theme guard (`theme_test`) reads `static/app.css`.
+- **Why one test job.** The SQLite and Postgres suites used to be two jobs, each compiling the tests. `verify` compiles once and runs both at once against the job's Postgres service (on tmpfs), while clippy checks beside the build in `target/clippy` (cached as a second target dir). Coverage, deny and gitleaks stay out of the critical path: deny and gitleaks in `security`, coverage locally in `verify --full`. Sharding the suites across runners (`nextest --partition`) doesn't pay at this size: each shard would compile the tests again, and the suites run in seconds once built.
+- **The Docker job** builds the dependencies in a layer of their own (`Dockerfile`), which the `gha` layer cache keeps; before 0.7.2 a cache mount (not in that cache) made every run compile every dependency in release mode.
 - `--locked` fails if `Cargo.lock` is stale, and `--frozen-lockfile` does the same for `pnpm-lock.yaml`. Commit both.
 
 ## Gotchas agents get wrong

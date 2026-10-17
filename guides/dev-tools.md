@@ -193,8 +193,9 @@ Why a poll and not the signal stream or a socket: on the plain-HTTP fallback eve
 ```toml
 [profile.dev]
 debug = "line-tables-only"   # backtraces keep file:line; lldb shows no locals
-split-debuginfo = "unpacked"
 ```
+
+and `.cargo/config.toml` adds `-C split-debuginfo=unpacked` on Linux (macOS's default already; Windows MSVC refuses it, which is why it left `[profile.dev]` in 0.7.2). More build-speed settings, and what was measured: [testing](testing.md#build-speed).
 
 A peer measured a template edit going from 16–23 s to 3.6–5.9 s and a Rust edit from 11–12 s to 4.4–5.3 s (a Kanban, M2). In the smaller reference app on a newer machine incremental builds were ~5 s with or without it (not reproduced there; it costs nothing). For a debugging session with locals: `CARGO_PROFILE_DEV_DEBUG=true cargo run`. A page with unsaved form input loses it on reload; that's development.
 

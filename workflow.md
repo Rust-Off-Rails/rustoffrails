@@ -18,10 +18,10 @@ Before building anything new, run the relevant part of [`interview.md`](intervie
             (inertia/spa: derive TS on Params + view props; tests export them)
 5. TEST     failing integration tests from the acceptance criteria
 6. BUILD    controller, routes, views (templates / Inertia pages / SPA routes), jobs, mailers
-7. CHECK    cargo check → fix → repeat (the compiler is your pair)
+7. CHECK    cargo check → fix → repeat (the compiler is your pair); one test: cargo nextest run <name>
             running app: bin/dev rebuilds, restarts and reloads open tabs on save;
             ask it before guessing: curl -s $URL/dev/introspect.json (migrations, css, realtime, url)
-8. VERIFY   Definition of Done, including running the app
+8. VERIFY   cargo offrails verify after each slice (seconds); --full once, before you say done
 9. RECORD   docs/routes.md, docs/decisions.md, spec checkboxes
 ```
 
@@ -49,31 +49,34 @@ Typical moments: the first email (`mailer`, `dev-mailbox`), the first slow, retr
 
 ## Definition of Done
 
-All must pass, in this order. Gates and thresholds are defined in [`guides/test-standards.md`](guides/test-standards.md).
+All must pass. Gates and thresholds are defined in [`guides/test-standards.md`](guides/test-standards.md). One command runs them, in parallel where they are independent:
 
 ```sh
-sh .offrails/tools/offrails-check                   # header, every AC cited, Security-table tests exist, tenancy suites, no unscoped lookups (exit 0)
-cargo fmt --all
-cargo clippy --all-targets -- -D warnings
+cargo offrails verify          # --fast, after every slice: fmt --check, the CSS (htmx), clippy -D warnings,
+                               # one test build, then the SQLite and Postgres suites at the same time
+cargo offrails verify --full   # once, before you say done: also offrails-check, coverage (the SQLite run, instrumented),
+                               # cargo deny, gitleaks, the no-unwrap review, routes vs docs/routes.md, the TS checks
+                               # (web/), and the browser smoke when BASE=<the URL bin/dev printed> is set
+```
+
+It prints one line per step with its time and test counts, the tail of each failure (full logs in `target/verify/`), and exits non-zero on any failure. Postgres comes from `TEST_DATABASE_URL` (the environment or `.env`), else the compose `db` URL when something listens on `localhost:${DB_PORT:-5432}`; with neither, the Postgres run is reported **skipped**, never passed. `cargo fmt --all` fixes what `fmt --check` reports.
+
+**Iterate fast, verify fully once.** While a slice is red, run only what you're fixing: `cargo check`, then `cargo nextest run <test name>`. At the end of each slice, `cargo offrails verify` (an all-parts app: ~20 s after a one-line change; a bare app: ~6 s). Never run coverage, `cargo deny`, gitleaks or the full browser smokes per iteration: they belong to `--full`, once, when the work is done. A real-browser smoke of the flow you changed is still due for UI changes (the table below), against the app `bin/dev` is already serving.
+
+What `verify` runs, for running one step by hand:
+
+```sh
+cargo fmt --all --check
+bin/tailwindcss -i assets/app.css -o static/app.css --minify            # htmx mode
+CARGO_TARGET_DIR=target/clippy cargo clippy --all-targets -- -D warnings  # its own dir, so it compiles beside the tests
 cargo nextest run                                   # SQLite; also re-exports ts-rs types
-TEST_DATABASE_URL=postgres://postgres:postgres@localhost:${DB_PORT:-5432}/postgres cargo nextest run   # Postgres (docker compose up -d db): required locally when reachable; CI always runs it
-
-# coverage gate (test-standards.md §5): ≥ 80% lines overall, ≥ 90% for src/models and src/policies
-cargo llvm-cov nextest --summary-only --ignore-filename-regex 'src/main\.rs$' --fail-under-lines 80
-
-# security gates (guides/security.md#automated-enforcement)
-cargo deny check                                    # advisories, licenses, banned crates, sources
+TEST_DATABASE_URL=postgres://postgres:postgres@localhost:${DB_PORT:-5432}/postgres cargo nextest run -E 'kind(test)'   # Postgres: required locally when reachable; CI always runs it
+# --full adds:
+sh .offrails/tools/offrails-check                   # header, every AC cited, Security-table tests exist, tenancy suites, no unscoped lookups (exit 0)
+cargo llvm-cov nextest --summary-only --ignore-filename-regex 'src/main\.rs$' --fail-under-lines 80   # test-standards.md §5: ≥ 80% lines overall, ≥ 90% for src/models and src/policies
+cargo deny check                                    # advisories, licenses, banned crates, sources (guides/security.md#automated-enforcement)
 gitleaks git . --redact --no-banner                 # secrets anywhere in history (.gitleaks.toml)
-pnpm --dir web audit --prod                         # TS modes only
-
-# htmx mode
-bin/tailwindcss -i assets/app.css -o static/app.css --minify
-
-# inertia / react / islands
-pnpm --dir web exec biome check --write .
-pnpm --dir web typecheck                           # React: `tsc -b` (never `tsc --noEmit`); Svelte: svelte-check
-pnpm --dir web test --run
-pnpm --dir web build
+pnpm --dir web exec biome check . && pnpm --dir web typecheck && pnpm --dir web test --run && pnpm --dir web build && pnpm --dir web audit --prod   # TS modes; React: `tsc -b` (never `tsc --noEmit`); Svelte: svelte-check
 ```
 
 **Postgres on another port:** if 5432 is taken (another app's Postgres, a native install), never stop it: run the compose `db` service elsewhere with `DB_PORT=54329 docker compose up -d db` and test with `DB_PORT=54329` (or set `TEST_DATABASE_URL` to any Postgres you may create databases in; the suite makes one per test). Check first with `lsof -nP -iTCP:5432 -sTCP:LISTEN`.

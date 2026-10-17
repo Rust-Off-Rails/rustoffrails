@@ -7,12 +7,14 @@
 #   tools/ci/test-template.sh --no-postgres   skip the Postgres runs (said so in the summary)
 #
 #   gen          offrails-gen's own tests and clippy
-#   bare         `new` with no parts: fmt, clippy, tests (SQLite + Postgres), offrails-check, memory budget
+#   bare         `new` with no parts: `cargo offrails verify` (fmt, clippy, tests on SQLite + Postgres),
+#                the no-unwrap lint, offrails-check, memory budget
 #   all          `new --parts all` (every part, so every sample's anchors are proven on the template)
 #   incremental  `new` bare, then `add-part` one part at a time into the generated app, then every
 #                add-part again (must change nothing), then the same gates as `all`
 #
-# Postgres: TEST_DATABASE_URL names a server where the suite may create databases (one per test).
+# Postgres: TEST_DATABASE_URL names a server where the suite may create databases (a template and
+# one reusable slot per concurrent test, testing.md#postgres-test-databases).
 # Apps are generated in $OFFRAILS_CI_DIR (default: a temp dir), sharing one CARGO_TARGET_DIR.
 # Exit status: 0 when every run passed.
 set -eu
@@ -23,7 +25,7 @@ targets=""
 for arg in "$@"; do
   case "$arg" in
     --no-postgres) postgres=0 ;;
-    -h | --help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "test-template: unknown option $arg" >&2; exit 2 ;;
     *) targets="$targets $arg" ;;
   esac
@@ -66,36 +68,27 @@ anchors_alone() {
 # flaky test fails the run.
 KNOWN_FLAKY="dev_dashboard_test::run_history_is_capped_redacted_and_reopened dev_dashboard_test::bench_drives_a_running_server"
 
-# suite [TEST_DATABASE_URL]: the test suite, failing on any flaky test not in KNOWN_FLAKY.
-suite() {
-  out=$(mktemp)
-  if [ -n "${1:-}" ]; then
-    TEST_DATABASE_URL=$1 cargo nextest run --no-fail-fast --retries 1 --status-level fail --final-status-level flaky >"$out" 2>&1
+# verify: `cargo offrails verify --fast` (fmt, CSS, clippy, one build, SQLite + Postgres at once),
+# failing on any flaky test not in KNOWN_FLAKY (nextest retries once: NEXTEST_RETRIES).
+verify() {
+  if [ "$postgres" = 1 ]; then
+    TEST_DATABASE_URL=$pg_url NEXTEST_RETRIES=1 cargo offrails verify --fast || return 1
   else
-    cargo nextest run --no-fail-fast --retries 1 --status-level fail --final-status-level flaky >"$out" 2>&1
+    NEXTEST_RETRIES=1 cargo offrails verify --fast --no-postgres || return 1
   fi
-  status=$?
-  tail -5 "$out"
-  unknown=$(grep -E '^[[:space:]]*FLAKY' "$out" | awk '{ print $NF }' | while IFS= read -r t; do
+  unknown=$(cat target/verify/tests-*.log 2>/dev/null | grep -E '^[[:space:]]*FLAKY' | awk '{ print $NF }' | while IFS= read -r t; do
     case " $KNOWN_FLAKY " in (*" $t "*) ;; (*) echo "$t" ;; esac
   done)
-  rm -f "$out"
-  [ "$status" = 0 ] || return 1
   [ -z "$unknown" ] || { echo "flaky, and not a known samples flake: $unknown" >&2; return 1; }
 }
 
 # The Definition of Done on a generated app. $1: memory budget in MiB.
 gates() {
-  step "fmt --check" cargo fmt --all --check || return 1
   step "anchors stand alone" anchors_alone || return 1
-  step "css" sh -c 'bin/setup-tailwind >/dev/null && bin/tailwindcss -i assets/app.css -o static/app.css --minify 2>&1 | tail -1' || return 1
+  step "tailwind" sh -c 'bin/setup-tailwind >/dev/null' || return 1
+  step "verify (fmt, css, clippy, tests on SQLite + Postgres)" verify || return 1
   step "routes" sh -c 'cargo run -q -- routes > /dev/null' || return 1
-  step "clippy" cargo clippy -q --all-targets -- -D warnings || return 1
-  step "clippy (no unwrap/expect)" cargo clippy -q --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used || return 1
-  step "tests (SQLite)" suite || return 1
-  if [ "$postgres" = 1 ]; then
-    step "tests (Postgres)" suite "$pg_url" || return 1
-  fi
+  step "clippy (no unwrap/expect)" env CARGO_TARGET_DIR="$CARGO_TARGET_DIR/clippy" cargo clippy -q --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used || return 1
   step "offrails-check" sh .offrails/tools/offrails-check || return 1
   step "memory budget" sh "$root/tools/ci/memory-budget.sh" . "$1" || return 1
 }

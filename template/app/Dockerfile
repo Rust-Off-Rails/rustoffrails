@@ -5,12 +5,22 @@ ARG RUST_VERSION=1.99
 # --- rust (plain htmx mode: no Node stage) ---
 FROM rust:${RUST_VERSION}-trixie AS build
 WORKDIR /app
+# The dependencies first, in a layer of their own: it is rebuilt only when Cargo.toml or
+# Cargo.lock change, and CI's layer cache (cache-to: type=gha) keeps it, so a code change
+# compiles only the app. (A `--mount=type=cache` target is not in that cache: every CI run
+# compiled every dependency again.)
+COPY Cargo.toml Cargo.lock ./
+COPY migration/Cargo.toml migration/
+RUN mkdir -p src migration/src \
+    && echo 'fn main() {}' > src/main.rs && touch src/lib.rs migration/src/lib.rs \
+    && cargo build --release --locked \
+    && rm -rf src migration/src
 COPY . .
 # Build the CSS with the pinned standalone Tailwind (bin/setup-tailwind).
 RUN bin/setup-tailwind && bin/tailwindcss -i assets/app.css -o static/app.css --minify
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
-    cargo build --release --locked && cp target/release/offrails_app /usr/local/bin/app
+# touch: the copied sources can be older than the placeholder build, and cargo goes by mtime.
+RUN touch src/main.rs src/lib.rs migration/src/lib.rs \
+    && cargo build --release --locked && cp target/release/offrails_app /usr/local/bin/app
 
 # --- runtime ---
 FROM debian:trixie-slim
