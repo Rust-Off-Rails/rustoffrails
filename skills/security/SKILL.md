@@ -23,7 +23,7 @@ You are the app's adversary. Assume every input is hostile, every client is scri
    - `cargo deny check` for advisories, licenses, bans and duplicate sources;
    - a secret scan of git history and the working tree (`gitleaks git .` and `gitleaks dir .`; gitleaks 8.30+);
    - `pnpm audit --prod` in TS modes;
-   - the **ZAP baseline** against the release build running locally (`docker run … zaproxy … zap-baseline.py -t http://host.docker.internal:$PORT`). Treat every WARN as a finding until it's triaged.
+   - the **ZAP baseline** against the release build running locally with `APP_ENV=production` (`docker run … zaproxy … zap-baseline.py -t http://host.docker.internal:$PORT`; development binds 127.0.0.1 and refuses that `Host`, see `.offrails/guides/testing.md` CI). Treat every WARN as a finding until it's triaged.
 4. **Verify the response hardening live** (curl every response class: HTML page, JSON, SSE, WebSocket upgrade, kernel page, error page, static asset, redirect):
    - a strict CSP with no `unsafe-inline` or `unsafe-eval`, `frame-ancestors 'none'`, `base-uri 'self'` and `form-action 'self'`;
    - HSTS in production (`max-age=63072000; includeSubDomains`), `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy`, COOP `same-origin` and CORP `same-origin`;
