@@ -141,7 +141,7 @@ pub fn presence_diff_frame(topic: &str, joins: &[(String, Payload)], leaves: &[(
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Member {
     pub key: String,                  // the person (user id)
-    pub meta: Payload,                // what others see in presence: minimal (initials / display name, never an email)
+    pub meta: Payload,                // what others see in presence: minimal (a chosen display name or its initials; never the email, nor anything derived from it)
     #[serde(skip)] pub session: Option<i64>,   // the session this connection authenticated with; revalidated
 }
 
@@ -305,7 +305,7 @@ Every transport (the WebSocket upgrade, `/socket/sse` + POST, and long-polling) 
 | **Expiry closes connections** | every `revalidate_every` (60s, `APP_REALTIME_REVALIDATE_SECS`) each connection calls `session_valid` (fails closed) | expired session closed by revalidation (socket and SSE) |
 | **Authorization against current state** | joins and **every push** call `authorize` against the database now; a refused push also leaves the topic | push after the book is deleted → `forbidden`, then `not_joined` |
 | **Per-user caps** | ≤ 128 connections per member (all transports, per node; each tab can hold 2, and a cap of 8 broke users at ~5 tabs, see [realtime](realtime.md#many-tabs-stall-http11-vs-http2)), ≤ 20 topics per connection, ≤ 30 joins per minute per connection, ≤ 100 frames per 10s, frames ≤ 4 KiB | each limit |
-| **Presence leaks nothing** | only members of the topic (who passed `authorize`) receive its presence; `meta` is minimal: initials or a display name, **never an email** unless the spec says so | no `@` in presence frames |
+| **Presence leaks nothing** | only members of the topic (who passed `authorize`) receive its presence; `meta` is minimal: a display name the person chose (or its initials), else a neutral `Member <n>`; **never the email, nor initials or a name derived from it** (`ann.lee@…` → "AL" tells a room who's there) unless the spec says so | no `@` in presence frames; a user with no display name shows as `Member <n>` |
 | **Relays can't be hijacked** | `{conn, token}`: owner member + 256-bit token, constant-time comparison | wrong token, other member, unknown conn |
 | **Untrusted input stays data** | typed `In` enums (unknown events refused before the room), text rendered with `textContent` | `bad_event`; HTML delivered raw, rendered escaped |
 
@@ -322,7 +322,7 @@ pub async fn socket(State(s): State<AppState>, SessionAndUser(found): SessionAnd
 // socket_sse, socket_poll_open, socket_poll, socket_send: the same, calling sse_open / poll_open / poll_get / relay_post.
 
 pub fn member_for(u: &User, session: Option<i64>) -> Member {
-    Member { key: u.id.to_string(), meta: json!({ "initials": user::initials(&u.email) }), session }
+    Member { key: u.id.to_string(), meta: json!({ "initials": user::initials(u) }) /* from u.name, else "M<n>"; never from u.email */, session }
 }
 
 /// Topics: `book:{id}` (presence + discussion) and `user:{id}` (private notices).
