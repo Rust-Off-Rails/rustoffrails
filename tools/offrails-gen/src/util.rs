@@ -166,6 +166,13 @@ pub fn write_text(path: &Path, text: &str) -> Result<()> {
     ctx(fs::write(path, text), "writing", path)
 }
 
+pub fn write_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        ctx(fs::create_dir_all(parent), "creating", parent)?;
+    }
+    ctx(fs::write(path, bytes), "writing", path)
+}
+
 pub fn read_text(path: &Path) -> Result<String> {
     ctx(fs::read_to_string(path), "reading", path)
 }

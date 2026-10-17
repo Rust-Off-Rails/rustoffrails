@@ -3,7 +3,7 @@
 //!
 //! Syntax: `name:type`, then any of `?` (nullable; on the name or the type; `:optional` is the
 //! same without a shell glob character), `!` or `:unique`, `:index`. `references` names its model (`author:references{users}`, default: the field name).
-//! `decimal{precision,scale}` (default 10,2). Examples: `title:string`, `slug:string:unique`,
+//! `decimal{precision.scale}` (or `{p,s}` quoted; default 10.2). Examples: `title:string`, `slug:string:unique`,
 //! `published_at:datetime?`, `price:money`, `book:references`, `weight:decimal{8,3}?`.
 
 use super::names::{self, Names};
@@ -37,7 +37,7 @@ pub struct Field {
     pub index: bool,
 }
 
-pub const TYPES: &str = "string, text, integer, bigint, boolean, decimal{p,s}, money, datetime, date, uuid, json, references{model}";
+pub const TYPES: &str = "string, text, integer, bigint, boolean, decimal{p.s}, money, datetime, date, uuid, json, references{model}";
 
 impl Field {
     pub fn parse(raw: &str) -> Result<Field> {
@@ -111,7 +111,8 @@ impl Field {
                 let (precision, scale) = match &arg {
                     None => (10, 2),
                     Some(a) => {
-                        let nums: Vec<&str> = a.split(',').map(str::trim).collect();
+                        // `{8,3}` or the shell-safe `{8.3}` (a shell brace-expands `{8,3}` unquoted).
+                        let nums: Vec<&str> = a.split([',', '.']).map(str::trim).collect();
                         match nums.as_slice() {
                             [p, s] => match (p.parse::<u32>(), s.parse::<u32>()) {
                                 (Ok(p), Ok(s)) if (1..=28).contains(&p) && s <= p => (p, s),
@@ -342,6 +343,7 @@ mod tests {
         let f = Field::parse("price:money").unwrap();
         assert_eq!((f.column(), f.param()), ("price_cents".into(), "price".into()));
         assert_eq!(f.migration_col("Items"), "big_integer(Items::PriceCents)");
+        assert_eq!(Field::parse("w:decimal{8.3}").unwrap().migration_col("I"), "decimal_len(I::W, 8, 3)");
         let f = Field::parse("weight:decimal{8,3}?").unwrap();
         assert_eq!(f.migration_col("Items"), "decimal_len_null(Items::Weight, 8, 3)");
         let f = Field::parse("author:references{users}").unwrap();

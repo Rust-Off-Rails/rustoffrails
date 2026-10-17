@@ -1,0 +1,103 @@
+# cargo offrails generate page about
+# options: {"nav": "no", "path": "/about"}
+
+=== shared src/controllers/pages.rs
+//! Static pages (`generate page`): About, Pricing, Terms… Public, no data.
+
+use axum::response::{IntoResponse, Response};
+
+use crate::error::AppError;
+use crate::views::{self, Ctx, pages};
+
+// samples: page actions
+
+=== wire src/controllers/mod.rs @ samples: controller mods (for src/controllers/pages.rs)
+pub mod pages;
+
+=== wire src/controllers/pages.rs @ samples: page actions
+/// `GET /about` (`cargo offrails generate page about`)
+#[tracing::instrument(skip_all)]
+pub async fn about(ctx: Ctx) -> Result<Response, AppError> {
+    // APP: a description for search results and link previews.
+    Ok(views::render(pages::PagesAbout {
+        ctx: ctx.titled("About"),
+    })?
+    .into_response())
+}
+
+
+=== shared src/views/pages.rs
+//! Page structs for the static pages (`generate page`).
+
+use askama::Template;
+
+use super::Ctx;
+// The layout links with `paths::`.
+use crate::routes::paths;
+
+// samples: page views
+
+=== wire src/views/mod.rs @ samples: view mods (for src/views/pages.rs)
+pub mod pages;
+
+=== wire src/views/pages.rs @ samples: page views
+/// `GET /about`
+#[derive(Template)]
+#[template(path = "pages/about.html")]
+pub struct PagesAbout {
+    pub ctx: Ctx,
+}
+
+
+=== create templates/pages/about.html
+{% extends "layouts/application.html" %}
+{% block content %}
+<article class="py-6">
+  <h1 class="text-3xl font-semibold tracking-tight">About</h1>
+  <p class="mt-4 text-gray-700 dark:text-gray-300">APP: the about page's words (templates/pages/about.html).</p>
+</article>
+{% endblock %}
+
+=== wire src/routes.rs @ samples: routes
+// About (cargo offrails generate page about)
+app = app.route("/about", get(crate::controllers::pages::about));
+
+
+=== wire src/routes.rs @ samples: paths
+pub fn about() -> String {
+    "/about".into()
+}
+
+=== wire src/routes.rs @ samples: routes table
+("GET",  "/about", "pages::about", Access::Public),
+
+=== wire src/controllers/meta.rs @ samples: sitemap paths
+paths::about(),
+
+=== shared tests/app/pages_test.rs
+//! The static pages (`generate page`): each renders, publicly, and is in the sitemap.
+
+use offrails_app::routes::paths;
+
+use crate::support::TestApp;
+
+// samples: page tests
+
+=== wire tests/app/main.rs @ samples: test mods (for tests/app/pages_test.rs)
+mod pages_test;
+
+=== wire tests/app/pages_test.rs @ samples: page tests
+#[tokio::test]
+async fn about_renders_publicly_and_is_in_the_sitemap() {
+    let app = TestApp::new().await;
+    app.get(&paths::about())
+        .await
+        .assert_ok()
+        .assert_contains("<title>About · ")
+        .assert_text("About");
+    app.get("/sitemap.xml")
+        .await
+        .assert_ok()
+        .assert_contains(&format!("{}</loc>", paths::about()));
+}
+
