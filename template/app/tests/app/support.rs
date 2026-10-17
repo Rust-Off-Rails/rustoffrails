@@ -385,6 +385,52 @@ impl TestApp {
         self.send(Method::POST, path, headers, Some(body)).await
     }
 
+    /// Any method with an empty form body: the route sweeps request every `ROUTES` row with its
+    /// own method (an API's `PATCH` and `DELETE` too).
+    pub async fn request_method(&self, method: &str, path: &str) -> TestResponse {
+        let method = Method::from_bytes(method.as_bytes()).expect("an HTTP method");
+        self.send(method, path, &[], Some(String::new())).await
+    }
+
+    /// A JSON request (`body` serialized, `content-type: application/json`) with extra headers,
+    /// e.g. `("authorization", "Bearer …")`. No cookies and no fetch metadata: an API client.
+    pub async fn send_json(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&serde_json::Value>,
+        headers: &[(&str, &str)],
+    ) -> TestResponse {
+        let method = Method::from_bytes(method.as_bytes()).expect("an HTTP method");
+        let mut builder = Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::ACCEPT, "application/json");
+        for (k, v) in headers {
+            builder = builder.header(*k, *v);
+        }
+        let request = match body {
+            Some(json) => builder
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json.to_string())),
+            None => builder.body(Body::empty()),
+        }
+        .expect("request");
+        let response = self
+            .router
+            .clone()
+            .oneshot(request)
+            .await
+            .expect("infallible");
+        let (parts, body) = response.into_parts();
+        let bytes = body.collect().await.expect("body").to_bytes();
+        TestResponse {
+            status: parts.status,
+            headers: parts.headers,
+            body: String::from_utf8_lossy(&bytes).into_owned(),
+        }
+    }
+
     /// Status and headers without reading the body (for endless responses such as SSE).
     pub async fn request_head(
         &self,

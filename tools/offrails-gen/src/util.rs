@@ -176,6 +176,11 @@ pub fn today_utc() -> String {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
+    date_of(secs)
+}
+
+/// The UTC date (YYYY-MM-DD) of a Unix time.
+pub fn date_of(secs: u64) -> String {
     let days = (secs / 86_400) as i64;
     // Howard Hinnant's civil_from_days.
     let z = days + 719_468;

@@ -257,7 +257,7 @@ fn trim(s: &str) -> &str {
     s.trim_matches([' ', '\t', '\r'])
 }
 
-fn is_anchor_line(line: &str, anchor: &str) -> bool {
+pub fn is_anchor_line(line: &str, anchor: &str) -> bool {
     // The anchor name, then the end of the line or the comment's closer (`#}`, `*/`, `-->`):
     // `samples: routes` is not `samples: routes table`.
     let needle = format!("samples: {anchor}");
@@ -302,7 +302,7 @@ fn split_trailing_anchor(line: &str, anchor: &str) -> Option<String> {
 }
 
 /// Apply `split_trailing_anchor` to every line of a file; `None` when nothing needed it.
-fn heal_anchor(file: &str, anchor: &str) -> Option<String> {
+pub fn heal_anchor(file: &str, anchor: &str) -> Option<String> {
     let nl = util::newline_of(file);
     let mut changed = false;
     let mut out = String::with_capacity(file.len() + 8);
@@ -623,6 +623,10 @@ pub fn add(fw: &Path, app: &Path, targets: &[String], opts: &AddOptions) -> Resu
     if opts.dry_run {
         return Ok(order);
     }
+    // docs/routes.md follows ROUTES (offrails-check [routes]) without compiling the app.
+    if crate::generate::routes_md::refresh(app)? {
+        println!("  routes docs/routes.md (from ROUTES)");
+    }
     if opts.fmt && util::have("cargo") {
         // Wires are inserted unformatted on purpose (FORMAT.md): rustfmt sorts `mod` lines.
         if util::run(app, "cargo", &["fmt", "--all"]).is_err() {
@@ -640,7 +644,6 @@ pub fn add(fw: &Path, app: &Path, targets: &[String], opts: &AddOptions) -> Resu
         if env {
             println!("  compare .env with .env.example             # the part added settings");
         }
-        println!("  cargo run -q -- routes                     # refreshes docs/routes.md");
         println!(
             "  the Definition of Done on SQLite and Postgres (.offrails/workflow.md#definition-of-done)"
         );

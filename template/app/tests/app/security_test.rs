@@ -38,7 +38,7 @@ async fn request(app: &TestApp, method: &str, path: &str) -> StatusCode {
     match method {
         // WHY: headers only: a streaming route (SSE) never ends its body.
         "GET" => app.request_head(path, &[]).await.0,
-        _ => app.post_form(path, &[]).await.status,
+        other => app.request_method(other, path).await.status,
     }
 }
 
