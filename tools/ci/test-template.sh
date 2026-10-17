@@ -137,7 +137,8 @@ destroy_all() {
     # shellcheck disable=SC2086
     step "destroy $kind $gname" cargo offrails destroy $kind $gname || exit 1
   done || return 1
-  step "destroy left the app as it was" sh -c 'git diff --quiet baseline -- . && test -z "$(git status --porcelain --untracked-files=all)" || { git status --short; git diff --stat baseline; exit 1; }'
+  # shellcheck disable=SC2016 # expanded by the inner shell
+  step "destroy left the app as it was" sh -c 'test -z "$(git diff --name-only baseline)" && test -z "$(git ls-files --others --exclude-standard)" || { git diff --stat baseline; git ls-files --others --exclude-standard; exit 1; }'
 }
 
 fresh() {
