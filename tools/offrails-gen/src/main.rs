@@ -15,8 +15,10 @@
 //! Exit status: 0 done, 1 refused or failed (nothing half-applied), 2 usage.
 
 mod generate;
+mod merge;
 mod newapp;
 mod parts;
+mod update_part;
 mod util;
 mod verify;
 
@@ -34,7 +36,9 @@ const USAGE: &str = "usage:
                    `generate --help` lists each kind, the field types and the options
   offrails-gen destroy <kind> <name> [--dry-run] [--app <dir>]   (alias: d) undo a generate (unchanged files only)
   offrails-gen add <part>… [--app <dir>] [--dry-run] [--force] [--offline] [--no-fmt]   (alias: add-part)
-  offrails-gen update-part <part>… [--app <dir>] [--dry-run]   merge a newer part version into the app (3-way)
+  offrails-gen update-part <part>… --framework <newer> [--base <fw>] [--app <dir>] [--dry-run] [--no-fmt]
+                   merge a newer framework's part into the app: 3-way against the vendored .offrails/ (the
+                   installed version), clean hunks applied, conflicts marked, app changes never overwritten
   offrails-gen parts [--app <dir>]   (alias: list-parts) every part, installed or not, and what it adds
   offrails-gen vendor --framework <newer framework> [--app <dir>]   re-copy a framework into <app>/.offrails/
   offrails-gen verify [--fast|--full] [--no-postgres] [--test-threads <n>] [--app <dir>]
@@ -47,7 +51,8 @@ struct Args {
     flags: Vec<(String, Option<String>)>,
 }
 
-const VALUE_FLAGS: [&str; 11] = [
+const VALUE_FLAGS: [&str; 12] = [
+    "--base",
     "--queue",
     "--every",
     "--path",
@@ -267,6 +272,37 @@ fn real_main() -> Result<()> {
                 },
             )
             .map(|_| ())
+        }
+        "update-part" | "update-parts" => {
+            args.reject_unknown(&["--app", "--dry-run", "--no-fmt", "--framework", "--base"])?;
+            if args.positional.is_empty() {
+                return Err(Fail::usage(format!("update-part needs a part name\n\n{USAGE}")));
+            }
+            let app = args.app()?;
+            let Some(newer) = args.value("--framework") else {
+                return Err(Fail::usage(
+                    "update-part needs --framework <the newer framework> (the plugin root, ~/.offrails/<version>, or a checkout); the base is the app's .offrails/",
+                ));
+            };
+            let new_fw = util::framework_root(Some(&newer))?;
+            let base = match args.value("--base") {
+                Some(b) => util::framework_root(Some(&b))?,
+                None => util::framework_root(Some(&app.join(".offrails").to_string_lossy()))?,
+            };
+            let mut names: Vec<String> = Vec::new();
+            for p in &args.positional {
+                names.extend(split_list(Some(p.clone())));
+            }
+            update_part::run(
+                &base,
+                &new_fw,
+                &app,
+                &names,
+                &update_part::Options {
+                    dry_run: args.flag("--dry-run"),
+                    fmt: !args.flag("--no-fmt"),
+                },
+            )
         }
         "list-parts" | "parts" => {
             args.reject_unknown(&["--app", "--framework"])?;

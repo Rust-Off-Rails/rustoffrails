@@ -243,7 +243,7 @@ pub fn resolve(
     Ok(order)
 }
 
-fn rename_crate(text: &str, krate: &str) -> String {
+pub fn rename_crate(text: &str, krate: &str) -> String {
     let mut s = text.to_owned();
     for host in HOST_CRATES {
         if host != krate {

@@ -50,7 +50,7 @@ kinds:
   channel <name>                       a realtime topic (realtime part): authorization, broadcast, test
   test <request|model|job> <name>      an empty test file, registered
 
-field types: string text integer bigint boolean decimal{p,s} money datetime date uuid json references{model}
+field types: string text integer bigint boolean decimal{p.s} money datetime date uuid json references{model}
   modifiers: name:type?  (nullable; or name:type:optional, which zsh won't glob)   :unique   :index
   e.g. slug:string:unique 'published_at:datetime?' price:money book:references
 
