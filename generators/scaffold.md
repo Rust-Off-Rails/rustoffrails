@@ -63,7 +63,7 @@ Field names that imply ownership (`owner`, `user`, `author` + `references`) are 
    - Tests: the REST request matrix (`tests/app/<plural>_test.rs` with `post_json`/`patch_json`/`delete`), insta contract snapshots of `<Plural>Page` and `<Model>Body` (`api_contract_test.rs`), and the GraphQL rows (`graphql_test.rs`: anonymous, another user's record, read-only token, payload `errors`, N+1 guard per association, REST and GraphQL agreeing on a record).
 10. **Nav:** add a link in the layout if the resource is top-level.
 11. **Seeds:** add 3–5 realistic records to `tasks/seed.rs`: find-or-create each one by a natural key (email, slug, name), inside the seed's one `kernel::db::begin` transaction. Never gate the whole seed on "no rows yet" ([cli](../cli.md#seeds)).
-12. **Definition of Done**, then the real-browser smoke: create → edit → delete, Back after the delete (expect 404), and the console clean ([test-standards §9](../guides/test-standards.md#9-real-browser-smoke)).
+12. **`cargo offrails verify`** (the fast Definition of Done; `--full` once, when the last slice is done), then the real-browser smoke: create → edit → delete, Back after the delete (expect 404), and the console clean ([test-standards §9](../guides/test-standards.md#9-real-browser-smoke)).
 
 ## Resource
 
