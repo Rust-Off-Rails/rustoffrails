@@ -122,6 +122,18 @@ A new app is a copy of [`template/app/`](template/README.md): a complete, compil
 
 The generators (`offrails-gen`: `new`, `add-part`, `list-parts`, `generate`, `destroy`, `snippets`) are a small standard-library Rust tool, so they work the same on Linux, macOS and Windows. Features start from a **snippet** (small tested code to copy: a feed, slugs, Markdown, a pager, a theme toggle; [template/snippets](template/snippets/README.md)) or a **generator** (`cargo offrails g resource posts title:string`), both optional, both the app's once written: small files per feature, one marked line per shared spot. Pages are built from a component kit (Askama macros, light and dark, branded from one `brand.toml`) in five layouts, and `cargo offrails prove` screenshots and checks every page and writes `docs/proof/PROOF.md`, tying each acceptance criterion to its passing tests and pages.
 
+### Field tests: real apps, ported by agents
+
+We test the framework by having agents port well-loved open-source apps to it. Each port puts the docs, the template and the parts up against a product with years of real-world design behind it, and every rough edge an agent hits goes back into the framework.
+
+- **fizzyer**: a Rust port of [Fizzy](https://github.com/basecamp/fizzy), 37signals' kanban-style tracker. Repository coming soon.
+- **A FreeScout port**: a Rust port of [FreeScout](https://github.com/freescout-help-desk/freescout), the open-source help desk. In progress; repository coming soon.
+- **uptime-offrails**: a Rust port of [Uptime Kuma](https://github.com/louislam/uptime-kuma), the self-hosted uptime monitor. Repository coming soon.
+
+The ports are built by different agents on purpose: GPT-6 Luna (high), Claude Sonnet 5.5 (high and medium), Meta's Muse Wonder 1, and smaller open models such as GLM 5.3 Flash through opencode. The goal is a framework that makes smaller, cheaper agents productive too, not only the biggest ones.
+
+They're for education and testing first. We also plan to run them ourselves, mostly to save server resources. Each will be open source under its original project's license, and contributions are welcome. They're independent ports, not affiliated with or endorsed by the original projects; credit for each product's design goes to its authors.
+
 ## Repository layout
 
 ```
