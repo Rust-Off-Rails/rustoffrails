@@ -68,7 +68,7 @@ V=0.3.0   # see https://github.com/Rust-Off-Rails/rustoffrails/releases
 curl -fsSLO https://github.com/Rust-Off-Rails/rustoffrails/releases/download/v$V/rustoffrails.tar.gz
 curl -fsSLO https://github.com/Rust-Off-Rails/rustoffrails/releases/download/v$V/checksums.txt
 shasum -a 256 -c checksums.txt --ignore-missing
-mkdir -p ~/.offrails && tar -xzf rustoffrails.tar.gz -C ~/.offrails && mv ~/.offrails/rustoffrails ~/.offrails/$V && ln -sfn $V ~/.offrails/current
+mkdir -p ~/.offrails && tar -xmzf rustoffrails.tar.gz -C ~/.offrails && mv ~/.offrails/rustoffrails ~/.offrails/$V && ln -sfn $V ~/.offrails/current
 
 # 3. Claude Code plugin (or skip and point any agent at ~/.offrails/current/AGENTS.md)
 claude plugin marketplace add Rust-Off-Rails/rustoffrails

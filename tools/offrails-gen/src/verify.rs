@@ -109,7 +109,8 @@ pub fn run(app: &Path, opts: &VerifyOptions) -> Result<()> {
     } else {
         Err("--no-postgres".to_owned())
     };
-    let (steps, skipped) = plan(app, opts, &pg, cpus);
+    let (mut steps, skipped) = plan(app, opts, &pg, cpus);
+    let toolchain = scope_coverage_toolchain(&mut steps);
 
     println!(
         "verify --{} ({}, {cpus} CPUs, Postgres: {})",
@@ -120,6 +121,11 @@ pub fn run(app: &Path, opts: &VerifyOptions) -> Result<()> {
             Err(why) => format!("skipped: {why}"),
         }
     );
+    if let Some(t) = &toolchain {
+        println!(
+            "  coverage runs on the {t} toolchain; fmt, clippy and the other steps on the default one"
+        );
+    }
     // The suites' environments, for re-running their failures alone afterwards.
     let suites: Vec<Suite> = steps
         .iter()
@@ -170,6 +176,31 @@ pub fn run(app: &Path, opts: &VerifyOptions) -> Result<()> {
     } else {
         Err(Fail::new(format!("verify: {failed} step(s) failed")))
     }
+}
+
+/// The coverage step's name (its toolchain may differ from the others').
+const COVERAGE: &str = "tests (SQLite) + coverage";
+
+/// cargo-llvm-cov often needs a toolchain with `llvm-tools` (`RUSTUP_TOOLCHAIN=nightly`, or
+/// `OFFRAILS_COVERAGE_TOOLCHAIN`), and that toolchain often has no rustfmt or clippy: it applies
+/// to the coverage step only, and every other step runs without `RUSTUP_TOOLCHAIN` (the default
+/// toolchain). Returns the toolchain when there is one and a coverage step to give it to.
+fn scope_coverage_toolchain(steps: &mut [Step]) -> Option<String> {
+    let toolchain = ["OFFRAILS_COVERAGE_TOOLCHAIN", "RUSTUP_TOOLCHAIN"]
+        .iter()
+        .find_map(|k| std::env::var(k).ok().filter(|v| !v.trim().is_empty()))?;
+    give_toolchain_to_coverage(steps, toolchain)
+}
+
+fn give_toolchain_to_coverage(steps: &mut [Step], toolchain: String) -> Option<String> {
+    if !steps.iter().any(|s| s.name == COVERAGE) {
+        return None;
+    }
+    for s in steps.iter_mut() {
+        let value = (s.name == COVERAGE).then(|| toolchain.clone());
+        s.env.push(("RUSTUP_TOOLCHAIN".to_owned(), value));
+    }
+    Some(toolchain)
 }
 
 /// The steps for this app, and the ones skipped up front (with why).
@@ -242,7 +273,7 @@ fn plan(
     if opts.full && have_cargo("llvm-cov") {
         // The SQLite suite, instrumented: one run proves the tests and the coverage gate.
         let mut coverage = Step::new(
-            "tests (SQLite) + coverage",
+            COVERAGE,
             "cargo",
             &[
                 "llvm-cov",
@@ -849,6 +880,36 @@ fn redact(url: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_coverage_toolchain_is_for_the_coverage_step_only() {
+        let mut steps = vec![
+            Step::new("fmt", "cargo", &["fmt"]),
+            Step::new(COVERAGE, "cargo", &["llvm-cov"]),
+        ];
+        assert_eq!(
+            give_toolchain_to_coverage(&mut steps, "nightly".into()).as_deref(),
+            Some("nightly")
+        );
+        assert_eq!(
+            steps[0].env,
+            vec![("RUSTUP_TOOLCHAIN".to_owned(), None)],
+            "fmt runs on the default toolchain"
+        );
+        assert_eq!(
+            steps[1].env,
+            vec![("RUSTUP_TOOLCHAIN".to_owned(), Some("nightly".to_owned()))]
+        );
+        let mut fast = vec![Step::new("fmt", "cargo", &["fmt"])];
+        assert_eq!(
+            give_toolchain_to_coverage(&mut fast, "nightly".into()),
+            None
+        );
+        assert!(
+            fast[0].env.is_empty(),
+            "no coverage step: the environment is left alone"
+        );
+    }
     use super::*;
 
     #[test]

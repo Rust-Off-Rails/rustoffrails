@@ -282,6 +282,15 @@ else
   printf 'ok   classes: short lists, plain links, silenced lines and the kit itself are not flagged\n'
 fi
 
+# hx-trigger filters need eval (allowEval: false): a warning.
+d=$(make_app htmx-filter); mkdir -p "$d/templates/posts"
+cat > "$d/templates/posts/search.html" <<'EOF2'
+<input name="q" hx-get="/posts" hx-trigger="keyup changed delay:300ms">
+<input name="r" hx-get="/posts" hx-trigger="keyup[key=='Enter']">
+EOF2
+expect "an hx-trigger filter only warns" "$d" 0 "0 error(s)" \
+  "WARN [htmx] templates/posts/search.html:2: an hx-trigger filter" "1 warning(s)"
+
 echo
 if [ "$failures" = 0 ]; then
   echo "offrails-check: all fixture cases behave"

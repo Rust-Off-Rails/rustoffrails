@@ -19,7 +19,8 @@
 //   It fails on an element that is dead after the boosted link, on a script or stylesheet the page
 //   loads in its own <head> (a boosted link never loads it), and on any console error, uncaught
 //   exception or CSP violation on either path.
-// With a password sign-in (GET /session/new and POST /session/password in docs/routes.md) it runs
+// With a password sign-in (GET /session/new, and a POST /session/password, /session, /login… route
+// in docs/routes.md, or SMOKE_SIGNIN_PATH; the form found on the sign-in page is submitted) it runs
 // every page twice: signed out, then signed in as the development demo account (`cargo run -- task
 // auth_demo`; SMOKE_EMAIL and SMOKE_PASSWORD override it).
 //
@@ -39,12 +40,13 @@
 // paths; a trailing * matches a prefix; default /dev/lab*: the load lab is slow and fails on
 // purpose), SMOKE_ONLY (the same syntax: only these), SMOKE_PATHS (comma-separated pages to add,
 // for routes with parameters: /posts/1,/posts/1/edit), SMOKE_EMAIL, SMOKE_PASSWORD, SMOKE_LOGIN
-// (default /session/new), SMOKE_IGNORE (a regular expression of console messages to allow),
+// (default /session/new), SMOKE_SIGNIN_PATH (the sign-in form's POST route when it isn't
+// /session/password, /session, /sessions, /login, /sign_in or /users/sign_in), SMOKE_IGNORE (a regular expression of console messages to allow),
 // HEADED=1 (a visible window). Exit status: 0 green, 1 a failure, 2 usage, 77 no browser.
 import fs from "node:fs";
 import path from "node:path";
 
-import { Tab, launch, requireChrome, sleep } from "./cdp.mjs";
+import { Tab, launch, requireChrome, signInPost, sleep } from "./cdp.mjs";
 
 const BASE = (process.env.BASE ?? "").replace(/\/$/, "");
 const ROUTES = process.env.ROUTES ?? path.join("docs", "routes.md");
@@ -373,7 +375,7 @@ async function main() {
     (p) => !/[{}:*]/.test(p) && !matches(skip, p) && (only.length === 0 || matches(only, p)),
   );
   for (const p of patterns(process.env.SMOKE_PATHS)) if (!paths.includes(p)) paths.push(p);
-  const passwordSignIn = all.some((r) => r.method === "GET" && r.path === LOGIN) && all.some((r) => r.method === "POST" && r.path === "/session/password");
+  const passwordSignIn = all.some((r) => r.method === "GET" && r.path === LOGIN) && signInPost(all) !== null;
 
   let code = 0;
   let close = null;
@@ -384,7 +386,7 @@ async function main() {
     console.log(`smoke-boosted: ${launched.version.product} against ${BASE}, ${paths.length} GET routes without parameters`);
     let pages = await pass(cdp, "signed out", paths);
     if (passwordSignIn) pages += (await pass(cdp, "signed in", paths, { login: true })) ?? 0;
-    else if (all.some((r) => r.path === LOGIN)) note(`signed-in pages: no password sign-in (POST /session/password) to sign in with`);
+    else if (all.some((r) => r.path === LOGIN)) note(`signed-in pages: no password sign-in (a POST /session/password, /session… route, or SMOKE_SIGNIN_PATH) to sign in with`);
     console.log(`\nsmoke-boosted: ${pages} page visits, ${failures} failure(s) in ${((Date.now() - started) / 1000).toFixed(1)} s`);
     code = failures ? 1 : 0;
   } catch (e) {

@@ -1,4 +1,4 @@
-// Browser smoke for the kernel UIs. Arrives from the app the way a person does (app nav → /dev),
+// Browser smoke for the kernel UIs. Opens /dev directly (an app's home need not link to it),
 // then mailbox → open message → Clear all → Back/Forward, and jobs → delete → Back. HTTP tests
 // can't see boosted navigation, <head> swaps, the back/forward cache or CSP violations; this can.
 // Run through run.sh. Seeds via the dev-only buttons (/dev/mailbox/test, /dev/jobs/test), so it
@@ -18,30 +18,30 @@ try {
     page.evaluate(() => ({
       path: location.pathname,
       styled: [...document.styleSheets].some((s) => (s.href || "").includes("/kernel/admin.css")),
-      rows: document.querySelectorAll("#mail-list li:not(.new-mail)").length,
+      rows: document.querySelectorAll("#mbx-list li.mbx-item").length,
+      flash: document.querySelector(".flash")?.textContent.trim() ?? "",
       text: document.body.innerText,
     }));
 
-  // 1. From an app page into /dev (the app layout boosts links; kernel links must not be boosted).
-  await page.goto(`${BASE}/`, { waitUntil: "load" });
-  await click('a[href="/dev"]');
+  // 1. /dev, opened directly: kernel pages are not boosted, so a full load is how a link gets there.
+  await page.goto(`${BASE}/dev`, { waitUntil: "load" });
   let s = await state();
-  check(s.path === "/dev" && s.styled, "app nav → /dev is styled without a hard refresh");
+  check(s.path === "/dev" && s.styled, "/dev is styled");
 
-  // 2. Seed three emails with the dev-only button, then open the mailbox. The button lands on the
-  // list or on the message it sent (dev-mailbox 0.7.2+), which may not carry the button again.
+  // 2. Seed three emails with the dev-only button (on /dev, and on the mailbox it lands in): each
+  // lands on the message it sent, /dev/mailbox/<id>, with the flash, beside the list.
   const seed = 'form[action="/dev/mailbox/test"] button';
   for (let i = 0; i < 3; i++) {
-    if (!(await page.$(seed))) await page.goto(`${BASE}/dev`, { waitUntil: "load" });
+    if (!(await page.$(seed))) await page.goto(`${BASE}/dev/mailbox`, { waitUntil: "load" });
     await click(seed);
     s = await state();
-    check(/^\/dev\/mailbox(\/\d+)?$/.test(s.path) && s.styled, `the test-email button lands in the mailbox (${s.path})`);
+    check(/^\/dev\/mailbox\/\d+$/.test(s.path) && s.styled && s.flash === "Sent a test email to your mailbox.",
+      `the test-email button lands on its message with the flash (${s.path}: "${s.flash}")`);
   }
-  if (s.path !== "/dev/mailbox") await page.goto(`${BASE}/dev/mailbox`, { waitUntil: "load" });
-  s = await state();
-  check(s.path === "/dev/mailbox" && s.styled && s.rows >= 3, `mailbox lists the seeded mail (${s.rows} rows)`);
+  check(s.rows >= 3, `the mailbox lists the seeded mail (${s.rows} rows)`);
 
-  await click("#mail-list li:not(.new-mail) a");
+  await page.goto(`${BASE}/dev/mailbox`, { waitUntil: "load" });
+  await click("#mbx-list li.mbx-item a");
   s = await state();
   check(/^\/dev\/mailbox\/\d+$/.test(s.path) && s.styled, "opening a message stays styled");
   await page.waitForSelector("iframe[sandbox]");

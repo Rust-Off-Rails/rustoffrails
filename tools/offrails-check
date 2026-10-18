@@ -30,6 +30,9 @@ Checks a Rust off Rails app (default: the current directory):
                lists on <button>, <input>, <select>, <textarea> or a button-like <a>: use the
                component kit (warning only; CLASS_LIST_MAX, default 8; silence one line with
                {# offrails-check: classes ok #})
+  htmx         an hx-trigger with an event filter ([…]) in templates/: filters need eval, which the
+               template's htmx-config turns off for the CSP (allowEval: false), so it never fires
+               (warning only)
 
 Exit status: 0 when there are no errors (warnings allowed), 1 otherwise, 2 on bad usage.
 EOF
@@ -55,7 +58,22 @@ test_dirs() { for d in tests src web/src web/e2e e2e; do [ -d "$d" ] && printf '
 # ---- header ------------------------------------------------------------------------------------
 if [ ! -f AGENTS.md ]; then
   fail header "no AGENTS.md here: not a Rust off Rails app (run from the app root or pass APP_DIR)"
-  printf '\noffrails-check: %s error(s), %s warning(s)\n' "$errors" "$warnings"
+  # ---- htmx trigger filters (warning) -----------------------------------------------------------
+# hx-trigger="keyup[key=='Enter']": htmx evaluates the filter with Function(), which the layout's
+# htmx-config forbids (allowEval: false, for the CSP); the trigger then silently never fires.
+if [ -d templates ]; then
+  filter_hits=$(grep -rnE "hx-trigger=(\"[^\"]*\[|'[^']*\[)" templates 2>/dev/null || true)
+  if [ -n "$filter_hits" ]; then
+    printf '%s\n' "$filter_hits" | head -n 20 | while IFS= read -r h; do printf 'WARN [htmx] %s: an hx-trigger filter ([…]) never fires with allowEval: false\n' "$(printf '%s' "$h" | cut -d: -f1-2)"; done
+    warnings=$((warnings + $(printf '%s\n' "$filter_hits" | wc -l | tr -d ' ')))
+    printf '     fix: a plain event (hx-trigger="keyup changed delay:300ms"), or a delegated listener in static/app.js\n'
+    printf '          that calls htmx.trigger(el, "my-event") for hx-trigger="my-event" (.offrails/guides/frontend-htmx.md#gotchas-agents-get-wrong)\n'
+  elif find templates -name '*.html' 2>/dev/null | grep -q .; then
+    pass htmx "no hx-trigger filters (they need eval, which the CSP setup turns off)"
+  fi
+fi
+
+printf '\noffrails-check: %s error(s), %s warning(s)\n' "$errors" "$warnings"
   exit 1
 fi
 
@@ -411,6 +429,21 @@ if [ -d templates ]; then
     printf '          a deliberate one: end the line with {# offrails-check: classes ok #}\n'
   elif find templates -name '*.html' 2>/dev/null | grep -q .; then
     pass classes "no long ad-hoc class lists on buttons and inputs"
+  fi
+fi
+
+# ---- htmx trigger filters (warning) -----------------------------------------------------------
+# hx-trigger="keyup[key=='Enter']": htmx evaluates the filter with Function(), which the layout's
+# htmx-config forbids (allowEval: false, for the CSP); the trigger then silently never fires.
+if [ -d templates ]; then
+  filter_hits=$(grep -rnE "hx-trigger=(\"[^\"]*\[|'[^']*\[)" templates 2>/dev/null || true)
+  if [ -n "$filter_hits" ]; then
+    printf '%s\n' "$filter_hits" | head -n 20 | while IFS= read -r h; do printf 'WARN [htmx] %s: an hx-trigger filter ([…]) never fires with allowEval: false\n' "$(printf '%s' "$h" | cut -d: -f1-2)"; done
+    warnings=$((warnings + $(printf '%s\n' "$filter_hits" | wc -l | tr -d ' ')))
+    printf '     fix: a plain event (hx-trigger="keyup changed delay:300ms"), or a delegated listener in static/app.js\n'
+    printf '          that calls htmx.trigger(el, "my-event") for hx-trigger="my-event" (.offrails/guides/frontend-htmx.md#gotchas-agents-get-wrong)\n'
+  elif find templates -name '*.html' 2>/dev/null | grep -q .; then
+    pass htmx "no hx-trigger filters (they need eval, which the CSP setup turns off)"
   fi
 fi
 

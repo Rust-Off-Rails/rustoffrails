@@ -457,7 +457,10 @@ impl Ctx<'_> {
         let mut columns = vec![html::resource_inline("index column", &[("LABEL", "Name")])];
         let mut cells = html::resource("index label td", &[("S", s)]);
         for f in index_columns(&self.spec.fields) {
-            columns.push(html::resource_inline("index column", &[("LABEL", &f.human())]));
+            columns.push(html::resource_inline(
+                "index column",
+                &[("LABEL", &f.human())],
+            ));
             cells.push_str(&html::resource(
                 "index td",
                 &[("S", s), ("COL", &f.column())],

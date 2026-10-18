@@ -158,7 +158,7 @@ Every doc change goes under `## Unreleased` in `CHANGELOG.md` the moment it's ma
 
 Releasing:
 1. Rename `Unreleased` to the new version.
-2. Bump `VERSION` and `.claude-plugin/plugin.json` together, and commit.
+2. Bump `VERSION`, `.claude-plugin/plugin.json` and `tools/offrails-gen/Cargo.toml` (+ its `Cargo.lock`) together, and commit (`release.sh` refuses a mismatch: offrails-gen's version is in Cargo's fingerprint, so an app's cached `cargo offrails` binary is rebuilt for the new release).
 3. `tools/release/release.sh --dry-run` to check, then `tools/release/release.sh`. It builds a reproducible `rustoffrails.tar.gz` (the whole framework, skills and hooks included), `install.sh` and `checksums.txt`, tags `v<version>`, and creates the GitHub release with `gh`. `install.sh` downloads `releases/latest/download/…`, so a release is all it takes.
 4. Publish the release's `install.sh` at `https://rustoffrails.org/install.sh` (the website serves it).
 5. `claude plugin tag --push` for the plugin marketplace.

@@ -78,7 +78,7 @@ cargo offrails update-part <part>… --framework "$FW"
 **An app on 0.7.1 or older has no `update-part`** (its `cargo offrails` is the vendored, older offrails-gen): run the new release's instead, the same arguments plus `--app .`:
 
 ```sh
-cargo run -q --manifest-path "$FW/tools/offrails-gen/Cargo.toml" --target-dir target/offrails-gen-new -- \
+cargo run -q --manifest-path "$FW/tools/offrails-gen/Cargo.toml" --target-dir "target/offrails-gen-$(cat "$FW/VERSION")" -- \
   update-part <part>… --framework "$FW" --app . --dry-run    # then without --dry-run
 ```
 
@@ -90,8 +90,10 @@ Per file it is a three-way merge: the part as installed (`.offrails/`), the new 
 Replace `.offrails/` with the release, with the same exclusions as [`new.md` step 1](new.md#1-generate), and write `.offrails/VERSION` (framework version, then `vendored <date>`). On any OS:
 
 ```sh
-cargo run -q --manifest-path "$FW/tools/offrails-gen/Cargo.toml" --target-dir target/offrails-gen -- vendor --framework "$FW"
+cargo run -q --manifest-path "$FW/tools/offrails-gen/Cargo.toml" --target-dir "target/offrails-gen-$(cat "$FW/VERSION")" -- vendor --framework "$FW"
 ```
+
+The target directory is the release's own (`target/offrails-gen-0.7.3`), never `target/offrails-gen`: a release whose files are older than the binary cached there would reuse the previous release's offrails-gen (seen as `update-part`: "unknown command"). Delete the old ones when you're done (`rm -rf target/offrails-gen-*`).
 
 (Or `rsync -a --delete --exclude /.git --exclude /.claude-plugin --exclude /skills --exclude /hooks --exclude /evals --exclude /brand --exclude /.in_use --exclude /media "$FW"/ .offrails/` then `date -u +"vendored %F" >> .offrails/VERSION`.) An app from before 0.7.1 also gets the `cargo offrails` alias: copy `.offrails/template/app/.cargo/config.toml`'s `[alias]` into the app's `.cargo/config.toml`, and `.gitattributes` from the same place.
 

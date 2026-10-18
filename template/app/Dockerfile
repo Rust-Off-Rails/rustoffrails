@@ -10,6 +10,9 @@ WORKDIR /app
 # compiles only the app. (A `--mount=type=cache` target is not in that cache: every CI run
 # compiled every dependency again.)
 COPY Cargo.toml Cargo.lock ./
+# The build settings (.cargo/config.toml: rustflags, profiles) too: without them this layer and the
+# final build use different flags, and every dependency compiles twice.
+COPY .cargo .cargo
 COPY migration/Cargo.toml migration/
 RUN mkdir -p src migration/src \
     && echo 'fn main() {}' > src/main.rs && touch src/lib.rs migration/src/lib.rs \

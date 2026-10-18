@@ -268,3 +268,16 @@ export class Tab {
     return { png: Buffer.from(shot.data, "base64"), cut: size.height > maxHeight };
   }
 }
+
+/**
+ * The POST route a password sign-in form submits to, from docs/routes.md's rows ({ method, path }):
+ * SMOKE_SIGNIN_PATH when set, else the first of the usual ones the app has (/session/password from
+ * the auth-password part, /session, /sessions, /login, /sign_in, /users/sign_in), else null. The
+ * smokes then sign in through the form they find on the sign-in page (SMOKE_LOGIN), whatever its
+ * action, so this only decides whether to try.
+ */
+export function signInPost(routes) {
+  if (process.env.SMOKE_SIGNIN_PATH) return process.env.SMOKE_SIGNIN_PATH;
+  const usual = ["/session/password", "/session", "/sessions", "/login", "/sign_in", "/users/sign_in"];
+  return usual.find((p) => routes.some((r) => r.method === "POST" && r.path === p)) ?? null;
+}

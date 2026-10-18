@@ -244,7 +244,8 @@ else
   ok "SHA-256 verified ${D}$actual${N}"
 
   mkdir -p "$TMPD/x"
-  tar -xzf "$TMPD/$ASSET" -C "$TMPD/x" || die "could not unpack $ASSET"
+  # -m: the files get the time they were unpacked, newer than any build an app has cached
+  tar -xmzf "$TMPD/$ASSET" -C "$TMPD/x" || die "could not unpack $ASSET"
   top=$(find "$TMPD/x" -mindepth 1 -maxdepth 1 -type d | head -n1)
   if [ ! -f "$top/VERSION" ] || [ ! -f "$top/AGENTS.md" ]; then
     die "$ASSET doesn't look like a Rust off Rails release"

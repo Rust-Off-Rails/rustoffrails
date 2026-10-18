@@ -26,7 +26,8 @@
 // Chrome", exit 77.
 //
 // Environment: BASE (required), ROUTES (default docs/routes.md), SMOKE_PATHS, SMOKE_SKIP (default
-// /dev/lab*), SMOKE_EMAIL, SMOKE_PASSWORD, SMOKE_LOGIN (default /session/new), SMOKE_IGNORE (a
+// /dev/lab*), SMOKE_EMAIL, SMOKE_PASSWORD, SMOKE_LOGIN (default /session/new), SMOKE_SIGNIN_PATH
+// (the POST route the sign-in form submits to, when it isn't one of the usual ones), SMOKE_IGNORE (a
 // regular expression of console messages to allow), PROVE_OUT (default docs/proof),
 // PROVE_DIFF_THRESHOLD (percent of pixels, default 0.5), PROVE_AXE=0 (skip axe),
 // PROVE_MAX_HEIGHT (default 8000 px per screenshot), PROVE_LINK_SKIP (paths not to fetch),
@@ -38,7 +39,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import zlib from "node:zlib";
 
-import { Tab, launch, requireChrome, sleep } from "./cdp.mjs";
+import { Tab, launch, requireChrome, signInPost, sleep } from "./cdp.mjs";
 
 const AXE_VERSION = "4.13.0"; // the a11y smoke's pin (run.sh)
 const BASE = (process.env.BASE ?? "").replace(/\/$/, "");
@@ -603,7 +604,7 @@ async function main() {
     .filter((r) => r.method === "GET" && /[{}:*]/.test(r.path) && !patterns(process.env.SMOKE_PATHS).some((p) => p.split("/").length === r.path.split("/").length))
     .map((r) => ({ path: r.path, why: "has a parameter (add a concrete path to SMOKE_PATHS)" }));
   for (const p of all.filter((r) => r.method === "GET" && matches(skip, r.path))) notCovered.push({ path: p.path, why: "SMOKE_SKIP" });
-  const passwordSignIn = all.some((r) => r.method === "GET" && r.path === LOGIN) && all.some((r) => r.method === "POST" && r.path === "/session/password");
+  const passwordSignIn = all.some((r) => r.method === "GET" && r.path === LOGIN) && signInPost(all) !== null;
 
   fs.mkdirSync(path.join(OUT, "screens"), { recursive: true });
   fs.rmSync(path.join(OUT, "diff"), { recursive: true, force: true });

@@ -39,8 +39,14 @@ if [ "$WORKTREE" = 0 ] && [ -n "$(git status --porcelain)" ]; then
 fi
 plugin_version=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' .claude-plugin/plugin.json | head -n1)
 [ "$plugin_version" = "$VERSION" ] || { echo "release: VERSION ($VERSION) and plugin.json ($plugin_version) disagree" >&2; exit 1; }
+# offrails-gen's version is part of Cargo's fingerprint: a new one rebuilds an app's cached binary
+# (target/offrails-gen) even when a copy kept older file times.
+gen_version=$(sed -n 's/^version = "\([^"]*\)".*/\1/p' tools/offrails-gen/Cargo.toml | head -n1)
+[ "$gen_version" = "$VERSION" ] || { echo "release: VERSION ($VERSION) and tools/offrails-gen/Cargo.toml ($gen_version) disagree" >&2; exit 1; }
 
-# Deterministic tarball: sorted paths, fixed owner and mtime, gzip without a timestamp.
+# Deterministic tarball: sorted paths, fixed owner, every mtime the release commit's time (not a
+# fixed old date: Cargo compares file times with its last build, and files older than an app's
+# cached offrails-gen binary made it reuse the previous release's), gzip without a timestamp.
 stage=$(mktemp -d); trap 'rm -rf "$stage"' EXIT INT TERM
 mkdir -p "$stage/rustoffrails"
 if [ "$WORKTREE" = 1 ]; then
@@ -51,9 +57,10 @@ if [ "$WORKTREE" = 1 ]; then
 else
   git archive --format=tar HEAD | tar -xf - -C "$stage/rustoffrails"
 fi
-find "$stage" -exec touch -h -t 200001010000 {} + 2>/dev/null || find "$stage" -exec touch -t 200001010000 {} +
+stamp=$(TZ=UTC0 git log -1 --format=%cd --date=format-local:%Y%m%d%H%M.%S HEAD)
+TZ=UTC0 find "$stage" -exec touch -h -t "$stamp" {} + 2>/dev/null || TZ=UTC0 find "$stage" -exec touch -t "$stamp" {} +
 if tar --version 2>/dev/null | grep -q GNU; then
-  (cd "$stage" && tar --sort=name --owner=0 --group=0 --numeric-owner --mtime='2000-01-01' -cf - rustoffrails) | gzip -n >"$OUT/rustoffrails.tar.gz"
+  (cd "$stage" && tar --sort=name --owner=0 --group=0 --numeric-owner -cf - rustoffrails) | gzip -n >"$OUT/rustoffrails.tar.gz"
 else
   # bsdtar (macOS): no extended attributes or AppleDouble files, which GNU tar on Linux warns about
   (cd "$stage" && find rustoffrails -print | LC_ALL=C sort | COPYFILE_DISABLE=1 tar --uid 0 --gid 0 --no-xattrs --no-mac-metadata -cf - -n -T -) | gzip -n >"$OUT/rustoffrails.tar.gz"

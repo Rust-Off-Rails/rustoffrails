@@ -75,6 +75,7 @@ Never weaken without a decision entry **and** the human's OK: strict CSP (no `un
 25. **Ids are 64-bit:** `big_pk_auto` and `big_integer` for every `id`/`*_id`, `i64` in entities. A 32-bit id passes on SQLite and is a 500 on every Postgres write; `TestApp` reads `TEST_DATABASE_URL` so the suite runs there (`offrails-check` `[ids]`, `[postgres]`; [migrations](guides/migrations.md#ids-are-64-bit)).
 26. **`assert_text` escapes its argument like Askama** (`'` → `&#39;`), so it finds text that came through `{{ … }}`; a literal apostrophe typed in a template stays `'` and needs `assert_contains` ([testing](guides/testing.md#gotchas-agents-get-wrong)).
 27. **Spans, one rule:** `#[tracing::instrument(skip_all)]` on actions and public model/service fns; `level = "debug", skip_all` on helpers called per row or in a loop; never without `skip_all` ([errors](guides/errors-and-logging.md#spans)).
+28. **No `hx-trigger` filters** (`keyup[key=='Enter']`): they need eval, `allowEval:false` (the CSP) turns them into a trigger that silently never fires. A plain event, or a delegated listener in `static/app.js` calling `htmx.trigger` (`offrails-check` `[htmx]`; [frontend-htmx](guides/frontend-htmx.md#gotchas-agents-get-wrong)).
 
 ## Commands ([cli.md](cli.md))
 
