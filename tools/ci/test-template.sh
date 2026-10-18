@@ -294,7 +294,9 @@ GENS
       step "clippy after the merge" cargo clippy -q --all-targets -- -D warnings || return 1
       # Conflict: the app changed the same line.
       step "reset" sh -c 'git checkout -q . && git clean -qfd' || return 1
+      # shellcheck disable=SC2016 # literal backticks in a perl pattern, not an expansion
       step "app edit on the same line" perl -pi -e 's/^\/\/! `TestMailer`: one harmless/\/\/! `TestMailer` (app): one harmless/' src/mailers/test_mailer.rs || return 1
+      # shellcheck disable=SC2016 # $0 expands in the inner sh, by design
       step "update-part reports the conflict (exit 1)" sh -c '! cargo offrails update-part mailer --framework "$0"' "$newer" || return 1
       step "markers hold both sides" sh -c 'grep -q "^<<<<<<< app" src/mailers/test_mailer.rs && grep -q "(app): one harmless" src/mailers/test_mailer.rs && grep -q "(newer): one harmless" src/mailers/test_mailer.rs && grep -q "^>>>>>>> mailer" src/mailers/test_mailer.rs' || return 1
       ;;
