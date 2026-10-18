@@ -157,7 +157,11 @@ mod tests {
         let (a_ref, owned_ref) = (&a, &owned);
         assert!(same(a_ref, owned_ref) && !same("a", "b"));
         let id = 7_i64;
-        assert!(same(&id, "7") && !same(&id, ""), "a select's option values may be ids");
+        let id_ref = &id;
+        assert!(
+            same(id_ref, "7") && !same(id_ref, ""),
+            "a select's option values may be ids"
+        );
         assert_eq!(error_key("", "title"), "title");
         assert_eq!(error_key("book", "book_id"), "book");
         assert_eq!(error_key(&"", &"title"), "title");
