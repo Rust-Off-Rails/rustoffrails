@@ -2,7 +2,7 @@
 
 Each entry lists convention changes and what an existing app must do about them. `/offrails:upgrade` reads this file, so write the **App migration** notes as instructions for an agent.
 
-## Unreleased
+## 0.7.2 (2026-10-18)
 
 **Upgrading an app to 0.7.2, in order** (each step's Detect/Converge/Prove is in the entry it names below; [upgrade](generators/upgrade.md) is the whole procedure). `$FW` is the new framework.
 1. **Parts first, before re-vendoring:** `update-part` merges against the part as installed in `.offrails/`, so run it while `.offrails/` is still the old release: `cargo offrails update-part <each installed part> --framework "$FW" --dry-run`, then without `--dry-run`. Resolve any `<<<<<<<` markers, then `cargo fmt --all` and `cargo run -q -- db migrate`. (An app on 0.7.1 or older has no `update-part` yet: run the new release's, `cargo run -q --manifest-path "$FW/tools/offrails-gen/Cargo.toml" -- update-part <part>… --framework "$FW" --app .`.)
