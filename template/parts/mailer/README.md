@@ -53,7 +53,7 @@ By hand, in the app root:
 - **Cc, Bcc, Reply-To, attachments**: `Email::new(..).cc(..).bcc(..).reply_to(..).attach(Attachment::new(name, type, &bytes))`.
 - **Your brand**: `templates/mailers/layout.html` is the shell every HTML email extends. Inline styles only (clients ignore `<link>`); keep the dark-mode `<style>` block's class names in step with it.
 - **Try real delivery from development**: `MAILER=smtp SMTP_URL=smtp://localhost:1025` with a local catcher (Mailpit), or a provider's sandbox.
-- **Tune code detection** in the dev mailbox: the `WORDS` list in `kernel/mailbox.rs` (`// APP:`).
+- **Tune code detection** in the dev mailbox: the `WORDS` list and the `BEFORE`/`AFTER` window in `codes_in` (`kernel/mailbox.rs`, `// APP:`). A code counts only next to one of those words (or as a 6-digit line of its own); years and dates never do.
 
 ## Do not change
 

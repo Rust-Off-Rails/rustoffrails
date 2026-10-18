@@ -3,17 +3,28 @@
 
 use axum::http::{StatusCode, header};
 use chrono::{Duration, Utc};
-use offrails_host::models::{
-    auth_event::{self, Kind},
-    auth_throttle, password_credential, session, user, user_token,
+use offrails_host::{
+    config::Signup,
+    models::{
+        auth_event::{self, Kind},
+        auth_throttle, password_credential, session, user, user_token,
+    },
+    routes::paths,
+    tasks::auth_invite,
 };
 use sea_orm::EntityTrait;
 
-use crate::auth_core_test::{LogCapture, age_sessions};
+use crate::auth_core_test::{LogCapture, age_sessions, app_with_signup};
 use crate::factories::{self, PASSWORD};
 use crate::support::{TestApp, TestResponse};
 
 const NEW_PASSWORD: &str = "copper kettle lighthouse";
+
+/// Sign-up tests run with public sign-up on, whatever the app's `DEFAULT_SIGNUP`; the invite-only
+/// tests below run with it off.
+async fn open_app() -> TestApp {
+    app_with_signup(Signup::Open).await
+}
 
 async fn sign_in(app: &TestApp, email: &str, password: &str) -> TestResponse {
     app.post_form(
@@ -43,7 +54,7 @@ async fn sign_up(app: &TestApp, email: &str, password: &str) -> String {
 
 #[tokio::test]
 async fn signup_verifies_the_address_before_signing_in() {
-    let app = TestApp::new().await;
+    let app = open_app().await;
     let link = sign_up(&app, "ada@example.com", NEW_PASSWORD).await;
     assert!(!signed_in(&app), "no session before verification");
     let u = user::find_by_email(app.db(), "ada@example.com")
@@ -58,7 +69,7 @@ async fn signup_verifies_the_address_before_signing_in() {
         .assert_not_contains("name=\"password\"");
     app.post_form(&link, &[])
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::after_sign_in());
     assert!(signed_in(&app));
     assert!(user::find_self(app.db(), u.id).await.unwrap().is_verified());
     // The link worked once.
@@ -70,7 +81,7 @@ async fn signup_verifies_the_address_before_signing_in() {
 
 #[tokio::test]
 async fn unverified_accounts_cant_sign_in_and_get_a_fresh_link() {
-    let app = TestApp::new().await;
+    let app = open_app().await;
     sign_up(&app, "ada@example.com", NEW_PASSWORD).await;
     sign_in(&app, "ada@example.com", NEW_PASSWORD)
         .await
@@ -89,12 +100,12 @@ async fn unverified_accounts_cant_sign_in_and_get_a_fresh_link() {
         .assert_contains("autocomplete=\"current-password\"");
     app.post_form(&link, &[("password", NEW_PASSWORD)])
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::after_sign_in());
 }
 
 #[tokio::test]
 async fn verification_in_another_browser_needs_the_password() {
-    let app = TestApp::new().await;
+    let app = open_app().await;
     let link = sign_up(&app, "ada@example.com", NEW_PASSWORD).await;
     app.clear_cookies(); // another browser (a phone's mail app)
     app.get(&link)
@@ -107,13 +118,13 @@ async fn verification_in_another_browser_needs_the_password() {
     assert!(!signed_in(&app));
     app.post_form(&link, &[("password", NEW_PASSWORD)])
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::after_sign_in());
     assert!(signed_in(&app));
 }
 
 #[tokio::test]
 async fn signup_with_an_existing_email_looks_identical() {
-    let app = TestApp::new().await;
+    let app = open_app().await;
     factories::user_with_password(app.db(), "taken@example.com").await;
     let fresh = app
         .post_form(
@@ -155,13 +166,13 @@ async fn signup_with_an_existing_email_looks_identical() {
     app.clear_cookies();
     sign_in(&app, "taken@example.com", PASSWORD)
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::after_sign_in());
 }
 
 #[tokio::test]
 async fn the_latest_signup_wins_for_an_unverified_address() {
     // Pre-hijacking: an attacker signs up with the victim's address first.
-    let app = TestApp::new().await;
+    let app = open_app().await;
     let attackers_link = sign_up(&app, "victim@example.com", "attacker chosen secret").await;
     app.clear_cookies();
     let victims_link = sign_up(&app, "victim@example.com", NEW_PASSWORD).await;
@@ -171,7 +182,7 @@ async fn the_latest_signup_wins_for_an_unverified_address() {
         .assert_status(StatusCode::NOT_FOUND);
     app.post_form(&victims_link, &[("password", NEW_PASSWORD)])
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::after_sign_in());
     app.clear_cookies();
     sign_in(&app, "victim@example.com", "attacker chosen secret")
         .await
@@ -180,7 +191,7 @@ async fn the_latest_signup_wins_for_an_unverified_address() {
 
 #[tokio::test]
 async fn weak_passwords_are_refused_at_signup_with_a_reason() {
-    let app = TestApp::new().await;
+    let app = open_app().await;
     for (pw, reason) in [
         ("short", "too short"),
         ("password1234", "too common"),
@@ -211,7 +222,7 @@ async fn weak_passwords_are_refused_at_signup_with_a_reason() {
 
 #[tokio::test]
 async fn signup_is_rate_limited_per_address() {
-    let app = TestApp::new().await;
+    let app = open_app().await;
     for _ in 0..3 {
         app.post_form(
             "/registration",
@@ -250,7 +261,7 @@ async fn password_sign_in_starts_a_session_and_honors_return_to() {
 
 #[tokio::test]
 async fn sign_in_form_fields_carry_autocomplete_hints() {
-    let app = TestApp::new().await;
+    let app = open_app().await;
     app.get("/session/new")
         .await
         .assert_contains("autocomplete=\"username\"")
@@ -315,7 +326,7 @@ async fn sign_in_rehashes_passwords_made_with_old_parameters() {
         .unwrap();
     sign_in(&app, "ada@example.com", PASSWORD)
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::after_sign_in());
     let stored = password_credential::Entity::find_by_id(ada.id)
         .one(app.db())
         .await
@@ -380,11 +391,11 @@ async fn a_reset_unlocks_sign_in() {
         &[("password", NEW_PASSWORD)],
     )
     .await
-    .assert_redirect_to("/account");
+    .assert_redirect_to(&paths::after_sign_in());
     app.clear_cookies();
     sign_in(&app, "ada@example.com", NEW_PASSWORD)
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::after_sign_in());
 }
 
 #[tokio::test]
@@ -407,7 +418,7 @@ async fn a_new_device_gets_a_sign_in_notice_and_a_known_one_doesnt() {
     factories::user_with_password(app.db(), "ada@example.com").await;
     sign_in(&app, "ada@example.com", PASSWORD)
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::after_sign_in());
     app.settle().await;
     assert!(
         app.last_email_to("ada@example.com").is_none(),
@@ -417,14 +428,14 @@ async fn a_new_device_gets_a_sign_in_notice_and_a_known_one_doesnt() {
     app.post_form("/session/delete", &[]).await;
     sign_in(&app, "ada@example.com", PASSWORD)
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::after_sign_in());
     app.settle().await;
     assert!(app.last_email_to("ada@example.com").is_none());
     // A new browser: a notice with a "this wasn't me" link.
     app.clear_cookies();
     sign_in(&app, "ada@example.com", PASSWORD)
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::after_sign_in());
     app.settle().await;
     let mail = app
         .last_email_to("ada@example.com")
@@ -493,7 +504,7 @@ async fn a_reset_link_works_once() {
     app.get(&edit).await.assert_ok();
     app.post_form(&update, &[("password", NEW_PASSWORD)])
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::after_sign_in());
     app.clear_cookies();
     app.get(&edit).await.assert_status(StatusCode::NOT_FOUND);
     app.post_form(&update, &[("password", "another fine passphrase")])
@@ -501,7 +512,7 @@ async fn a_reset_link_works_once() {
         .assert_status(StatusCode::NOT_FOUND);
     sign_in(&app, "ada@example.com", NEW_PASSWORD)
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::after_sign_in());
 }
 
 #[tokio::test]
@@ -517,7 +528,7 @@ async fn a_reset_ends_every_other_session() {
         &[("password", NEW_PASSWORD)],
     )
     .await
-    .assert_redirect_to("/account");
+    .assert_redirect_to(&paths::after_sign_in());
     assert!(
         session::find_by_token(app.db(), &stolen, Utc::now())
             .await
@@ -583,7 +594,7 @@ async fn a_password_reset_cancels_a_pending_email_change() {
         &[("password", NEW_PASSWORD)],
     )
     .await
-    .assert_redirect_to("/account");
+    .assert_redirect_to(&paths::after_sign_in());
     assert_email_change_dead(&app, &change).await;
     assert_eq!(
         user::find_self(app.db(), ada.id).await.unwrap().email,
@@ -602,7 +613,7 @@ async fn a_password_change_cancels_a_pending_email_change() {
         &[("current_password", PASSWORD), ("password", NEW_PASSWORD)],
     )
     .await
-    .assert_redirect_to("/account");
+    .assert_redirect_to(&paths::account());
     assert_email_change_dead(&app, &change).await;
 }
 
@@ -631,7 +642,7 @@ async fn reset_links_expire_and_die_when_the_password_changes() {
         &[("current_password", PASSWORD), ("password", NEW_PASSWORD)],
     )
     .await
-    .assert_redirect_to("/account");
+    .assert_redirect_to(&paths::account());
     app.clear_cookies();
     app.get(&edit).await.assert_status(StatusCode::NOT_FOUND);
 }
@@ -703,7 +714,7 @@ async fn changing_the_password_signs_out_other_devices_and_keeps_this_one() {
         &[("current_password", PASSWORD), ("password", NEW_PASSWORD)],
     )
     .await
-    .assert_redirect_to("/account");
+    .assert_redirect_to(&paths::account());
     assert!(
         session::find_by_token(app.db(), &other, Utc::now())
             .await
@@ -739,11 +750,11 @@ async fn a_passwordless_account_can_set_a_password() {
         .assert_not_contains("current_password");
     app.post_form("/account/password", &[("password", NEW_PASSWORD)])
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::account());
     app.clear_cookies();
     sign_in(&app, "ada@example.com", NEW_PASSWORD)
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::after_sign_in());
 }
 
 #[tokio::test]
@@ -795,7 +806,7 @@ async fn password_reauth_is_throttled() {
 
 #[tokio::test]
 async fn the_strength_meter_works_by_post_only() {
-    let app = TestApp::new().await;
+    let app = open_app().await;
     app.post_form("/password-strength", &[("password", "password1234")])
         .await
         .assert_ok()
@@ -822,7 +833,7 @@ async fn the_strength_meter_works_by_post_only() {
 #[tokio::test]
 async fn passwords_and_reset_tokens_never_reach_the_logs() {
     let logs = LogCapture::start();
-    let app = TestApp::new().await;
+    let app = open_app().await;
     factories::user_with_password(app.db(), "ada@example.com").await;
     sign_in(&app, "ada@example.com", "a wrong guess here").await;
     sign_in(&app, "ada@example.com", PASSWORD).await;
@@ -868,7 +879,7 @@ async fn sign_in_params_debug_hides_the_password() {
 
 #[tokio::test]
 async fn a_signup_never_overwrites_a_verified_accounts_password() {
-    let app = TestApp::new().await;
+    let app = open_app().await;
     let ada = factories::user_with_password(app.db(), "ada@example.com").await;
     app.post_form(
         "/registration",
@@ -891,7 +902,7 @@ async fn a_signup_never_overwrites_a_verified_accounts_password() {
 
 #[tokio::test]
 async fn password_pages_follow_the_theme_switch() {
-    let app = TestApp::new().await;
+    let app = open_app().await;
     crate::auth_core_test::assert_pages_follow_the_theme(
         &app,
         &["/registration/new", "/passwords/new"],
@@ -900,4 +911,177 @@ async fn password_pages_follow_the_theme_switch() {
     let user = factories::user(app.db(), "ada@example.com").await;
     app.sign_in_as(&user).await;
     crate::auth_core_test::assert_pages_follow_the_theme(&app, &["/account/password/edit"]).await;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Invite-only (`Signup::Invite`): no public sign-up; invitations set the first password
+// ---------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn invite_only_has_no_public_sign_up() {
+    let app = app_with_signup(Signup::Invite).await;
+    app.get("/registration/new")
+        .await
+        .assert_status(StatusCode::NOT_FOUND);
+    app.post_form(
+        "/registration",
+        &[("email", "ada@example.com"), ("password", NEW_PASSWORD)],
+    )
+    .await
+    .assert_status(StatusCode::NOT_FOUND);
+    app.get("/registration/sent")
+        .await
+        .assert_status(StatusCode::NOT_FOUND);
+    app.settle().await;
+    assert!(
+        user::find_by_email(app.db(), "ada@example.com")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(app.last_email_to("ada@example.com").is_none());
+    // No "Sign up" in the nav, no "Create an account" under the form.
+    app.get("/session/new")
+        .await
+        .assert_ok()
+        .assert_not_contains("/registration/new")
+        .assert_text("Accounts are by invitation.");
+    // The same app with sign-up open shows both.
+    let open = open_app().await;
+    open.get("/registration/new").await.assert_ok();
+    open.get("/session/new")
+        .await
+        .assert_contains("href=\"/registration/new\"")
+        .assert_text("Create an account");
+}
+
+#[tokio::test]
+async fn an_invitation_sets_a_password_and_verifies_the_address() {
+    let app = app_with_signup(Signup::Invite).await;
+    auth_invite::invite(&app.state, "ada@example.com")
+        .await
+        .unwrap();
+    let mail = app.last_email_to("ada@example.com").expect("an invitation");
+    assert!(mail.text.contains("Choose your password"));
+    let edit = app.link_in(&mail, "/passwords/");
+    let update = edit.trim_end_matches("/edit").to_owned();
+    // No password yet: sign-in fails like any wrong password.
+    sign_in(&app, "ada@example.com", NEW_PASSWORD)
+        .await
+        .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+    app.get(&edit)
+        .await
+        .assert_ok()
+        .assert_text("Choose your password")
+        .assert_contains("autocomplete=\"new-password\"");
+    app.post_form(&update, &[("password", "password1234")])
+        .await
+        .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+    app.post_form(&update, &[("password", NEW_PASSWORD)])
+        .await
+        .assert_redirect_to(&paths::after_sign_in());
+    assert!(signed_in(&app));
+    let ada = user::find_by_email(app.db(), "ada@example.com")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(ada.is_verified(), "the invitation link proved the address");
+    let kinds = auth_event::kinds_for(app.db(), ada.id).await.unwrap();
+    assert!(kinds.contains(&Kind::Invited) && kinds.contains(&Kind::EmailVerified));
+    // Single use.
+    app.clear_cookies();
+    app.get(&edit).await.assert_status(StatusCode::NOT_FOUND);
+    // The password works from now on; a first password sends no "password changed" alarm.
+    sign_in(&app, "ada@example.com", NEW_PASSWORD)
+        .await
+        .assert_redirect_to(&paths::after_sign_in());
+    app.settle().await;
+    assert!(
+        app.emails_to("ada@example.com")
+            .iter()
+            .all(|m| !m.subject.contains("password was changed"))
+    );
+}
+
+#[tokio::test]
+async fn invitation_links_expire_and_a_new_invitation_replaces_the_old() {
+    let app = app_with_signup(Signup::Invite).await;
+    let ada = auth_invite::invite(&app.state, "ada@example.com")
+        .await
+        .unwrap();
+    let first = app.link_in(
+        &app.last_email_to("ada@example.com").unwrap(),
+        "/passwords/",
+    );
+    auth_invite::invite(&app.state, "ada@example.com")
+        .await
+        .unwrap();
+    let second = app.link_in(
+        &app.last_email_to("ada@example.com").unwrap(),
+        "/passwords/",
+    );
+    assert_ne!(first, second);
+    app.get(&first).await.assert_status(StatusCode::NOT_FOUND);
+    app.get(&second).await.assert_ok();
+    let old = user_token::issue(
+        app.db(),
+        ada.id,
+        user_token::Purpose::Invitation,
+        &ada.email,
+        None,
+        Utc::now() - Duration::days(8),
+    )
+    .await
+    .unwrap();
+    app.get(&format!("/passwords/{old}/edit"))
+        .await
+        .assert_status(StatusCode::NOT_FOUND);
+    // An invitation link isn't a reset link for someone else's purpose: a reset still works.
+    let edit = reset_link(&app, "ada@example.com").await;
+    app.get(&edit)
+        .await
+        .assert_ok()
+        .assert_text("Choose a new password");
+}
+
+#[tokio::test]
+async fn sign_in_reset_and_verification_work_in_both_signup_modes() {
+    for mode in [Signup::Open, Signup::Invite] {
+        let app = app_with_signup(mode).await;
+        factories::user_with_password(app.db(), "ada@example.com").await;
+        sign_in(&app, "ada@example.com", PASSWORD)
+            .await
+            .assert_redirect_to(&paths::after_sign_in());
+        app.clear_cookies();
+        let edit = reset_link(&app, "ada@example.com").await;
+        app.post_form(
+            edit.trim_end_matches("/edit"),
+            &[("password", NEW_PASSWORD)],
+        )
+        .await
+        .assert_redirect_to(&paths::after_sign_in());
+        // An account that signed up before the switch and never verified still can.
+        app.clear_cookies();
+        let bob = user::find_or_create(app.db(), "bob@example.com", Utc::now())
+            .await
+            .unwrap();
+        let digest = password_credential::hash(NEW_PASSWORD.to_owned())
+            .await
+            .unwrap();
+        password_credential::set(app.db(), bob.id, digest, Utc::now())
+            .await
+            .unwrap();
+        sign_in(&app, "bob@example.com", NEW_PASSWORD)
+            .await
+            .assert_status(StatusCode::UNPROCESSABLE_ENTITY)
+            .assert_text("Confirm your email address first");
+        app.settle().await;
+        let link = app.link_in(
+            &app.last_email_to("bob@example.com").unwrap(),
+            "/email-verification/",
+        );
+        app.post_form(&link, &[("password", NEW_PASSWORD)])
+            .await
+            .assert_redirect_to(&paths::after_sign_in());
+    }
 }

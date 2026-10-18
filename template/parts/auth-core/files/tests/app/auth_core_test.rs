@@ -6,13 +6,15 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{Duration, Utc};
 use offrails_host::{
-    config::{AppEnv, Config},
+    config::{AppEnv, Config, DEFAULT_SIGNUP, Signup},
     controllers::auth::{self, CurrentSession, RequestMeta},
     kernel::{auth_token, session as auth_cookie},
     models::{
         auth_event::{self, Kind, Meta},
         auth_throttle, session, user, user_token,
     },
+    routes::paths,
+    tasks::auth_invite,
 };
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, IntoActiveModel};
 
@@ -320,7 +322,7 @@ async fn return_to_rejects_open_redirects() {
             .unwrap();
         assert_eq!(
             res.headers().get(header::LOCATION).unwrap(),
-            "/account",
+            &paths::after_sign_in(),
             "{evil:?}"
         );
     }
@@ -382,7 +384,7 @@ async fn the_sessions_list_shows_devices_and_revokes_one_or_all_others() {
 
     app.post_form(&format!("/account/sessions/{}/delete", phone.id), &[])
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::account());
     assert!(
         session::find_by_token(app.db(), &phone_raw, Utc::now())
             .await
@@ -392,7 +394,7 @@ async fn the_sessions_list_shows_devices_and_revokes_one_or_all_others() {
 
     app.post_form("/account/sessions/delete-others", &[])
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::account());
     assert!(
         session::find_by_token(app.db(), &laptop_raw, Utc::now())
             .await
@@ -536,7 +538,7 @@ async fn changing_the_email_needs_the_new_address_to_confirm_and_warns_the_old_o
     app.sign_in_as(&ada).await;
     app.post_form("/account/email", &[("email", "Ada.New@Example.com")])
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::account());
     app.settle().await;
     let mail = app
         .last_email_to("ada.new@example.com")
@@ -554,7 +556,7 @@ async fn changing_the_email_needs_the_new_address_to_confirm_and_warns_the_old_o
         .assert_contains("ada.new@example.com");
     app.post_form(&link, &[])
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::account());
     assert_eq!(
         user::find_self(app.db(), ada.id).await.unwrap().email,
         "ada.new@example.com"
@@ -980,6 +982,79 @@ async fn the_demo_task_refuses_outside_development() {
             .await
             .unwrap()
             .is_some()
+    );
+}
+
+/// An app whose sign-up mode is `signup`, whatever `DEFAULT_SIGNUP` says: a test that creates an
+/// account by signing up asks for `Signup::Open`, an invite-only test for `Signup::Invite`, so
+/// switching the app's default never breaks either.
+pub async fn app_with_signup(signup: Signup) -> TestApp {
+    let mut config = Config::test();
+    config.auth.signup = signup;
+    TestApp::with_config(config).await
+}
+
+#[tokio::test]
+async fn the_signup_mode_comes_from_app_auth_signup() {
+    assert_eq!(Signup::parse(None), Ok(DEFAULT_SIGNUP));
+    assert_eq!(Signup::parse(Some(" ")), Ok(DEFAULT_SIGNUP));
+    assert_eq!(Signup::parse(Some("open")), Ok(Signup::Open));
+    assert_eq!(Signup::parse(Some(" Invite ")), Ok(Signup::Invite));
+    assert!(Signup::parse(Some("closed")).is_err());
+    assert_eq!(Config::test().auth.signup, DEFAULT_SIGNUP);
+    assert!(format!("{:?}", Config::test().auth).contains("signup"));
+}
+
+#[tokio::test]
+async fn the_invite_task_creates_an_unverified_account_and_emails_it() {
+    let app = app_with_signup(Signup::Invite).await;
+    let ada = auth_invite::invite(&app.state, " Ada@Example.com ")
+        .await
+        .unwrap();
+    assert_eq!(ada.email, "ada@example.com");
+    assert!(
+        !ada.is_verified(),
+        "verified only when the invitation is used"
+    );
+    let mail = app.last_email_to("ada@example.com").expect("an invitation");
+    assert!(mail.subject.contains("invited"));
+    assert!(mail.text.contains("http://localhost:3000/"));
+    assert!(
+        auth_event::kinds_for(app.db(), ada.id)
+            .await
+            .unwrap()
+            .contains(&Kind::Invited)
+    );
+    // Again: a fresh invitation for the same account, never a second account.
+    offrails_host::tasks::auth_invite::run(&app.state, vec!["ada@example.com".into()])
+        .await
+        .unwrap();
+    assert_eq!(user::Entity::find().all(app.db()).await.unwrap().len(), 1);
+    assert_eq!(app.emails_to("ada@example.com").len(), 2);
+    // The task wants exactly one valid address.
+    assert!(auth_invite::run(&app.state, vec![]).await.is_err());
+    assert!(
+        auth_invite::run(&app.state, vec!["not an address".into()])
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn inviting_a_verified_account_changes_nothing() {
+    let app = TestApp::new().await;
+    let ada = factories::user(app.db(), "ada@example.com").await;
+    let refused = auth_invite::invite(&app.state, "ada@example.com").await;
+    assert!(matches!(
+        refused,
+        Err(offrails_host::error::AppError::Invalid(_))
+    ));
+    assert!(app.last_email_to("ada@example.com").is_none());
+    assert!(
+        !auth_event::kinds_for(app.db(), ada.id)
+            .await
+            .unwrap()
+            .contains(&Kind::Invited)
     );
 }
 

@@ -300,14 +300,18 @@ pub fn links_in(text: &str, html: &str) -> Vec<String> {
     out
 }
 
-/// One-time codes in a text part ("Your code is 482913", "Use 482-913", "code: X7K2PQ"): a token of
-/// 4 to 8 digits (digits may be grouped by one space or dash), or of 6 to 10 capitals and digits
-/// with at least one of each, on a line that talks about a code. A digit-only token alone on its
-/// line counts too. Years and prices don't: they're not on such a line.
+/// One-time codes in a text part ("Your code is 482913", "Use 482-913", "code: X7K2PQ", "482913 is
+/// your verification code"): a token of 4 to 8 digits (digits may be grouped by one space or dash)
+/// or of 6 to 10 capitals and digits with at least one of each, that sits **next to a word about
+/// a code** (`WORDS`, whole words: a few words before it or after it on its line), or alone on its
+/// line under a line that has one ("Enter this code:" then "7310"). A 6-digit token alone on its
+/// line counts by itself. Years ("2026"), dates ("2026-10-18", "18 October 2026") and numbers
+/// with no code word nearby (prices, order numbers, phone numbers) never count.
 pub fn codes_in(text: &str) -> Vec<String> {
-    // APP: words that mark a line as talking about a code (add your product's own, e.g. "PIN").
+    // APP: words that mark a code (add your product's own, e.g. "PIN"), and how many words away.
     const WORDS: &[&str] = &[
         "code",
+        "codes",
         "otp",
         "one-time",
         "passcode",
@@ -316,32 +320,55 @@ pub fn codes_in(text: &str) -> Vec<String> {
         "verify",
         "token",
     ];
+    const BEFORE: usize = 6;
+    const AFTER: usize = 3;
+    let is_word = |w: &str| WORDS.contains(&w.to_lowercase().as_str());
     let mut out: Vec<String> = Vec::new();
+    let mut previous_mentions_a_code = false;
     for line in text.lines() {
-        let lower = line.to_lowercase();
-        let talks_about_a_code = WORDS.iter().any(|w| lower.contains(w));
-        let alone = line.trim();
+        let words: Vec<&str> = line
+            .split(|c: char| c.is_whitespace() || matches!(c, ':' | ',' | '(' | ')' | '"' | '\''))
+            .map(|w| w.trim_end_matches(['.', '!', ';', '?']))
+            .filter(|w| !w.is_empty())
+            .collect();
+        if words.is_empty() {
+            continue; // blank lines don't break "Enter this code:" + the code below it
+        }
+        let mentions = |at: usize, len: usize| {
+            words[at.saturating_sub(BEFORE)..at]
+                .iter()
+                .any(|w| is_word(w))
+                || words[(at + len).min(words.len())..(at + len + AFTER).min(words.len())]
+                    .iter()
+                    .any(|w| is_word(w))
+        };
         let mut candidates: Vec<String> = Vec::new();
-        if is_digit_code(&compact(alone)) && alone.split_whitespace().count() <= 2 {
-            candidates.push(compact(alone));
-        }
-        if talks_about_a_code {
-            let words: Vec<&str> = line
-                .split(|c: char| c.is_whitespace() || matches!(c, ':' | ',' | '(' | ')' | '"'))
-                .map(|w| w.trim_end_matches(['.', '!', ';']))
-                .filter(|w| !w.is_empty())
-                .collect();
-            for (i, w) in words.iter().enumerate() {
-                let joined = words.get(i + 1).map(|n| format!("{w}{n}"));
-                if let Some(j) = joined.filter(|j| {
-                    w.len() == 3 && w.chars().all(|c| c.is_ascii_digit()) && is_digit_code(j)
-                }) {
-                    candidates.push(j);
-                } else if is_digit_code(&compact(w)) || is_mixed_code(w) {
-                    candidates.push(compact(w));
-                }
+        let mut i = 0;
+        while i < words.len() {
+            // "482 913": two 3-digit groups are one code.
+            let pair = words.get(i + 1).filter(|n| {
+                [words[i], n]
+                    .iter()
+                    .all(|g| g.len() == 3 && g.chars().all(|c| c.is_ascii_digit()))
+            });
+            let (token, len) = match pair {
+                Some(n) => (format!("{}{n}", words[i]), 2),
+                None => (compact(words[i]), 1),
+            };
+            let shaped = (is_digit_code(&token) || is_mixed_code(&token))
+                && !is_year(&token)
+                && !is_date(words[i])
+                && !next_to_a_month(&words, i, len);
+            let alone = words.len() == len;
+            if shaped
+                && (mentions(i, len)
+                    || (alone && (previous_mentions_a_code || is_six_digits(&token))))
+            {
+                candidates.push(token);
             }
+            i += len;
         }
+        previous_mentions_a_code = words.iter().any(|w| is_word(w));
         for c in candidates {
             if !out.contains(&c) {
                 out.push(c);
@@ -369,12 +396,71 @@ fn is_digit_code(s: &str) -> bool {
     (4..=8).contains(&s.len()) && s.chars().all(|c| c.is_ascii_digit())
 }
 
+fn is_six_digits(s: &str) -> bool {
+    s.len() == 6 && s.chars().all(|c| c.is_ascii_digit())
+}
+
 fn is_mixed_code(s: &str) -> bool {
     (6..=10).contains(&s.len())
         && s.chars()
             .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
         && s.chars().any(|c| c.is_ascii_digit())
         && s.chars().any(|c| c.is_ascii_uppercase())
+}
+
+/// "1999", "2026": a year, never a code.
+fn is_year(s: &str) -> bool {
+    s.len() == 4 && s.parse::<u32>().is_ok_and(|y| (1900..=2099).contains(&y))
+}
+
+/// "2026-10-18", "18-10-2026", "10-18-2026": a date written with dashes.
+fn is_date(word: &str) -> bool {
+    let groups: Vec<&str> = word.split('-').collect();
+    groups.len() == 3
+        && groups
+            .iter()
+            .all(|g| !g.is_empty() && g.chars().all(|c| c.is_ascii_digit()))
+        && groups.iter().any(|g| is_year(g))
+        && groups.iter().filter(|g| g.len() <= 2).count() == 2
+}
+
+/// "18 October 2026", "Oct 2026", "2026, Monday": a number in a date.
+fn next_to_a_month(words: &[&str], at: usize, len: usize) -> bool {
+    const MONTHS: &[&str] = &[
+        "jan",
+        "feb",
+        "mar",
+        "apr",
+        "may",
+        "jun",
+        "jul",
+        "aug",
+        "sep",
+        "sept",
+        "oct",
+        "nov",
+        "dec",
+        "january",
+        "february",
+        "march",
+        "april",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+    ];
+    let month = |w: &str| MONTHS.contains(&w.to_lowercase().as_str());
+    (at > 0 && month(words[at - 1])) || words.get(at + len).is_some_and(|w| month(w))
 }
 
 /// The first `max` characters of a text body on one line, for the inbox list.
@@ -415,6 +501,12 @@ mod tests {
         assert_eq!(codes_in("Your one-time code: 482 913"), ["482913"]);
         assert_eq!(codes_in("Enter this code:\n\n    7310\n"), ["7310"]);
         assert_eq!(codes_in("Recovery token X7K2PQ9A"), ["X7K2PQ9A"]);
+        assert_eq!(codes_in("482913 is your verification code"), ["482913"]);
+        assert_eq!(codes_in("Sign in to Offrails Host\n\n482913\n"), ["482913"]);
+        assert_eq!(
+            codes_in("Your code is 482913. It expires at 10:30 on 18 October 2026."),
+            ["482913"]
+        );
     }
 
     #[test]
@@ -422,6 +514,30 @@ mod tests {
         assert!(codes_in("Since 2019 we have shipped 12000 orders for $4500.").is_empty());
         assert!(codes_in("Your CODE review is READY now").is_empty());
         assert!(codes_in("Call 555-0100 for help").is_empty());
+        assert!(codes_in("Your order 48291 shipped. Barcode 9921 inside.").is_empty());
+    }
+
+    #[test]
+    fn dates_and_years_are_not_codes_even_next_to_the_word_code() {
+        // A post-published email once showed "CODE 2026": a title about code, and a year.
+        let published = "Your post \"Writing code in 2026\" is live.\n\nPublished on 18 October 2026 at 10:30.\n\n2026\n\n© 2026 Offrails Host\n";
+        assert!(codes_in(published).is_empty(), "{:?}", codes_in(published));
+        for text in [
+            "CODE 2026",
+            "Code review: 2026-10-18",
+            "The verification code expired on 18-10-2026.",
+            "Your code from Oct 2026 no longer works",
+            "Code of conduct, updated 2019",
+            "Enter this code:\n\n2026\n",
+            "October\n2026\n",
+        ] {
+            assert!(codes_in(text).is_empty(), "{text:?}: {:?}", codes_in(text));
+        }
+        // The code next to its date still counts, and only the code.
+        assert_eq!(
+            codes_in("Your code for 18 October 2026: 482913"),
+            ["482913"]
+        );
     }
 
     #[test]

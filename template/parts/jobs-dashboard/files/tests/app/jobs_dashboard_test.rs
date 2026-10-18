@@ -875,6 +875,15 @@ async fn the_dashboard_follows_the_theme_switch() {
     assert!(css.contains("--chart-ok: light-dark("));
 }
 
+/// At a phone's width no jobs page scrolls sideways: a wide table scrolls inside its `.scroll` box,
+/// which contains the visually-hidden labels in its headers (before, /admin/jobs and
+/// /admin/jobs/cron were 931 and 634 px wide at 390). `tools/e2e.sh` checks it in a browser.
+#[test]
+fn wide_tables_scroll_inside_their_box_on_a_phone() {
+    let css = std::fs::read_to_string("static/kernel/jobs.css").unwrap();
+    assert!(css.contains(".jobs .scroll { position: relative; max-width: 100%; }"));
+}
+
 #[tokio::test]
 async fn the_dashboard_loads_its_own_css_and_js() {
     let app = TestApp::with_config(development()).await;

@@ -11,6 +11,7 @@ What you get (the Rails 8 generator, `phx.gen.auth` and Devise each cover part o
 - **Security emails** (new sign-in from a new device, password changed, email changed, two-factor on/off, recovery code used, sign-in paused), each with a **"This wasn't me" link** that signs the account out everywhere and forgets trusted devices.
 - **An audit trail** (`auth_events`): sign-ins, failures, changes; never a secret.
 - **Progressive throttling** (`auth_throttles`): database-backed, counted up front under a row lock, refused attempts never extend the pause, keyed by an HMAC so unknown and known accounts behave identically.
+- **Open or invite-only sign-up, one switch for every method**: `Signup::Open` or `Signup::Invite` (`DEFAULT_SIGNUP` in `src/config.rs`, overridden by `APP_AUTH_SIGNUP=open|invite`). Invite-only answers 404 on the sign-up pages (auth-password) and sends sign-in links only to existing accounts (auth-magic-link); no route edits, no test deletions. People get in with **`app task auth_invite <email>`**, which creates the account unverified and emails the invitation (with auth-password: a link to choose a password, which also verifies the address).
 - **Return-to** that only ever redirects to a local path, a dev-mailbox hint on auth screens in development, and a demo task with obviously fake credentials.
 
 Extracted from Rust off Rails apps and improved: the originals had sessions and return-to, but no rotation on re-auth, no absolute expiry, no device list, no audit trail, no security emails and no shared throttle.
@@ -48,16 +49,16 @@ By hand, in the app root, after [dev-mailbox](../dev-mailbox/):
    - `src/kernel/mod.rs`: `auth_token`, `background`, `return_to`, `session`, `user_agent` modules.
    - `src/models/mod.rs`: `auth_event`, `auth_throttle`, `session`, `user`, `user_token`, and `pub type User = user::Model;`.
    - `src/controllers/mod.rs`: `account`, `auth`, `security`, `sessions`.
-   - `src/views/mod.rs`: `pub mod auth;` and three `Ctx` fields, `current_user`, `dev_mailbox` and `auth_js` (the digested URL of `static/auth.js`); `src/controllers/application.rs` fills them in `Ctx`'s extractor.
+   - `src/views/mod.rs`: `pub mod auth;` and four `Ctx` fields, `current_user`, `dev_mailbox`, `auth_js` (the digested URL of `static/auth.js`) and `signup_open` (sign-up links show only then); `src/controllers/application.rs` fills them in `Ctx`'s extractor.
    - `templates/layouts/application.html`: `<script src="{{ ctx.auth_js }}" defer></script>` at `samples: app head`, so every app page loads it. Never in a page's `{% block head %}`: links and forms are boosted, and a boosted click runs nothing in the next page's `<head>` (the Show button, Caps Lock hint and code auto-submit would be dead until a reload).
    - `src/mailers/mod.rs`: `pub mod auth_mailer;`; `src/mailers/previews.rs`: two previews.
    - `src/state.rs`: a `background: Background` field, built with `Background::default()`.
-   - `src/config.rs`: an `auth: AuthConfig` field (`APP_SECRET_KEY`) with its section, parse, test and `Debug` lines.
+   - `src/config.rs`: an `auth: AuthConfig` field (`APP_SECRET_KEY`, `APP_AUTH_SIGNUP`) with its section (the `Signup` enum and `DEFAULT_SIGNUP` included), parse, test and `Debug` lines.
    - `src/routes.rs`: the routes below, their `paths::` helpers and `ROUTES` rows.
    - `templates/shared/_nav.html`: `{% include "shared/_auth_nav.html" %}`.
-   - `src/tasks/mod.rs`: the `auth_cleanup` and `auth_demo` tasks.
+   - `src/tasks/mod.rs`: the `auth_cleanup`, `auth_demo` and `auth_invite` tasks.
    - `migration/src/lib.rs`: the four migrations.
-   - `.env.example`, `compose.yaml`: `APP_SECRET_KEY`.
+   - `.env.example`, `compose.yaml`: `APP_SECRET_KEY`, `APP_AUTH_SIGNUP`.
    - `src/kernel/redact.rs`: the two token routes (`/account/email/confirm/{token}`, `/security/not-me/{token}`) in `TOKEN_ROUTES`, so logs show `[redacted]` for them.
    - `tests/app/main.rs`: `mod auth_core_test;`; `tests/app/factories.rs`: `user()`; `tests/app/support.rs`: `settle`, `sign_in_as`, `emails_to`, `link_in`.
 4. `cargo fmt --all && cargo run -- db migrate && cargo run -q -- routes`, then the Definition of Done (`.offrails/workflow.md`).
@@ -69,8 +70,9 @@ By hand, in the app root, after [dev-mailbox](../dev-mailbox/):
 - Install at least one sign-in method: [auth-password](../auth-password/), [auth-magic-link](../auth-magic-link/), or both.
 - Set `APP_SECRET_KEY` (at least 32 characters: `openssl rand -base64 48`) in the deploy configuration. Production refuses to boot without it.
 - Schedule `app task auth_cleanup` daily (cron, or the jobs sample's scheduler).
-- Set `ACCOUNTS:` in `AGENTS.md` (`signup`, `magic-link`, …) and log the install in `docs/decisions.md`.
-- Point `paths::after_sign_in()` (`// APP:` in `src/routes.rs`) at your app's home for signed-in people.
+- Set `ACCOUNTS:` in `AGENTS.md` and log the install in `docs/decisions.md`. The header names the sign-in methods, joined by `+`, then `invite` when sign-up is closed: `ACCOUNTS: password`, `ACCOUNTS: magic-link`, `ACCOUNTS: password+magic-link invite`, `ACCOUNTS: password+totp invite` (the older single words map onto it: `signup` = `password`, `invite` = `password invite`, `magic-link-invite` = `magic-link invite`). `invite` means `DEFAULT_SIGNUP = Signup::Invite`.
+- **Invite-only?** Set `DEFAULT_SIGNUP` to `Signup::Invite` in `src/config.rs` (`// APP:`), not only `APP_AUTH_SIGNUP` in one deploy, so a forgotten variable can't open sign-up. Create the first accounts with `app task auth_invite <email>` (it works in production: shell access is the admin).
+- Point `paths::after_sign_in()` (`// APP:` in `src/routes.rs`) at your app's home for signed-in people. The auth tests assert sign-in redirects with `paths::after_sign_in()` and account-page redirects with `paths::account()`, so they follow the change (`tools/ci.sh all` reruns them with it moved).
 - Protect your own handlers: `RequireUser(user)` on every private page, `RequireRecentAuth` on anything that changes credentials or money, and an owner-scoped query (`find_for(db, &user, id)`) for every record.
 
 ## Adapting it
@@ -78,6 +80,7 @@ By hand, in the app root, after [dev-mailbox](../dev-mailbox/):
 - **Longer or shorter sessions**: `IDLE_DAYS` and `ABSOLUTE_DAYS` in `src/kernel/session.rs` (`// APP:`). Keep idle ≤ absolute.
 - **A stricter or looser "sudo mode"**: `REAUTH_WINDOW` in `src/controllers/auth.rs` (`// APP:`).
 - **Your own sensitive action** (deleting the account, changing payout details): take `RequireRecentAuth` instead of `RequireUser` in its handler, record an `auth_event` (add a `Kind`, `// APP:`), and `auth::notify` the owner with a new `Notice` variant in `src/mailers/auth_mailer.rs`.
+- **Invite people from an admin screen** instead of the task: call `crate::tasks::auth_invite::invite(&state, &email)` inside `state.background.spawn(…)` from a handler that takes your admin extractor, so the request never holds the invitation token. Rename the task (`create_author`, `invite_member`) in `src/tasks/mod.rs` if your domain has a word for it; its wording is the `// APP:` block in `auth_invite.rs`.
 - **Rename `User` to `Member`**: rename `src/models/user.rs` and its table in a new migration; the alias `pub type User = user::Model;` in `models/mod.rs` keeps call sites short while you do it.
 - **Add OAuth later** ("Sign in with …"): a new controller that verifies the provider's response, then calls `auth::sign_in(state, headers, meta, user, "oauth")`. That one call gives it rotation, return-to, the audit trail, new-device emails and two-factor (with auth-totp). Store the provider identity in its own table, like `password_credentials`.
 - **Throttle wording and pace**: `FREE_FAILURES`, `FIRST_PAUSE_SECS`, `MAX_PAUSE_SECS` in `src/models/auth_throttle.rs` (`// APP:`).
@@ -95,6 +98,7 @@ By hand, in the app root, after [dev-mailbox](../dev-mailbox/):
 - Throttling counts before checking and never extends a pause (`parallel_guesses_are_counted_up_front`, `refused_attempts_do_not_extend_the_pause`).
 - Token pages are `no-store` + `no-referrer` and never echo the token into canonical URLs (`token_pages_are_not_cached_and_send_no_referrer`).
 - Tokens are minted inside the background task that sends the email, and no secret is logged (`session_tokens_never_reach_the_logs`).
+- Every handler that creates an account from a form takes `SignupOpen`, and every sign-in method reads `config.auth.signup` (`invite_only_has_no_public_sign_up`, `invite_only_magic_links_go_only_to_existing_accounts`); an invitation never touches a verified account (`inviting_a_verified_account_changes_nothing`). Tests that need open sign-up ask for it (`auth_core_test::app_with_signup(Signup::Open)`), so changing `DEFAULT_SIGNUP` breaks no test.
 
 ## How it works
 
@@ -107,7 +111,7 @@ any sign-in method ──► auth::sign_in ──[samples: before sign in]──
                                                                            └ cookies + redirect to return-to (local paths only)
 ```
 
-Sign-in methods plug in through anchors in this sample's own files: `{# samples: sign in methods #}` / `sign in alternatives` in `templates/sessions/new.html`, `confirm second factor` / `confirm methods` / `confirm alternatives` in `templates/account/confirm.html`, `account fields` / `account load` / `account init` and `account sections` for the account page, `before sign in`, `step-up second factor`, `revoke everything`, `revoke other access` and `claim unverified account` (delete the method's credential when the address's owner claims an unverified account: pre-hijacking) in `controllers/auth.rs`, and `auth events` in `models/auth_event.rs` (`record`: every audit event, where dev-dashboard's optional wire feeds its brute-force and credential-stuffing detectors). That is how the samples combine without editing each other.
+Sign-in methods plug in through anchors in this sample's own files: `{# samples: sign in methods #}` / `sign in alternatives` in `templates/sessions/new.html`, `confirm second factor` / `confirm methods` / `confirm alternatives` in `templates/account/confirm.html`, `account fields` / `account load` / `account init` and `account sections` for the account page, `before sign in`, `step-up second factor`, `revoke everything`, `revoke other access` and `claim unverified account` (delete the method's credential when the address's owner claims an unverified account: pre-hijacking) in `controllers/auth.rs`, `auth invite` in `tasks/auth_invite.rs` (the invitation's button: auth-password puts its set-password link there), and `auth events` in `models/auth_event.rs` (`record`: every audit event, where dev-dashboard's optional wire feeds its brute-force and credential-stuffing detectors). That is how the samples combine without editing each other.
 
 Emails go out through `state.background` (no job queue needed): the request returns immediately, the task mints its token and sends. `app.settle()` waits for them in tests.
 
@@ -137,13 +141,13 @@ Emails go out through `state.background` (no job queue needed): the request retu
 | `src/models/user_token.rs` | single-use emailed tokens (verification, reset, email change, not-me) |
 | `src/models/auth_event.rs` | the audit trail |
 | `src/models/auth_throttle.rs` | progressive delays |
-| `src/controllers/auth.rs` | extractors, `sign_in`, `grant_step_up`, `revoke_everything`, `notify` |
+| `src/controllers/auth.rs` | extractors (`SignupOpen` included), `sign_in`, `grant_step_up`, `revoke_everything`, `notify` |
 | `src/controllers/sessions.rs` | sign-in page, sign out |
 | `src/controllers/account.rs` | account page, sessions, re-auth page, email change |
 | `src/controllers/security.rs` | "This wasn't me" |
 | `src/views/auth.rs` | page structs, `time_ago` |
 | `src/mailers/auth_mailer.rs` | one template pair for every auth email; security notices |
-| `src/tasks/auth_cleanup.rs`, `src/tasks/auth_demo.rs` | cleanup; development demo accounts |
+| `src/tasks/auth_cleanup.rs`, `src/tasks/auth_demo.rs`, `src/tasks/auth_invite.rs` | cleanup; development demo accounts; invitations (`app task auth_invite <email>`, or `invite` from an admin screen) |
 | `templates/…` | sign-in, account, confirm, email change, not-me, check-email, invalid-link, nav, dev hint, mail |
 | `static/auth.js` | show/hide password, Caps Lock hint, one-time-code auto-submit, copy, print: delegated `document` listeners, loaded once by the layout |
 | `migration/src/m20261016_0010…_0013…` | users, sessions, user_tokens, auth_events + auth_throttles |

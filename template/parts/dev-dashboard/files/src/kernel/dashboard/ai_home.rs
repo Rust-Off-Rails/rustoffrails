@@ -1017,10 +1017,65 @@ pub struct AiPart {
     pub health_preview: String,
     /// The latest health summary (live or finished), if any.
     pub run: Option<RunView>,
+    /// The latest **finished** briefing's bottom line, shown on load at the top of the card (and
+    /// in the collapsed bar), even while a newer one is still being written.
+    pub summary: Option<BriefSummary>,
     /// "Generated 3 min ago", or why there's no automatic one.
     pub note: String,
     pub left: String,
     pub provider: String,
+}
+
+/// The bottom line of the latest finished AI briefing.
+pub struct BriefSummary {
+    /// The answer's first paragraph (citations and all).
+    pub blocks: Vec<super::ai::Block>,
+    /// The same as plain text, cut to one line, for the collapsed command center.
+    pub line: String,
+    /// "Generated 3 min ago".
+    pub when: String,
+    /// The full briefing's permalink.
+    pub page: String,
+    /// A newer briefing is being written right now (shown below).
+    pub refreshing: bool,
+}
+
+/// APP: how long the bottom line may be in the collapsed bar.
+const SUMMARY_LINE_CHARS: usize = 160;
+
+/// The bottom line of a finished briefing: its first paragraph, or `None` without an answer.
+pub fn brief_summary(rec: &ai_agent::Record, now: chrono::DateTime<Utc>) -> Option<BriefSummary> {
+    if !rec.status.finished() || matches!(rec.status, ai_agent::Status::Failed(_)) {
+        return None;
+    }
+    let view = ai_web::run_view(rec, false);
+    let first = view
+        .blocks
+        .into_iter()
+        .find(|b| matches!(b, super::ai::Block::Para(_)))?;
+    let text: String = match &first {
+        super::ai::Block::Para(xs) => xs
+            .iter()
+            .map(|x| match x {
+                super::ai::Inline::Text(t)
+                | super::ai::Inline::Code(t)
+                | super::ai::Inline::Strong(t)
+                | super::ai::Inline::Em(t)
+                | super::ai::Inline::Guide(t, _)
+                | super::ai::Inline::Cite(t, _, _) => t.as_str(),
+            })
+            .collect(),
+        _ => String::new(),
+    };
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let line = ui::truncate(&flat, SUMMARY_LINE_CHARS);
+    Some(BriefSummary {
+        blocks: vec![first],
+        line,
+        when: format!("Generated {}", ui::ago(rec.started, now)),
+        page: view.page,
+        refreshing: false,
+    })
 }
 
 /// Builds the overview's prepared context (shared by the prompt box and the briefing button) and
@@ -1037,6 +1092,7 @@ pub async fn ai_part(state: &AppState, mode: Mode, owner: Option<&str>, snapshot
         preview: String::new(),
         health_preview: String::new(),
         run: None,
+        summary: None,
         note: String::new(),
         left: String::new(),
         provider: if configured {
@@ -1117,11 +1173,28 @@ pub async fn ai_part(state: &AppState, mode: Mode, owner: Option<&str>, snapshot
     p.left = ai::budget(cfg).left(ai::today());
     // The latest health summary: this boot's, else the newest in the history.
     let boot = lock(&BOOT_RUN).clone().flatten();
-    let rec = boot.as_deref().and_then(ai_agent::find_record).or_else(|| {
-        ai_agent::history()
-            .into_iter()
-            .filter(|r| r.kind == Kind::Health && r.base == mode.base)
-            .max_by_key(|r| r.started)
+    let briefings: Vec<ai_agent::Record> = ai_agent::history()
+        .into_iter()
+        .filter(|r| r.kind == Kind::Health && r.base == mode.base)
+        .collect();
+    let rec = boot
+        .as_deref()
+        .and_then(ai_agent::find_record)
+        .or_else(|| briefings.iter().max_by_key(|r| r.started).cloned());
+    // The bottom line on load: the newest briefing that has one (this boot's, or the cached one
+    // from the history on disk), even while a newer run is still investigating.
+    // INVARIANT: a finished briefing's summary shows without a click (test: the_ai_briefing_summary_shows_on_load)
+    let now = Utc::now();
+    let mut finished: Vec<&ai_agent::Record> = briefings.iter().collect();
+    if let Some(r) = &rec
+        && briefings.iter().all(|b| b.id != r.id)
+    {
+        finished.push(r);
+    }
+    finished.sort_by_key(|r| std::cmp::Reverse(r.started));
+    p.summary = finished.into_iter().find_map(|r| {
+        let live = ai_agent::get(&r.id).map_or_else(|| r.clone(), |run| run.record());
+        brief_summary(&live, now)
     });
     if let Some(rec) = rec {
         let live_run = ai_agent::get(&rec.id).filter(|r| !r.record().status.finished());
@@ -1137,7 +1210,15 @@ pub async fn ai_part(state: &AppState, mode: Mode, owner: Option<&str>, snapshot
                 format!("Generated {}", ui::ago(rec.started, Utc::now()))
             };
         }
-        p.run = Some(ai_web::run_view(&rec, streams));
+        let view = ai_web::run_view(&rec, streams);
+        if let Some(sm) = p.summary.as_mut() {
+            sm.refreshing = !rec.status.finished();
+            // The summary is this run's: say how it came (proactive mode) like the note does.
+            if sm.page == view.page {
+                sm.when.clone_from(&p.note);
+            }
+        }
+        p.run = Some(view);
     }
     p
 }

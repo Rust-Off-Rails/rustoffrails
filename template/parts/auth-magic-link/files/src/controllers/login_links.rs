@@ -1,4 +1,6 @@
-//! Passwordless sign-in: ask for a link, then click it or type its 6-digit code.
+//! Passwordless sign-in: ask for a link, then click it or type its 6-digit code. The first use
+//! creates the account under `Signup::Open`; under `Signup::Invite` (`config.auth.signup`) links go
+//! only to existing accounts.
 //!
 //! GUIDE: .offrails/guides/auth.md#magic-link-variants-magic-link-magic-link-invite
 //!
@@ -74,8 +76,10 @@ pub struct LinkParams {
 }
 
 /// `POST /login_links`: emails a link and code. Same redirect for every valid address.
-// SECURITY: no hint whether the address has an account (both get an email under `magic-link`,
-// where the first use creates the account); rate limited per network and per address.
+// SECURITY: no hint whether the address has an account: under `Signup::Open` both get an email
+// (the first use creates the account); under `Signup::Invite` only an account's address does,
+// decided inside the background send, so the response and its timing are the same either way.
+// Rate limited per network and per address.
 // INVARIANT: known and unknown addresses get identical responses (test: known_and_unknown_addresses_get_identical_responses)
 pub async fn create(
     State(s): State<AppState>,
@@ -131,7 +135,6 @@ pub async fn create(
     // A fresh browser cookie per request: the newest link wins in this browser.
     let secure = s.config.is_production();
     let browser = auth_token::generate_token();
-    // APP: invite-only sign-in: only send when `user::find_by_email` finds an account (README).
     send_link(&s, &email, Purpose::SignIn, auth_token::digest(&browser));
     let mut response = Redirect::to(&paths::login_links_sent()).into_response();
     response.headers_mut().append(
@@ -146,11 +149,22 @@ pub async fn create(
     Ok(response)
 }
 
-/// Mints the link and code in the background and emails them.
+/// Mints the link and code in the background and emails them. Under `Signup::Invite` a sign-in
+/// link goes only to an address that has an account; the others get nothing, not even a row.
 fn send_link(s: &AppState, email: &str, purpose: Purpose, browser_digest: String) {
     let state = s.clone();
     let to = email.to_owned();
     s.background.spawn("sign-in link email", async move {
+        let open = state.config.auth.signup.is_open();
+        // SECURITY: invite-only: an unknown address gets no link and no email, and the lookup
+        // runs here, after the response, so it can't be timed
+        // (test: invite_only_magic_links_go_only_to_existing_accounts)
+        if purpose == Purpose::SignIn
+            && !open
+            && user::find_by_email(&state.db, &to).await?.is_none()
+        {
+            return Ok(());
+        }
         let minted = login_link::mint(
             &state.db,
             &state.config.auth.secret_key,
@@ -166,7 +180,12 @@ fn send_link(s: &AppState, email: &str, purpose: Purpose, browser_digest: String
                 to: to.clone(),
                 subject: format!("Your {app} sign-in link"),
                 heading: format!("Sign in to {app}"),
-                intro: vec!["Click the button to sign in. If this is your first time, it creates your account.".to_owned()],
+                // APP: wording.
+                intro: vec![if open {
+                    "Click the button to sign in. If this is your first time, it creates your account.".to_owned()
+                } else {
+                    "Click the button to sign in.".to_owned()
+                }],
                 action: Some(("Sign in".to_owned(), url(&state.config, &paths::login_link(&minted.token)))),
                 code: Some(minted.code),
                 outro: vec![
@@ -200,12 +219,20 @@ fn check_email_page(
     status: StatusCode,
     error: Option<String>,
 ) -> Result<Response, AppError> {
+    // APP: wording. It must read the same whether or not the address has an account.
+    let message = if ctx.signup_open {
+        "We've sent you a sign-in link and a 6-digit code. Click the link, or type the code below. Both work once, for 15 minutes."
+    } else {
+        "If that address has an account, we've sent it a sign-in link and a 6-digit code. Click the link, or type the code below. Both work once, for 15 minutes."
+    };
     let page = CheckEmail {
         ctx: ctx.titled("Check your email").noindex(),
         heading: "Check your email".to_owned(),
-        // APP: wording. It must read the same whether or not the address has an account.
-        message: "We've sent you a sign-in link and a 6-digit code. Click the link, or type the code below. Both work once, for 15 minutes.".to_owned(),
-        code_form: Some(CodeForm { action: paths::login_links_code(), error }),
+        message: message.to_owned(),
+        code_form: Some(CodeForm {
+            action: paths::login_links_code(),
+            error,
+        }),
     };
     Ok((status, views::render(page)?).into_response())
 }
@@ -357,7 +384,8 @@ pub async fn consume(
     finish(&s, ctx, &meta, &headers, link, "magic_link").await
 }
 
-/// Claims the link, finds or creates the account, marks the address verified and signs in.
+/// Claims the link, finds the account (or creates it, under `Signup::Open`), marks the address
+/// verified and signs in.
 async fn finish(
     s: &AppState,
     ctx: Ctx,
@@ -372,8 +400,14 @@ async fn finish(
         txn.rollback().await?;
         return invalid(ctx.at(&paths::new_session()).noindex());
     }
-    // WHY: ON CONFLICT DO NOTHING + select: two first sign-ins racing can't abort the transaction.
     let existing = user::find_by_email(&txn, &link.email).await?;
+    // SECURITY: invite-only: a link never creates an account, even one minted before the switch
+    // (test: invite_only_magic_links_never_create_accounts)
+    if existing.is_none() && !s.config.auth.signup.is_open() {
+        txn.rollback().await?;
+        return invalid(ctx.at(&paths::new_session()).noindex());
+    }
+    // WHY: ON CONFLICT DO NOTHING + select: two first sign-ins racing can't abort the transaction.
     let u = user::find_or_create(&txn, &link.email, now).await?;
     if existing.is_none() {
         auth_event::record(&txn, Some(u.id), Kind::SignedUp, &meta.meta, now).await?;

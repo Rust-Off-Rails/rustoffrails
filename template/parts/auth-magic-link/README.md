@@ -1,6 +1,6 @@
 # auth-magic-link
 
-Passwordless sign-in (Phoenix 1.8's default, the framework's `ACCOUNTS: magic-link` variant): enter your email, then **click the link or type the 6-digit code** from the same email. The first use creates the account. Built on [auth-core](../auth-core/) (sessions, account page, re-auth, security emails, audit trail).
+Passwordless sign-in (Phoenix 1.8's default, the framework's `ACCOUNTS: magic-link` variant): enter your email, then **click the link or type the 6-digit code** from the same email. The first use creates the account, or, invite-only (`ACCOUNTS: magic-link invite`), links go only to accounts that exist. Built on [auth-core](../auth-core/) (sessions, account page, re-auth, security emails, audit trail).
 
 - **A link and a code in one email.** Phones often open mail links in another browser (the mail app's); the code lets you finish where you started.
 - **Single-use, hashed, 15-minute** links and codes, minted inside the background task that sends them. Only the SHA-256 of the token and an HMAC of the code (keyed by `APP_SECRET_KEY`) are stored.
@@ -9,7 +9,8 @@ Passwordless sign-in (Phoenix 1.8's default, the framework's `ACCOUNTS: magic-li
 - **Bound to the asking browser, by default**: the link and the code only work in the browser that asked for them. That stops **login CSRF** (an attacker mailing you a link to *their* account) and forwarded links. The code covers the other-device case; `APP_MAGIC_LINK_ANY_BROWSER=true` lifts the binding if you must.
 - **5 wrong codes burn the link**, and wrong codes count **per address across every link** in `auth_throttles` (growing pauses), plus a per-network cap on guesses; requests are limited per network **and per address across networks** (10 per 3 minutes each, 20 per address per day).
 - **Pre-hijacking safe with passwords**: signing in by link or code to an account someone registered but never verified (auth-password) drops that account's password, sessions and tokens first (`auth::claim_unverified_account`).
-- **No enumeration**: every valid address gets the same redirect and an email (the first use creates the account).
+- **No enumeration**: every valid address gets the same redirect and the request does the same work; under open sign-up both get an email (the first use creates the account).
+- **Open or invite-only** from auth-core's one switch (`Signup`, `APP_AUTH_SIGNUP`): invite-only, an unknown address gets no email and no link (decided in the background send, so it can't be timed), a link never creates an account, and `app task auth_invite <email>` lets people in.
 - **Re-auth by emailed code** for sensitive actions ("Email me a code" on "Confirm it's you"); refused when two-factor is on.
 - **The dev mailbox hint** on "Check your email" in development, and links built from the address actually served, so a development link never points at a stale port.
 
@@ -56,7 +57,7 @@ By hand, in the app root (install [auth-core](../auth-core/) first):
 
 ## After installing
 
-- `ACCOUNTS: magic-link` in `AGENTS.md`; log the install in `docs/decisions.md`.
+- `ACCOUNTS: magic-link` in `AGENTS.md` (`password+magic-link`, `magic-link invite`, …: auth-core's README, "After installing"); log the install in `docs/decisions.md`.
 - Production needs a real mail provider (`SMTP_URL`) before launch: this is the only way in.
 - Try it in development: enter any `@example.com` address, then open `/dev/mailbox` (the page links to it).
 
@@ -71,7 +72,7 @@ By hand, in the app root (install [auth-core](../auth-core/) first):
 
 ## Adapting it
 
-- **Invite-only** (`ACCOUNTS: magic-link-invite`): in `login_links::create` (`// APP:`), only call `send_link` when `user::find_by_email` finds an account (keep the same redirect either way), and in `finish` use `user::find_by_email` instead of `find_or_create`.
+- **Invite-only** (`ACCOUNTS: magic-link invite`): set `DEFAULT_SIGNUP = Signup::Invite` in `src/config.rs` (`// APP:`, auth-core). Nothing else changes in code or tests (the tests that rely on a first use creating the account ask for `Signup::Open`). Invite people with `app task auth_invite <email>`; the invitation's button opens the sign-in page.
 - **Shorter links or fewer guesses**: `TTL` and `MAX_CODE_ATTEMPTS` in `src/models/login_link.rs` (`// APP:`).
 - **Links that work in any browser** (an app whose users mostly open mail on another device and can't type codes): `APP_MAGIC_LINK_ANY_BROWSER=true`. This re-opens login CSRF; log the decision.
 - **Request limits**: `LIMIT` and `WINDOW` in `src/controllers/login_links.rs` (`// APP:`).
@@ -84,7 +85,7 @@ By hand, in the app root (install [auth-core](../auth-core/) first):
 - Browser binding on by default; codes only in the asking browser (`a_link_opened_in_another_browser_is_refused_by_default`, `the_code_signs_in_only_in_the_browser_that_asked`).
 - The attempt is counted before the code is compared (`a_code_allows_five_wrong_guesses_then_burns_the_link`), and counted against the address too (`code_guesses_are_throttled_per_address_across_links`).
 - `finish` claims an unverified account with `auth::claim_unverified_account`, never a bare `user::mark_verified` (`a_password_set_before_verification_dies_when_the_owner_signs_in_by_link`).
-- Identical responses for known and unknown addresses (`known_and_unknown_addresses_get_identical_responses`).
+- Identical responses for known and unknown addresses, in both sign-up modes (`known_and_unknown_addresses_get_identical_responses`); invite-only, the account check stays in the background send and `finish` never creates an account (`invite_only_magic_links_go_only_to_existing_accounts`, `invite_only_magic_links_never_create_accounts`).
 - Tokens and codes are minted in the background task; nothing is logged (`link_tokens_and_codes_never_reach_the_logs`).
 - Links come from `config.app_url` (`links_follow_the_app_url_being_served_not_a_stale_port`).
 
@@ -92,7 +93,7 @@ By hand, in the app root (install [auth-core](../auth-core/) first):
 
 | Route | Handler | Access |
 |-------|---------|--------|
-| `POST /login_links` | ask for a link + code (303 to `/login_links/sent`, same for every address) | public |
+| `POST /login_links` | ask for a link + code (303 to `/login_links/sent`, same for every address; invite-only, sent only to accounts) | public |
 | `GET /login_links/sent` | "Check your email", with the code form and the dev hint | public |
 | `POST /login_links/code` | sign in with the code (asking browser only) | public |
 | `GET /login_links/{token}` | "Continue as …" (never signs in) | public (token) |

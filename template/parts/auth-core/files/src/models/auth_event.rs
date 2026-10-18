@@ -92,6 +92,9 @@ pub enum Kind {
     DeviceTrusted,
     #[sea_orm(string_value = "not_me")]
     NotMe,
+    /// An account created by invitation (`app task auth_invite`).
+    #[sea_orm(string_value = "invited")]
+    Invited,
 }
 
 impl Kind {
@@ -120,6 +123,7 @@ impl Kind {
             Kind::RecoveryCodesRegenerated => "New recovery codes generated",
             Kind::DeviceTrusted => "Device remembered for two-factor",
             Kind::NotMe => "Reported \"this wasn't me\": signed out everywhere",
+            Kind::Invited => "Invited",
         }
     }
 

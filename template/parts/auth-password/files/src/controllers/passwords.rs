@@ -1,5 +1,5 @@
-//! "Forgot your password?": a single-use, hashed, 30-minute link by email, and the live strength
-//! meter.
+//! "Forgot your password?": a single-use, hashed, 30-minute link by email; an invitation's
+//! "choose your password" link (the same page, 7 days); and the live strength meter.
 //!
 //! GUIDE: .offrails/guides/auth.md#password-reset-passwordsrs-new-create-edit-update
 
@@ -181,18 +181,12 @@ pub async fn edit(
     Path(token): Path<String>,
 ) -> Result<Response, AppError> {
     let ctx = ctx.at(&paths::new_password()).noindex();
-    match user_token::find_valid(
-        &s.db,
-        user_token::Purpose::PasswordReset,
-        &token,
-        Utc::now(),
-    )
-    .await?
-    {
-        Some((_, u)) => Ok(token_page(
+    match find_set_password(&s.db, &token, Utc::now()).await? {
+        Some((purpose, u)) => Ok(token_page(
             views::render(PasswordsEdit {
-                ctx: ctx.titled("Choose a new password"),
+                ctx: ctx.titled(title(purpose)),
                 email: u.email,
+                invitation: purpose == user_token::Purpose::Invitation,
                 action: paths::update_password(&token),
                 errors: Errors::default(),
                 strength: None,
@@ -225,11 +219,10 @@ pub async fn update(
 ) -> Result<Response, AppError> {
     let ctx = ctx.at(&paths::new_password()).noindex();
     let now = Utc::now();
-    let Some((_, u)) =
-        user_token::find_valid(&s.db, user_token::Purpose::PasswordReset, &token, now).await?
-    else {
+    let Some((purpose, u)) = find_set_password(&s.db, &token, now).await? else {
         return invalid(ctx);
     };
+    let invitation = purpose == user_token::Purpose::Invitation;
     // Validate first: a weak password re-renders the form and the link keeps working.
     let errors = password_policy::validate(&params.password, &u.email);
     if !errors.is_empty() {
@@ -237,8 +230,9 @@ pub async fn update(
             (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 views::render(PasswordsEdit {
-                    ctx: ctx.titled("Choose a new password"),
+                    ctx: ctx.titled(title(purpose)),
                     email: u.email,
+                    invitation,
                     action: paths::update_password(&token),
                     errors,
                     strength: Some(password_policy::strength(&params.password, "")),
@@ -249,30 +243,96 @@ pub async fn update(
     }
     let digest = password_credential::hash(params.password).await?;
     let txn = db::begin(&s.db).await?;
-    let Some((_, u)) =
-        user_token::consume(&txn, user_token::Purpose::PasswordReset, &token, now).await?
-    else {
+    let Some((_, u)) = user_token::consume(&txn, purpose, &token, now).await? else {
         txn.rollback().await?;
         return invalid(ctx);
     };
     password_credential::set(&txn, u.id, digest, now).await?;
-    user_token::revoke_all(&txn, u.id, user_token::Purpose::PasswordReset).await?;
+    for p in SET_PASSWORD {
+        user_token::revoke_all(&txn, u.id, p).await?;
+    }
     auth::revoke_everything(&txn, u.id).await?;
     user::mark_verified(&txn, u.id, now).await?;
     auth_throttle::clear(&txn, &auth::throttle_key(&s, "login", &u.email)).await?;
-    auth_event::record(&txn, Some(u.id), Kind::PasswordReset, &meta.meta, now).await?;
+    let kind = if invitation {
+        Kind::EmailVerified
+    } else {
+        Kind::PasswordReset
+    };
+    auth_event::record(&txn, Some(u.id), kind, &meta.meta, now).await?;
     txn.commit().await?;
     auth::sessions_ended(&s, u.id);
-    auth::notify(&s, u.id, Notice::PasswordChanged);
+    // An accepted invitation is the account's first password: nothing to warn about.
+    if !invitation {
+        auth::notify(&s, u.id, Notice::PasswordChanged);
+    }
     let u = user::find_self(&s.db, u.id).await?;
-    auth::sign_in(&s, &headers, &meta, u, "reset").await
+    let method = if invitation { "invitation" } else { "reset" };
+    auth::sign_in(&s, &headers, &meta, u, method).await
+}
+
+/// The tokens that open "choose a password": a reset, or an invitation (auth-core's `auth_invite`).
+const SET_PASSWORD: [user_token::Purpose; 2] = [
+    user_token::Purpose::PasswordReset,
+    user_token::Purpose::Invitation,
+];
+
+/// The set-password token's purpose and account, if `token` is a live reset or invitation.
+async fn find_set_password(
+    db: &impl sea_orm::ConnectionTrait,
+    token: &str,
+    now: chrono::DateTime<Utc>,
+) -> Result<Option<(user_token::Purpose, user::Model)>, AppError> {
+    for purpose in SET_PASSWORD {
+        if let Some((_, u)) = user_token::find_valid(db, purpose, token, now).await? {
+            return Ok(Some((purpose, u)));
+        }
+    }
+    Ok(None)
+}
+
+fn title(purpose: user_token::Purpose) -> &'static str {
+    if purpose == user_token::Purpose::Invitation {
+        "Choose your password"
+    } else {
+        "Choose a new password"
+    }
+}
+
+/// The invitation's button (auth-core's `auth_invite`, at `samples: auth invite`): a link to
+/// choose a password, which also proves the address. Single use, 7 days, digest only.
+// SECURITY: minted inside the send, never logged; using it verifies the address, ends every other
+// session and kills older links, like a reset (test: an_invitation_sets_a_password_and_verifies_the_address)
+pub async fn invitation_link(
+    s: &AppState,
+    user: &user::Model,
+    mail: &mut AuthMail,
+) -> Result<(), AppError> {
+    let token = user_token::issue(
+        &s.db,
+        user.id,
+        user_token::Purpose::Invitation,
+        &user.email,
+        None,
+        Utc::now(),
+    )
+    .await?;
+    mail.action = Some((
+        "Choose your password".to_owned(),
+        url(&s.config, &paths::edit_password(&token)),
+    ));
+    mail.outro.insert(
+        0,
+        "The link works once, for 7 days. After that, use \"Forgot password?\" on the sign-in page.".to_owned(),
+    );
+    Ok(())
 }
 
 fn invalid(ctx: Ctx) -> Result<Response, AppError> {
     invalid_link(
         ctx,
         "This reset link doesn't work",
-        "Password reset links work once and expire after 30 minutes, and changing your password cancels older ones. Ask for a new link.",
+        "Password links work once and expire (a reset after 30 minutes, an invitation after 7 days), and changing your password cancels older ones. Ask for a new link.",
         "Get a new link",
         &paths::new_password(),
     )

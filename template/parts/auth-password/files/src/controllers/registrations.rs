@@ -1,4 +1,6 @@
-//! Sign-up and email verification.
+//! Sign-up and email verification. Sign-up is public under `Signup::Open` (`config.auth.signup`)
+//! and 404 under `Signup::Invite`; verification works in both (an account made before the switch,
+//! or a resent link).
 //!
 //! GUIDE: .offrails/guides/auth.md#sign-up-signup-only-registrationsrs-new-create
 //!
@@ -30,7 +32,7 @@ use crate::{
     controllers::{
         account::{invalid_link, token_page},
         application::ClientIp,
-        auth::{self, CurrentUser, RequestMeta},
+        auth::{self, CurrentUser, RequestMeta, SignupOpen},
     },
     error::AppError,
     kernel::{auth_token, db, session as auth_cookie},
@@ -68,8 +70,13 @@ pub struct SignupParams {
     pub password: String,
 }
 
-/// `GET /registration/new`
-pub async fn new(ctx: Ctx, CurrentUser(user): CurrentUser) -> Result<Response, AppError> {
+/// `GET /registration/new`. Every sign-up handler takes `SignupOpen`: under `Signup::Invite`
+/// they answer 404 (auth-core's `auth_invite` creates the accounts then).
+pub async fn new(
+    _: SignupOpen,
+    ctx: Ctx,
+    CurrentUser(user): CurrentUser,
+) -> Result<Response, AppError> {
     if user.is_some() {
         return Ok(Redirect::to(&paths::after_sign_in()).into_response());
     }
@@ -88,6 +95,7 @@ pub async fn new(ctx: Ctx, CurrentUser(user): CurrentUser) -> Result<Response, A
 // addresses; only the email differs, and only the mailbox owner reads it.
 // INVARIANT: sign-up doesn't reveal existing accounts (test: signup_with_an_existing_email_looks_identical)
 pub async fn create(
+    _: SignupOpen,
     State(s): State<AppState>,
     ctx: Ctx,
     meta: RequestMeta,
@@ -201,7 +209,7 @@ pub async fn create(
 }
 
 /// `GET /registration/sent`
-pub async fn sent(ctx: Ctx) -> Result<Response, AppError> {
+pub async fn sent(_: SignupOpen, ctx: Ctx) -> Result<Response, AppError> {
     Ok(views::render(CheckEmail {
         ctx: ctx.titled("Check your email").noindex(),
         heading: "Check your email".to_owned(),

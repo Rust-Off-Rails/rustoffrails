@@ -70,6 +70,7 @@ The optional **Ask AI** agent is the one feature that sends data off the machine
 
 | Invariant | Test |
 |-----------|------|
+| The AI briefing card shows the latest finished briefing's bottom line on load (and in the collapsed bar), also while a newer one runs | `the_ai_briefing_summary_shows_on_load` |
 | Every page renders with its own stylesheet and script, never `app.css`, and follows the theme switch (`light-dark()` tokens, no `prefers-color-scheme` blocks) | `every_dashboard_page_renders_with_its_own_assets`, `the_dashboard_stylesheet_follows_the_theme_switch`, `every_kernel_page_renders_data_theme` |
 | The dashboard replaces the System and Routes tabs; their pages stay | `the_dashboard_replaces_the_system_and_routes_tabs` |
 | Requests are grouped by route pattern with status classes, percentiles and bytes; the dashboard doesn't record itself | `requests_are_recorded_per_route_with_percentiles`, `requests_are_grouped_by_their_route_pattern`, `the_dashboard_ignores_itself` |

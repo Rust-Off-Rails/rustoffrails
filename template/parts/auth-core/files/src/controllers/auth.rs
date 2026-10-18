@@ -117,6 +117,24 @@ impl FromRequestParts<AppState> for CurrentUser {
     }
 }
 
+/// Public sign-up is open (`config.auth.signup`); a 404 otherwise. Put it on every handler that
+/// creates an account from a form, so an invite-only app needs no route edits.
+// SECURITY: under `Signup::Invite` the sign-up pages answer 404 as if they weren't routed, and
+// create nothing (test: invite_only_has_no_public_sign_up)
+pub struct SignupOpen;
+
+impl FromRequestParts<AppState> for SignupOpen {
+    type Rejection = AppError;
+
+    async fn from_request_parts(_: &mut Parts, state: &AppState) -> Result<Self, AppError> {
+        if state.config.auth.signup.is_open() {
+            Ok(Self)
+        } else {
+            Err(AppError::NotFound)
+        }
+    }
+}
+
 /// The signed-in person, or a redirect to sign in (with return-to).
 // SECURITY: put this (or a stronger extractor) on every handler that shows or changes private
 // data; the security suite requests every `Access::User` route signed out and expects no 2xx

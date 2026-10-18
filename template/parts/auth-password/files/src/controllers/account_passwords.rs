@@ -132,6 +132,7 @@ pub async fn update(
     let txn = db::begin(&s.db).await?;
     password_credential::set(&txn, user.id, digest, now).await?;
     user_token::revoke_all(&txn, user.id, user_token::Purpose::PasswordReset).await?;
+    user_token::revoke_all(&txn, user.id, user_token::Purpose::Invitation).await?;
     // Every other device is signed out; this one gets a fresh token.
     auth::revoke_other_access(&txn, &user, auth.session.id).await?;
     let raw = session::rotate(&txn, auth.session.id, now).await?;

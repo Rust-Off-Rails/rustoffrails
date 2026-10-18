@@ -1,1 +1,6 @@
+{% if ctx.signup_open %}
 <p>New here? <a class="link" href="{{ paths::new_registration() }}">Create an account</a></p>
+{% else %}
+{# APP: who to ask for an invitation #}
+<p>Accounts are by invitation.</p>
+{% endif %}

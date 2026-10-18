@@ -5,6 +5,7 @@
     <span class="cc-title">AI command center</span>
     <span class="cc-verdict tone-{{ cc.tone }}"><span class="dot" aria-hidden="true"></span>{{ cc.verdict }}</span>
     <span class="cc-headline">{{ cc.headline }}</span>
+    {% if let Some(sm) = cc.ai.summary %}<span class="cc-ai-line" data-cc-ai-line><span class="cc-tag">AI</span> {{ sm.line }}</span>{% endif %}
     <span class="cc-chevron" aria-hidden="true"></span>
   </summary>
   <div class="cc-body">
@@ -27,7 +28,13 @@
       <section class="cc-ai" aria-labelledby="cc-ai-h">
         <h2 id="cc-ai-h">AI briefing {% if cc.ai.configured %}<span class="cc-tag">{{ cc.ai.provider }}</span>{% endif %}</h2>
         {% if cc.ai.configured %}
-        {% if !cc.ai.note.is_empty() %}<p class="hint">{{ cc.ai.note }}</p>{% endif %}
+        {% if let Some(sm) = cc.ai.summary %}
+        {# The latest finished briefing's bottom line, on load: no click, no waiting for a new run. #}
+        <div class="cc-ai-summary" data-cc-summary>
+          <div class="ai-text">{% for b in sm.blocks %}{% include "kernel/dashboard/_ai_block.html" %}{% endfor %}</div>
+          <p class="hint small">{{ sm.when }}{% if sm.refreshing %} · a new briefing is being written below{% endif %} · <a href="{{ sm.page }}">Full briefing</a></p>
+        </div>
+        {% else if !cc.ai.note.is_empty() %}<p class="hint">{{ cc.ai.note }}</p>{% endif %}
         <form class="cc-health" method="post" action="{{ cc.base }}/ai/ask" data-ai-form data-runs="{{ cc.base }}/ai/runs">
           <input type="hidden" name="prepared" value="{{ cc.ai.prepared }}">
           <input type="hidden" name="tab" value="overview">

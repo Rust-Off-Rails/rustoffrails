@@ -25,6 +25,10 @@
 }
 
 .jobs { font-variant-numeric: tabular-nums; }
+/* A phone never scrolls sideways: a wide table scrolls inside its .scroll box, and that box is the
+   containing block of the visually-hidden labels in its headers (absolute: else they sit at the
+   table's far edge, outside the box, and widen the page). */
+.jobs .scroll { position: relative; max-width: 100%; }
 .jobs h1 { font-size: 1.35rem; letter-spacing: -.01em; }
 .jobs h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 650; margin: 0; }
 .jobs .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .82rem; }

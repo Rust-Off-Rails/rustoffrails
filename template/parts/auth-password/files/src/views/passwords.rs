@@ -47,6 +47,8 @@ pub struct PasswordsNew {
 pub struct PasswordsEdit {
     pub ctx: Ctx,
     pub email: String,
+    /// An invitation link (the first password), not a reset.
+    pub invitation: bool,
     pub action: String,
     pub errors: Errors,
     pub strength: Option<Strength>,

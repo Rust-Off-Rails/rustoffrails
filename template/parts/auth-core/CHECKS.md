@@ -11,6 +11,8 @@ What "working and safe" means for the shared accounts layer, and the test that p
 | Spoofing | A sibling subdomain or an http response plants a `session_token` cookie | Production reads and writes only `__Host-` cookies (Secure, Path=/, no Domain) | `production_ignores_a_planted_unprefixed_session_cookie`, `production_auth_cookies_are_host_prefixed_and_secure` |
 | Spoofing | A token is guessed | 256-bit tokens from the OS CSPRNG | `tokens_are_long_unique_and_url_safe` |
 | Spoofing | A token comparison leaks its prefix through timing | Digest lookups; in-memory comparisons go through `constant_time_eq` | `constant_time_eq_compares_content` |
+| Spoofing | Someone signs themselves up to an invite-only app (`Signup::Invite`) | `config.auth.signup` decides for every method: auth-password's sign-up handlers take `SignupOpen` (a 404, nothing created or emailed); auth-magic-link sends links only to existing accounts and never creates one from a link | `invite_only_has_no_public_sign_up`, `invite_only_magic_links_go_only_to_existing_accounts`, `invite_only_magic_links_never_create_accounts` |
+| Spoofing | An invitation takes over an account that already has access, or a stale invitation link works forever | `auth_invite` refuses a verified account; invitation tokens are digest-only, single use, 7 days, and a new invitation kills the older link | `inviting_a_verified_account_changes_nothing`, `invitation_links_expire_and_a_new_invitation_replaces_the_old`, `an_invitation_sets_a_password_and_verifies_the_address` |
 | Tampering | Cross-site requests change state (CSRF) | tower-http `CsrfLayer` (Fetch Metadata + Origin) on every POST; GETs never change state | `cross_site_posts_to_auth_routes_are_refused`, `cross_site_posts_to_every_unsafe_route_are_403` |
 | Tampering | A crafted `return_to` cookie redirects to another site after sign-in | Only `/path` values, never `//`, `\`, control characters or absolute URLs | `return_to_rejects_open_redirects`, `only_local_paths_are_safe`, `a_tampered_cookie_is_ignored` |
 | Tampering | A guessed id revokes someone else's session | Revocation is scoped by `user_id` in the query; another user's id is a 404 | `revoking_another_users_session_is_404` |
@@ -58,6 +60,8 @@ What "working and safe" means for the shared accounts layer, and the test that p
 
 | Invariant | Test |
 |-----------|------|
+| `APP_AUTH_SIGNUP` is `open` or `invite` (else the config is invalid); unset means `DEFAULT_SIGNUP` | `the_signup_mode_comes_from_app_auth_signup` |
+| An invitation creates one unverified account, emails it, and is recorded; inviting again resends | `the_invite_task_creates_an_unverified_account_and_emails_it` |
 | The account page lists every session, marks this one, and its query count doesn't grow with them | `the_sessions_list_shows_devices_and_revokes_one_or_all_others`, `the_account_page_query_count_is_stable` |
 | Security emails have an HTML and a text part, absolute links, and escape what they show | `notices_carry_an_absolute_not_me_link_and_no_markup_injection` |
 | Background emails finish before `settle()` returns | `idle_waits_for_spawned_work` |

@@ -13,6 +13,7 @@ use offrails_host::{
         auth_throttle, pending_login, recovery_code, session, totp_credential, trusted_device,
         user, user_token,
     },
+    routes::paths,
 };
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, IntoActiveModel};
 
@@ -112,9 +113,10 @@ async fn a_password_alone_doesnt_sign_in_when_two_factor_is_on() {
         .assert_contains("autocomplete=\"one-time-code\"")
         .assert_contains("inputmode=\"numeric\"");
     let c = code(&app, &ada, 0).await;
+    // Back to the page that asked for sign-in (return-to), not `after_sign_in`.
     app.post_form("/two-factor", &[("code", &c)])
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::account());
     assert!(signed_in(&app));
     assert_eq!(
         session::all_for(app.db(), &ada).await.unwrap()[0].sign_in_method,
@@ -131,7 +133,10 @@ async fn users_without_two_factor_sign_in_directly() {
     let app = TestApp::new().await;
     let ada = factories::user(app.db(), "ada@example.com").await;
     let res = first_factor(&app, &ada).await;
-    assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/account");
+    assert_eq!(
+        res.headers().get(header::LOCATION).unwrap(),
+        &paths::after_sign_in()
+    );
     assert!(signed_in(&app));
 }
 
@@ -143,7 +148,7 @@ async fn a_totp_code_works_only_once() {
     first_factor(&app, &ada).await;
     app.post_form("/two-factor", &[("code", &c)])
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::after_sign_in());
     // Replay the same code in a second sign-in (a shoulder-surfer, a phishing relay).
     app.clear_cookies();
     first_factor(&app, &ada).await;
@@ -159,7 +164,7 @@ async fn a_totp_code_works_only_once() {
     let next = code(&app, &ada, 1).await;
     app.post_form("/two-factor", &[("code", &next)])
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::after_sign_in());
 }
 
 #[tokio::test]
@@ -270,7 +275,7 @@ async fn a_recovery_code_works_only_once() {
         &[("code", &codes[0].to_lowercase())],
     )
     .await
-    .assert_redirect_to("/account");
+    .assert_redirect_to(&paths::after_sign_in());
     assert_eq!(
         session::all_for(app.db(), &ada).await.unwrap()[0].sign_in_method,
         "recovery_code"
@@ -301,7 +306,10 @@ async fn a_recovery_code_used_twice_at_the_same_time_works_once() {
     );
     let wins = [&a, &b]
         .iter()
-        .filter(|r| r.status == StatusCode::SEE_OTHER && r.location() == Some("/account"))
+        .filter(|r| {
+            r.status == StatusCode::SEE_OTHER
+                && r.location() == Some(paths::after_sign_in().as_str())
+        })
         .count();
     assert_eq!(wins, 1, "statuses: {} and {}", a.status, b.status);
     assert_eq!(session::all_for(app.db(), &ada).await.unwrap().len(), 1);
@@ -531,10 +539,10 @@ async fn turning_two_factor_off_needs_a_fresh_code() {
     let c = code(&app, &ada, 0).await;
     app.post_form("/account/confirm/two-factor", &[("code", &c)])
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::account());
     app.post_form("/account/two-factor/delete", &[])
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::account());
     assert!(
         !totp_credential::enabled_for(app.db(), ada.id)
             .await
@@ -564,7 +572,7 @@ async fn a_recovery_code_also_confirms_identity() {
     age_sessions(&app, 30).await;
     app.post_form("/account/confirm/two-factor", &[("code", &codes[3])])
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::account());
     assert_eq!(recovery_code::remaining(app.db(), ada.id).await.unwrap(), 9);
 }
 
@@ -580,7 +588,7 @@ async fn a_trusted_device_skips_the_code_for_thirty_days() {
     let c = code(&app, &ada, 0).await;
     app.post_form("/two-factor", &[("code", &c), ("trust_device", "1")])
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::after_sign_in());
     assert!(app.cookie("trusted_device").is_some());
     app.get("/account")
         .await
@@ -590,7 +598,10 @@ async fn a_trusted_device_skips_the_code_for_thirty_days() {
     // Sign out, sign in again: no code needed on this browser.
     app.post_form("/session/delete", &[]).await;
     let res = first_factor(&app, &ada).await;
-    assert_eq!(res.headers().get(header::LOCATION).unwrap(), "/account");
+    assert_eq!(
+        res.headers().get(header::LOCATION).unwrap(),
+        &paths::after_sign_in()
+    );
     assert!(signed_in(&app));
 
     // Another browser still needs the code.
@@ -706,7 +717,7 @@ async fn credential_changes_and_not_me_forget_trusted_devices() {
     app.sign_in_as(&ada).await;
     app.post_form("/account/two-factor/delete", &[])
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::account());
     assert!(none_trusted().await, "turning two-factor off forgets them");
     assert!(
         !totp_credential::enabled_for(app.db(), ada.id)

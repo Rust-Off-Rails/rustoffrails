@@ -67,6 +67,8 @@ pub current_user: Option<crate::models::user::Model>,
 pub dev_mailbox: bool,
 /// `static/auth.js`, digested: the app layout loads it on every page (`samples: app head`).
 pub auth_js: String,
+/// Anyone may create an account (`config.auth.signup`): sign-up links show only then.
+pub signup_open: bool,
 '''
 
 [[wire]]
@@ -76,6 +78,7 @@ text = '''
 current_user: crate::controllers::auth::current_user(parts, state).await?,
 dev_mailbox: development && state.mailer.is_local(),
 auth_js: state.assets.path("auth.js"),
+signup_open: state.config.auth.signup.is_open(),
 '''
 
 [[wire]]
@@ -186,6 +189,42 @@ text = '''
 #[derive(Clone)]
 pub struct AuthConfig {
     pub secret_key: Vec<u8>,
+    /// Who may create an account: `APP_AUTH_SIGNUP`, else `DEFAULT_SIGNUP`.
+    pub signup: Signup,
+}
+
+/// Who may create an account. Every sign-in method follows it, so an invite-only app changes
+/// one line (or one env var), never its routes or its tests.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Signup {
+    /// Anyone: the sign-up form (auth-password) and a magic link's first use (auth-magic-link)
+    /// create accounts.
+    Open,
+    /// By invitation only: `app task auth_invite <email>` (or your admin screen calling
+    /// `auth_invite::invite`) creates accounts. The sign-up pages answer 404 and sign-in links go
+    /// only to addresses that have an account. Email verification stays: an invitation link
+    /// proves the address.
+    Invite,
+}
+
+/// APP: `Signup::Invite` for an invite-only app (`ACCOUNTS: … invite` in AGENTS.md). Set it here,
+/// not only in a deploy's env, so a forgotten variable can't open sign-up.
+pub const DEFAULT_SIGNUP: Signup = Signup::Open;
+
+impl Signup {
+    /// `APP_AUTH_SIGNUP`: `open` or `invite`; unset or empty means `DEFAULT_SIGNUP`.
+    pub fn parse(raw: Option<&str>) -> Result<Self, String> {
+        match raw.map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+            None | Some("") => Ok(DEFAULT_SIGNUP),
+            Some("open") => Ok(Signup::Open),
+            Some("invite") => Ok(Signup::Invite),
+            Some(other) => Err(format!("APP_AUTH_SIGNUP (expected open or invite, got {other:?})")),
+        }
+    }
+
+    pub fn is_open(self) -> bool {
+        self == Signup::Open
+    }
 }
 
 /// Development only, never accepted in production. Codes made with it are as worthless as the
@@ -194,7 +233,13 @@ const DEV_AUTH_SECRET_KEY: &str = "development-only-auth-key-not-a-secret-0001";
 
 impl AuthConfig {
     pub fn from_env(env: AppEnv, missing: &mut Vec<String>, invalid: &mut Vec<String>) -> Self {
-        Self::from_value(env, std::env::var("APP_SECRET_KEY").ok(), missing, invalid)
+        let mut auth = Self::from_value(env, std::env::var("APP_SECRET_KEY").ok(), missing, invalid);
+        auth.signup = Signup::parse(std::env::var("APP_AUTH_SIGNUP").ok().as_deref())
+            .unwrap_or_else(|problem| {
+                invalid.push(problem);
+                DEFAULT_SIGNUP
+            });
+        auth
     }
 
     pub fn from_value(
@@ -208,6 +253,7 @@ impl AuthConfig {
             // guessable (test: the_secret_key_must_be_long_enough_and_set_in_production)
             Some(key) if key.len() >= 32 => Self {
                 secret_key: key.into_bytes(),
+                signup: DEFAULT_SIGNUP,
             },
             Some(_) => {
                 invalid.push("APP_SECRET_KEY (at least 32 characters: openssl rand -base64 48)".into());
@@ -221,6 +267,7 @@ impl AuthConfig {
             }
             None => Self {
                 secret_key: DEV_AUTH_SECRET_KEY.as_bytes().to_vec(),
+                signup: DEFAULT_SIGNUP,
             },
         }
     }
@@ -229,7 +276,10 @@ impl AuthConfig {
     pub fn test() -> Self {
         let mut key = vec![0u8; 32];
         rand::fill(&mut key[..]);
-        Self { secret_key: key }
+        Self {
+            secret_key: key,
+            signup: DEFAULT_SIGNUP,
+        }
     }
 }
 
@@ -237,6 +287,7 @@ impl std::fmt::Debug for AuthConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AuthConfig")
             .field("secret_key", &"[redacted]")
+            .field("signup", &self.signup)
             .finish()
     }
 }
@@ -337,6 +388,7 @@ anchor = "task mods"
 text = '''
 pub mod auth_cleanup;
 pub mod auth_demo;
+pub mod auth_invite;
 '''
 
 [[wire]]
@@ -345,6 +397,7 @@ anchor = "tasks"
 text = '''
 "auth_cleanup" => auth_cleanup::run(state, args).await,
 "auth_demo" => auth_demo::run(state, args).await,
+"auth_invite" => auth_invite::run(state, args).await,
 '''
 
 [[wire]]
@@ -373,6 +426,8 @@ anchor = "env"
 text = '''
 # --- accounts (auth-core): required in production, at least 32 characters ---
 # APP_SECRET_KEY=generate-with-openssl-rand-base64-48
+# Who may create an account: open (anyone) or invite (app task auth_invite <email>). Default: DEFAULT_SIGNUP in src/config.rs.
+# APP_AUTH_SIGNUP=open
 '''
 
 [[wire]]
@@ -380,6 +435,7 @@ file = "compose.yaml"
 anchor = "compose env"
 text = '''
 APP_SECRET_KEY: ${APP_SECRET_KEY:?set APP_SECRET_KEY (openssl rand -base64 48)}
+APP_AUTH_SIGNUP: ${APP_AUTH_SIGNUP:-}
 '''
 
 [[wire]]

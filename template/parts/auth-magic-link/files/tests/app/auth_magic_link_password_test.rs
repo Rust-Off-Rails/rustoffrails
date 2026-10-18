@@ -7,7 +7,10 @@
 //! would now sign in to Ada's verified account.
 
 use axum::http::StatusCode;
-use offrails_host::models::{password_credential, user, user_token};
+use offrails_host::{
+    models::{password_credential, user, user_token},
+    routes::paths,
+};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
 use crate::auth_magic_link_test::{code_in, mail_for, signed_in};
@@ -77,36 +80,36 @@ async fn assert_mallory_is_out(app: &TestApp, verification_link: &str) {
 
 #[tokio::test]
 async fn a_password_set_before_verification_dies_when_the_owner_signs_in_by_link() {
-    let app = TestApp::new().await;
+    let app = crate::auth_magic_link_test::open_app().await;
     let verification = mallory_registers_adas_address(&app).await;
     let mail = mail_for(&app, "ada@example.com").await;
     app.post_form(&app.link_in(&mail, "/login_links/"), &[])
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::after_sign_in());
     assert!(signed_in(&app), "Ada is in");
     assert_mallory_is_out(&app, &verification).await;
 }
 
 #[tokio::test]
 async fn a_password_set_before_verification_dies_when_the_owner_signs_in_by_code() {
-    let app = TestApp::new().await;
+    let app = crate::auth_magic_link_test::open_app().await;
     let verification = mallory_registers_adas_address(&app).await;
     let mail = mail_for(&app, "ada@example.com").await;
     app.post_form("/login_links/code", &[("code", &code_in(&mail))])
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::after_sign_in());
     assert!(signed_in(&app), "Ada is in");
     assert_mallory_is_out(&app, &verification).await;
 }
 
 #[tokio::test]
 async fn a_verified_accounts_password_survives_a_magic_link_sign_in() {
-    let app = TestApp::new().await;
+    let app = crate::auth_magic_link_test::open_app().await;
     let ada = crate::factories::user_with_password(app.db(), "ada@example.com").await;
     let mail = mail_for(&app, "ada@example.com").await;
     app.post_form(&app.link_in(&mail, "/login_links/"), &[])
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::after_sign_in());
     assert!(
         password_credential::changed_at(app.db(), ada.id)
             .await

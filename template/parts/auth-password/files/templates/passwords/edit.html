@@ -2,13 +2,24 @@
 {% block content %}
 <section class="mx-auto max-w-md">
   <div class="rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-6 shadow-sm sm:p-8">
+    {% if invitation %}
+    {# APP: the invitation's welcome copy #}
+    <h1 class="text-2xl font-semibold tracking-tight">Choose your password</h1>
+    <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">Welcome to {{ crate::config::APP_NAME }}. Your account is <strong class="font-medium text-gray-900 dark:text-gray-100">{{ email }}</strong>.</p>
+    {% else %}
     <h1 class="text-2xl font-semibold tracking-tight">Choose a new password</h1>
     <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">For <strong class="font-medium text-gray-900 dark:text-gray-100">{{ email }}</strong>. Every other device will be signed out.</p>
+    {% endif %}
     {% include "shared/_dev_mailbox_hint.html" %}
     <form method="post" action="{{ action }}" class="mt-2" novalidate>
       <input type="hidden" name="username" autocomplete="username" value="{{ email }}">
+      {% if invitation %}
+      {% let new_password_label = "Password" %}
+      {% include "passwords/_new_password.html" %}
+      {% else %}
       {% let new_password_label = "New password" %}
       {% include "passwords/_new_password.html" %}
+      {% endif %}
       <button class="btn mt-6 w-full justify-center">Save and sign in</button>
     </form>
   </div>

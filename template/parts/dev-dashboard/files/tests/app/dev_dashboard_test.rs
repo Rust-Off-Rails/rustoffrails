@@ -171,6 +171,16 @@ fn the_dashboard_stylesheet_follows_the_theme_switch() {
     }
 }
 
+/// At a phone's width no tab scrolls sideways: a wide table scrolls inside its `.scroll` box, and
+/// the box contains the absolutely positioned visually-hidden labels in its cells (before, they sat
+/// at the table's far edge and widened the requests and lab pages). A real browser checks every
+/// tab at 390 px in `tools/e2e.sh` (`tools/screenshots/fit-phone.mjs`).
+#[test]
+fn wide_tables_scroll_inside_their_box_on_a_phone() {
+    let css = std::fs::read_to_string("static/kernel/dashboard.css").unwrap();
+    assert!(css.contains(".dash .scroll { position: relative; max-width: 100%; }"));
+}
+
 /// The dashboard replaces the host's System and Routes tabs; their pages stay as the fallback.
 #[tokio::test]
 async fn the_dashboard_replaces_the_system_and_routes_tabs() {
@@ -3941,6 +3951,81 @@ fn suggestions_are_derived_from_the_findings() {
     // Nothing found: general questions, the data model among them.
     let quiet = ai_home::suggestions(&facts(Vec::new(), Vec::new()));
     assert!(quiet.contains(&"Explain the data model".to_owned()));
+}
+
+/// The AI briefing's bottom line is on the page when it loads: at the top of the AI briefing card
+/// and in the command center's bar (so it reads even collapsed), from the latest finished run,
+/// also while a newer one is still being written.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_ai_briefing_summary_shows_on_load() {
+    let dir = tempfile::tempdir().unwrap();
+    *lock(&HUB.tests.root) = Some(dir.path().to_owned());
+    let (base, _) = scripted_provider(
+        vec![a_text(
+            "Watch: one N+1 on the orders page slows it down [route:GET /dev/lab/orders/n-plus-one].\n\n## Needs attention\n- The N+1.\n\n## Fix first\nLoad the children with load_many.",
+        )],
+        Duration::ZERO,
+    )
+    .await;
+    let app = ai_app(ai_config(AiProvider::Anthropic, &base)).await;
+    let page = app.get("/dev/dashboard").await;
+    page.assert_ok().assert_not_contains("data-cc-summary");
+    let (prepared, _) = preview_of(&page.body);
+    let form = [
+        ("prepared", prepared.as_str()),
+        ("tab", "overview"),
+        ("item", ""),
+        ("kind", "health"),
+    ];
+    app.post_form("/dev/dashboard/ai/ask", &form)
+        .await
+        .assert_ok();
+    let page = app.get("/dev/dashboard").await;
+    page.assert_ok()
+        .assert_contains("data-cc-summary")
+        .assert_contains("data-cc-ai-line")
+        .assert_text("Full briefing")
+        .assert_not_contains("a new briefing is being written");
+    let bar = page.body.split("class=\"cc-summary\"").nth(1).unwrap();
+    let bar = bar.split("</summary>").next().unwrap();
+    assert!(
+        bar.contains("Watch: one N+1 on the orders page slows it down"),
+        "the bottom line is in the collapsed bar"
+    );
+    let card = page.body.split("data-cc-summary").nth(1).unwrap();
+    let card = card.split("</div>").take(2).collect::<String>();
+    assert!(card.contains("one N+1 on the orders page"), "{card}");
+    assert!(
+        !card.contains("Fix first"),
+        "only the bottom line, the rest is below"
+    );
+    assert!(
+        page.body.find("data-cc-summary").unwrap() < page.body.find("data-ai-send").unwrap(),
+        "above the Regenerate button, not inside a closed <details>"
+    );
+
+    // A newer briefing still investigating: the finished one's summary stays on top.
+    let (slow, _) = scripted_provider(vec![a_text("Healthy.")], Duration::from_secs(20)).await;
+    let app = ai_app(ai_config(AiProvider::Anthropic, &slow)).await;
+    let page = app.get("/dev/dashboard").await;
+    let (prepared, _) = preview_of(&page.body);
+    app.post_form_with_headers(
+        "/dev/dashboard/ai/runs",
+        &[
+            ("prepared", prepared.as_str()),
+            ("tab", "overview"),
+            ("item", ""),
+            ("kind", "health"),
+        ],
+        &[("x-dashboard-fragment", "1")],
+    )
+    .await
+    .assert_ok();
+    let page = app.get("/dev/dashboard").await;
+    page.assert_ok()
+        .assert_text("Watch: one N+1 on the orders page slows it down")
+        .assert_text("a new briefing is being written below")
+        .assert_contains("data-stream=");
 }
 
 /// The overview opens with the command center, expanded (`open`, so it is expanded without

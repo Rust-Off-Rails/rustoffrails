@@ -148,7 +148,7 @@ text = '''
 file = "templates/shared/_auth_nav.html"
 anchor = "auth nav links"
 text = '''
-<a href="{{ paths::new_registration() }}" class="rounded-md bg-indigo-600 px-3 py-1 font-medium text-white hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-950">Sign up</a>
+{% if ctx.signup_open %}<a href="{{ paths::new_registration() }}" class="rounded-md bg-indigo-600 px-3 py-1 font-medium text-white hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-950">Sign up</a>{% endif %}
 '''
 
 [[wire]]
@@ -223,6 +223,14 @@ let digest = crate::models::password_credential::hash(password.to_owned()).await
 crate::models::password_credential::set(&state.db, user.id, digest.clone(), now).await?;
 crate::models::password_credential::set(&state.db, two_factor.id, digest, now).await?;
 println!("  password:  {password} (both accounts)");
+'''
+
+[[wire]]
+file = "src/tasks/auth_invite.rs"
+anchor = "auth invite"
+text = '''
+// auth-password: the button sets a password (an invitation link), which also verifies the address.
+crate::controllers::passwords::invitation_link(state, &user, &mut mail).await?;
 '''
 
 [[wire]]

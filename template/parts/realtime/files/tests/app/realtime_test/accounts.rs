@@ -7,6 +7,7 @@ use axum::http::{HeaderMap, HeaderValue, header};
 use offrails_host::config::{AppEnv, Config};
 use offrails_host::controllers::auth::{self, RequestMeta};
 use offrails_host::models::{auth_event::Meta, user};
+use offrails_host::routes::paths;
 use serde_json::json;
 
 use super::client::{Ws, guest, serve};
@@ -42,7 +43,7 @@ async fn signing_out_everywhere_else_closes_the_other_devices_sockets() {
     app.set_cookie("session_token", &ann.token);
     app.post_form("/account/sessions/delete-others", &[])
         .await
-        .assert_redirect_to("/account");
+        .assert_redirect_to(&paths::account());
     assert_eq!(phone.closed().await, (4401, Some("revoked".into())));
     assert_eq!(laptop.request(json!({ "t": "ping" })).await["t"], "pong");
 }

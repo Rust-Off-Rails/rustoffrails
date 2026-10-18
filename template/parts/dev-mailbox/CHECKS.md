@@ -26,6 +26,7 @@ The mailbox renders mail that the app (and, through it, anyone who can type into
 | Invariant | Test |
 |-----------|------|
 | Every mailbox page links its own stylesheet and script, never `app.css` (the bug this sample fixes) | `every_mailbox_page_links_its_own_stylesheet_and_script` |
+| The codes panel shows one-time codes only: a year or a date ("Published 18 October 2026") never appears as a code | `codes_and_links_are_extracted_with_copy_buttons`, `dates_and_years_in_a_message_are_not_shown_as_codes` |
 | Every class a mailbox template uses has a rule in `admin.css` or `mailbox.css` | `every_mailbox_class_has_a_rule` |
 | Opening a message marks it read; the inbox opens the newest | `opening_a_message_marks_it_read_and_shows_its_parts` |
 | A deleted message's URL redirects to the inbox with a flash, never a bare 404 | `delete_clear_and_gone_messages_redirect_with_a_flash` |

@@ -1,6 +1,6 @@
 # auth-password
 
-Email + password accounts, done the way current guidance says (NIST SP 800-63B, the OWASP cheat sheets): sign-up with email verification, sign-in, password reset, change password, and the protections around them. It is the `ACCOUNTS: signup` variant of the framework's auth guide, built on [auth-core](../auth-core/) (sessions, account page, re-auth, security emails, audit trail).
+Email + password accounts, done the way current guidance says (NIST SP 800-63B, the OWASP cheat sheets): sign-up with email verification, sign-in, password reset, change password, and the protections around them. It is the `ACCOUNTS: password` variant of the framework's auth guide (`signup` in older headers), and `ACCOUNTS: password invite` with sign-up closed, built on [auth-core](../auth-core/) (sessions, account page, re-auth, security emails, audit trail).
 
 - **argon2id with OWASP's parameters** (19 MiB, 2 iterations, 1 lane), run on the blocking pool; hashes made with older parameters are **upgraded on the next sign-in**.
 - **Sign-up that never reveals existing accounts**: every submit says "check your email"; a new address gets a verification link, an existing one gets "you already have an account". Nobody is signed in before the address is verified.
@@ -8,6 +8,7 @@ Email + password accounts, done the way current guidance says (NIST SP 800-63B, 
 - **Sign-in with no enumeration**: one argon2 verify on every path (a dummy hash for unknown addresses), the same queries, the same 422 page.
 - **Progressive delays per account** (5 free failures, then 30 s, 1 m, 2 m … up to 15 m), identical for unknown addresses, plus a per-network limit; refused attempts never extend a pause; the owner is emailed when sign-in is paused, and a **password reset unlocks** at once.
 - **Reset by single-use, hashed, 30-minute links**, minted inside the background task that sends them; a reset or change of password kills every older link and ends every other session.
+- **Open or invite-only** from one switch in auth-core (`Signup`, `APP_AUTH_SIGNUP`): invite-only answers 404 on `/registration*`, hides "Sign up" and "Create an account", and `app task auth_invite <email>` emails a single-use, 7-day link to choose a password (it verifies the address and signs in). Sign-in, reset and verification work the same in both modes.
 - **Change password** needs the current password *and* a recent re-auth; this device stays signed in with a fresh token, every other device is signed out, and the owner is emailed.
 - **Passwords people can live with**: 12 to 72 characters, spaces and paste welcome, no composition rules; a **bundled common-password check** (offline, ~400 entries plus leetspeak, sequences, repeats, the email's name and the site's name).
 - **A strength meter that works without JavaScript** (rendered by the server after a submit) and live while typing with htmx (a POST, never a URL); **show/hide password**, a **Caps Lock hint**, `autocomplete` hints for password managers (`username`, `current-password`, `new-password`).
@@ -48,7 +49,7 @@ By hand, in the app root (install [auth-core](../auth-core/) first, which brings
    - `src/models/mod.rs`: `password_credential`, `password_policy`.
    - `src/controllers/mod.rs`: `account_passwords`, `password_sessions`, `passwords`, `registrations`; `src/views/mod.rs`: `passwords`.
    - `src/routes.rs`: the routes below, their `paths::` helpers and `ROUTES` rows.
-   - auth-core's files: the password form in `templates/sessions/new.html` (`sign in methods`) and the sign-up link (`sign in links`); "Sign up" in `templates/shared/_auth_nav.html`; the password card on the account page (`account fields` in `src/views/auth.rs`, `account load`/`account init` in `src/controllers/account.rs`, `account sections` in `templates/account/show.html`); the password form on "Confirm it's you" (`confirm fields`, `confirm load`, `confirm init`, `confirm methods`); the demo password in `src/tasks/auth_demo.rs`; the password's removal at `claim unverified account` in `src/controllers/auth.rs`.
+   - auth-core's files: the set-password link in invitations (`auth invite` in `src/tasks/auth_invite.rs`); the password form in `templates/sessions/new.html` (`sign in methods`) and the sign-up link (`sign in links`); "Sign up" in `templates/shared/_auth_nav.html` (inside `{% if ctx.signup_open %}`); the password card on the account page (`account fields` in `src/views/auth.rs`, `account load`/`account init` in `src/controllers/account.rs`, `account sections` in `templates/account/show.html`); the password form on "Confirm it's you" (`confirm fields`, `confirm load`, `confirm init`, `confirm methods`); the demo password in `src/tasks/auth_demo.rs`; the password's removal at `claim unverified account` in `src/controllers/auth.rs`.
    - `migration/src/lib.rs`: the `password_credentials` migration.
    - `src/kernel/redact.rs`: `/email-verification/{token}`, `/passwords/{token}/edit` and `/passwords/{token}` in `TOKEN_ROUTES`, so logs show `[redacted]` for them.
    - `tests/app/main.rs`: `mod auth_password_test;`; `tests/app/factories.rs`: `PASSWORD` and `user_with_password()`.
@@ -58,7 +59,7 @@ By hand, in the app root (install [auth-core](../auth-core/) first, which brings
 
 ## After installing
 
-- `ACCOUNTS: signup` in `AGENTS.md`; log the install in `docs/decisions.md`.
+- `ACCOUNTS: password` in `AGENTS.md` (`password+magic-link`, `password invite`, …: auth-core's README, "After installing"); log the install in `docs/decisions.md`.
 - Production needs a real mail provider (`SMTP_URL`): verification and resets are emails.
 - Try it: `cargo run -- task auth_demo` prints `demo@example.com` / `not-a-real-password-42` (development only).
 
@@ -75,7 +76,7 @@ Each sample wires into auth-core's anchors, so install order doesn't matter (`to
 
 ## Adapting it
 
-- **Invite-only accounts** (`ACCOUNTS: invite`): remove the `/registration*` routes and the "Sign up"/"Create an account" links (the `auth nav links` and `sign in links` wiring); create users from an admin screen or a task with `user::find_or_create` + `password_credential::set`, and send them a reset link (`passwords::send_reset`) to choose a password.
+- **Invite-only accounts** (`ACCOUNTS: password invite`): set `DEFAULT_SIGNUP = Signup::Invite` in `src/config.rs` (`// APP:`, auth-core). That's all: the sign-up pages answer 404, the links disappear, and `app task auth_invite <email>` invites people (each gets a "Choose your password" link). Keep the routes, the templates and every test: the sign-up tests ask for `Signup::Open` themselves and the invite-only tests for `Signup::Invite`. The wording under the sign-in form is `{# APP: #}` in `templates/password_sessions/_links.html`.
 - **Stronger hashing**: raise `M_COST_KIB` / `T_COST` in `src/models/password_credential.rs` (`// APP:`); existing hashes upgrade on sign-in. Keep a sign-in under ~250 ms on your servers.
 - **A bigger breach list**: append lines to `src/models/common_passwords.txt` (`// APP:`), or check a k-anonymity breach API in `password_policy::problem` (it's network and a third party: decide it explicitly and log it in `docs/decisions.md`).
 - **Length rules**: `MIN_CHARS` / `MAX_CHARS` in `password_policy.rs` (`// APP:`). Never lower the minimum below 12.
@@ -91,16 +92,17 @@ Each sample wires into auth-core's anchors, so install order doesn't matter (`to
 - Change password needs the current one and re-auth (`changing_the_password_needs_the_current_one`, `password_reauth_confirms_and_returns`).
 - `SignInParams`'s hand-written `Debug` and no `Debug` on the other params (`sign_in_params_debug_hides_the_password`, `passwords_and_reset_tokens_never_reach_the_logs`).
 - The strength meter is a POST (`the_strength_meter_works_by_post_only`).
+- The sign-up handlers take `SignupOpen` (`invite_only_has_no_public_sign_up`); an invitation link is a single-use token that verifies the address (`an_invitation_sets_a_password_and_verifies_the_address`, `invitation_links_expire_and_a_new_invitation_replaces_the_old`).
 
 ## How it works
 
 | Route | Handler | Access |
 |-------|---------|--------|
 | `POST /session/password` | sign in | public |
-| `GET /registration/new`, `POST /registration`, `GET /registration/sent` | sign up, "check your email" | public |
+| `GET /registration/new`, `POST /registration`, `GET /registration/sent` | sign up, "check your email" | public (404 under `Signup::Invite`) |
 | `GET`/`POST /email-verification/{token}` | verify (one click in the sign-up browser, else the password) | public (token) |
 | `GET /passwords/new`, `POST /passwords`, `GET /passwords/sent` | forgot password | public |
-| `GET /passwords/{token}/edit`, `POST /passwords/{token}` | choose a new password | public (token) |
+| `GET /passwords/{token}/edit`, `POST /passwords/{token}` | choose a new password (a reset), or the first one (an invitation) | public (token) |
 | `POST /password-strength` | the meter fragment (htmx) | public |
 | `GET /account/password/edit`, `POST /account/password` | change or set a password | user, recent re-auth |
 | `POST /account/confirm/password` | re-auth with the password | user |
@@ -115,7 +117,7 @@ Each sample wires into auth-core's anchors, so install order doesn't matter (`to
 | `src/models/password_policy.rs`, `src/models/common_passwords.txt` | length, common passwords, patterns; the strength estimate |
 | `src/controllers/password_sessions.rs` | sign in; re-auth with the password |
 | `src/controllers/registrations.rs` | sign up; email verification |
-| `src/controllers/passwords.rs` | forgot/reset; the strength meter |
+| `src/controllers/passwords.rs` | forgot/reset; invitations' set-password link; the strength meter |
 | `src/controllers/account_passwords.rs` | change or set a password |
 | `src/views/passwords.rs` | page structs |
 | `templates/password_sessions/`, `registrations/`, `passwords/`, `account_passwords/`, `account/_password_section.html` | the screens and partials |

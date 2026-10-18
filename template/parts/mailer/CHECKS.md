@@ -28,7 +28,8 @@ The mailer has no routes of its own. Its attack surface is what it puts into a m
 | Every preview renders, and previews are never sent or stored | `every_preview_renders_and_is_never_sent_or_stored` |
 | `app task send_test_email <address>` goes through the selected mailer | `the_send_test_email_task_delivers_through_the_selected_mailer` |
 | Mailbox search treats `%` and `_` literally and is case-insensitive on both databases | `mailbox_search_trim_and_latest`, `like_wildcards_are_literal` |
-| Links and one-time codes are extracted from the decoded text, never the quoted-printable `.eml` | `links_come_from_text_then_html_hrefs_without_trailing_punctuation`, `codes_are_found_where_a_line_talks_about_a_code`, `years_prices_and_words_are_not_codes` |
+| Links and one-time codes are extracted from the decoded text, never the quoted-printable `.eml` | `links_come_from_text_then_html_hrefs_without_trailing_punctuation`, `codes_are_found_where_a_line_talks_about_a_code`, `years_prices_and_words_are_not_codes`, `dates_and_years_are_not_codes_even_next_to_the_word_code` |
+| A code needs context: a code word a few words away, the line above, or a 6-digit line of its own; a year or a date is never one (a post titled "… code in 2026" once showed "CODE 2026") | `dates_and_years_are_not_codes_even_next_to_the_word_code`, `dates_and_years_in_a_message_are_not_shown_as_codes` |
 | The migration rolls back and forward | `the_mailbox_migration_rolls_back_and_forward` |
 
 ## Commands

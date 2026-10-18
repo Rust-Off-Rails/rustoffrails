@@ -1,5 +1,5 @@
 //! Single-use emailed tokens for an existing account: email verification, password reset,
-//! email change and "this wasn't me". One table, one recipe, like phx.gen.auth's `users_tokens`.
+//! email change, "this wasn't me" and invitations. One table, one recipe, like phx.gen.auth's `users_tokens`.
 //!
 //! GUIDE: .offrails/guides/auth.md#password-reset-passwordsrs-new-create-edit-update
 //!
@@ -62,6 +62,9 @@ pub enum Purpose {
     /// The link in security notices: signs the account out everywhere.
     #[sea_orm(string_value = "not_me")]
     NotMe,
+    /// An invitation (`app task auth_invite`): with auth-password, the link to choose a password.
+    #[sea_orm(string_value = "invitation")]
+    Invitation,
 }
 
 impl Purpose {
@@ -73,6 +76,7 @@ impl Purpose {
             Purpose::PasswordReset => Duration::minutes(30),
             Purpose::EmailChange => Duration::hours(1),
             Purpose::NotMe => Duration::days(7),
+            Purpose::Invitation => Duration::days(7),
         }
     }
 
@@ -83,7 +87,10 @@ impl Purpose {
 
     /// Valid only while the account's email still equals `sent_to`.
     fn bound_to_current_email(self) -> bool {
-        matches!(self, Purpose::EmailVerification | Purpose::PasswordReset)
+        matches!(
+            self,
+            Purpose::EmailVerification | Purpose::PasswordReset | Purpose::Invitation
+        )
     }
 }
 

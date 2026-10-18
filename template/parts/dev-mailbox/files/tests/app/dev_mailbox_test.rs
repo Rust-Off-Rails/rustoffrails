@@ -396,6 +396,29 @@ async fn codes_and_links_are_extracted_with_copy_buttons() {
 }
 
 #[tokio::test]
+async fn dates_and_years_in_a_message_are_not_shown_as_codes() {
+    // A "post published" email once showed "CODE 2026" (a year mistaken for a sign-in code).
+    let app = dev_app().await;
+    let id = deliver(
+        &app,
+        Email::new(
+            "ada@example.com",
+            "Your post is live",
+            "<p>Your post <em>Writing code in 2026</em> is live.</p>",
+            "Your post \"Writing code in 2026\" is live.\n\nPublished on 18 October 2026 at 10:30 (2026-10-18).\n\n2026\n\nRead it: http://localhost:3000/posts/42\n",
+        ),
+    )
+    .await;
+    let page = app.get(&format!("/dev/mailbox/{id}")).await;
+    page.assert_ok()
+        .assert_not_contains("mbx-codes")
+        .assert_not_contains(r#"data-copy="2026""#)
+        .assert_contains(r#"data-copy="http://localhost:3000/posts/42""#);
+    let m = mailbox::find(app.db(), id).await.unwrap().unwrap();
+    assert!(mailbox::codes_in(&m.text).is_empty());
+}
+
+#[tokio::test]
 async fn checks_flag_what_breaks_in_real_inboxes() {
     let flagged = checks(
         "",
