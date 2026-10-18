@@ -44,7 +44,7 @@ The template already has `CLAUDE.md` (`@AGENTS.md`), `.cursor/rules/offrails.mdc
 | `AGENTS.md` | Written from [`blueprints/AGENTS.md`](../blueprints/AGENTS.md) with the template's defaults (`htmx`, `API: none`, `ACCOUNTS: none`, `TENANCY: none`, and `EMAIL`/`ACCOUNTS` set by the parts). Set every header line from the interview; never one the code doesn't match yet (`TENANCY` changes when [`authentication.md`](authentication.md) builds the tenancy suites) |
 | `product/README.md` | Written from [`blueprints/product-README.md`](../blueprints/product-README.md) with the name filled; write the rest from the interview |
 | `product/features/` | one spec per feature from the confirmed plan ([`blueprints/feature-spec.md`](../blueprints/feature-spec.md)). They're built after step 5 |
-| `static/` brand assets | `bash .offrails/tools/brand/render.sh "<APP_NAME>" "<accent>" "<one-line pitch>" static` (headless Chrome; without it, `rsvg-convert`; with neither it keeps the template's neutral set: log that in `docs/decisions.md`) |
+| `static/` brand assets | `new` renders them from `brand.toml` (`cargo offrails brand`: headless Chrome, else `rsvg-convert`; with neither the PNGs keep the template's look and it says so: log that in `docs/decisions.md`). Set the colors, fonts and logo in `brand.toml` and re-run |
 
 Design: follow any references from the interview. Otherwise keep the template's clean, neutral Tailwind design.
 
@@ -160,7 +160,7 @@ After `cargo fmt --all`, none may trail code: `grep -rnE '[^[:space:]].*(//|\{#|
 ### Frontend
 
 - Templates: every class in both color schemes ([views](../guides/views.md#dark-mode); `tests/app/theme_test.rs` enforces it); `templates/layouts/application.html` (the `htmx-config` meta from [frontend-htmx](../guides/frontend-htmx.md#required-config-swap-422-responses), `data-theme` from the theme cookie, `dev-reload.js` in development), `templates/shared/{_flash,_errors,_nav}.html`, `templates/home/index.html`, the standalone error pages `templates/errors/{404,403,429,500,503}.html` and the `_invalid.html` fragment, and `templates/kernel/` (layout, `/dev` pages).
-- Assets: `assets/app.css` (Tailwind 4, the `dark` variant that follows the theme switch, the component layer), `static/app.js`, `static/dev-reload.js` ([dev-tools](../guides/dev-tools.md#hot-reload)), `static/kernel/admin.{css,js}`, htmx and its sse extension in `static/vendor/` ([frontend-htmx](../guides/frontend-htmx.md#setup-done-by-generatorsnewmd)), and the brand set (`favicon.svg`, `favicon.ico`, `apple-touch-icon.png`, `icon-512.png`, `og.png`, source `assets/brand/og.html`).
+- Assets: `assets/app.css` (Tailwind 4, the `dark` variant that follows the theme switch, the component layer), `static/app.js`, `static/dev-reload.js` ([dev-tools](../guides/dev-tools.md#hot-reload)), `static/kernel/admin.{css,js}`, htmx and its sse extension in `static/vendor/` ([frontend-htmx](../guides/frontend-htmx.md#setup-done-by-generatorsnewmd)), the brand (`brand.toml` → `assets/brand.css`, `src/brand.rs`, `favicon.svg`, `favicon.ico`, `apple-touch-icon.png`, `icon-512.png`, `og.png` from `assets/brand/og.svg`), the five layouts (`templates/layouts/`), the component kit (`templates/components/ui.html`, `static/components.js`) and its gallery at `/dev/components`.
 - Links into kernel pages carry `hx-boost="false"` ([dev-tools](../guides/dev-tools.md#rules)).
 
 ### Scripts & ops files

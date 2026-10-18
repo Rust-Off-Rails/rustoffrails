@@ -33,7 +33,9 @@ migration/   templates/   static/   web/ (TS modes)   tests/app/ (ONE test binar
 ```sh
 cargo offrails verify          # after every slice: fmt --check, CSS, clippy, one test build, SQLite + Postgres at once (seconds)
 cargo offrails verify --full   # once, at the end: + offrails-check, coverage ≥80% (≥90% models + policies), cargo deny,
-                               #   gitleaks, no-unwrap review, routes, TS checks (web/), browser smoke (BASE=…)
+                               #   gitleaks, no-unwrap review, routes, TS checks (web/), browser smoke, `prove` (BASE=…)
+BASE=… cargo offrails prove    # every page: screenshots (desktop/mobile × light/dark), console, CSP, axe, links, overflow
+                               #   → docs/proof/PROOF.md; link it in your final message
 cargo nextest run <name>       # while a test is red: just that test (never the full DoD per edit)
 ```
 

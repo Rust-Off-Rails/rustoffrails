@@ -257,6 +257,28 @@ expect "no Host check fails" "$d" 1 "no Host check: development answers any Host
 d=$(make_app routes); : > "$d/docs/routes.md"
 expect "a stale docs/routes.md only warns" "$d" 0 "docs/routes.md is missing ROUTES path(s): /notes/{id}"
 
+# Long ad-hoc class lists on buttons and inputs: a warning, never an error; silenced per line.
+d=$(make_app classes); mkdir -p "$d/templates/posts" "$d/templates/components"
+cat > "$d/templates/posts/index.html" <<'EOF2'
+<button class="btn">Save</button>
+<button type="submit" class="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500">Go</button>
+<a href="/x" class="rounded-md bg-indigo-600 px-3 py-1 font-medium text-white hover:bg-indigo-500 focus:outline-none focus-visible:ring-2">Sign up</a>
+<a href="/y" class="text-sm text-gray-700 dark:text-gray-300 underline underline-offset-2 hover:text-gray-900 dark:hover:text-white focus:outline-none">a plain link</a>
+<input name="q" class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm {{ extra }}">
+<button class="inline-flex items-center rounded-md bg-white px-4 py-2 text-sm font-medium text-gray-900 shadow-sm">Ok</button>{# offrails-check: classes ok (the hero's white button) #}
+EOF2
+cp "$d/templates/posts/index.html" "$d/templates/components/ui.html"
+expect "long class lists on buttons and inputs only warn, and can be silenced" "$d" 0 "0 error(s)" \
+  "WARN [classes] templates/posts/index.html:2: <button> with 10 classes" \
+  "WARN [classes] templates/posts/index.html:3: <a> with 9 classes" \
+  "WARN [classes] templates/posts/index.html:5: <input> with 9 classes" "3 warning(s)"
+out=$(sh "$CHECK" "$d" 2>&1 || true)
+if printf '%s\n' "$out" | grep -qE 'index.html:(1|4|6):|\[classes\] templates/components'; then
+  failures=$((failures + 1)); printf 'FAIL classes: flagged a short list, a plain link, a silenced line or the kit itself\n%s\n' "$out"
+else
+  printf 'ok   classes: short lists, plain links, silenced lines and the kit itself are not flagged\n'
+fi
+
 echo
 if [ "$failures" = 0 ]; then
   echo "offrails-check: all fixture cases behave"

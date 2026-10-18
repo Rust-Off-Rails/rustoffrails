@@ -26,6 +26,10 @@ Checks a Rust off Rails app (default: the current directory):
   bind         development listens on this machine only: no 0.0.0.0 literal bind in src/, config.rs
                reads APP_BIND, and kernel::hosts refuses foreign Host names (DNS rebinding)
   routes       docs/routes.md lists every ROUTES path (warning only)
+  classes      app templates (outside templates/components, kernel, mailers) with long ad-hoc class
+               lists on <button>, <input>, <select>, <textarea> or a button-like <a>: use the
+               component kit (warning only; CLASS_LIST_MAX, default 8; silence one line with
+               {# offrails-check: classes ok #})
 
 Exit status: 0 when there are no errors (warnings allowed), 1 otherwise, 2 on bad usage.
 EOF
@@ -363,6 +367,46 @@ if [ -f src/routes.rs ] && grep -q 'pub const ROUTES' src/routes.rs; then
     else
       pass routes "docs/routes.md lists every ROUTES path"
     fi
+  fi
+fi
+
+# ---- component classes (warning) ----------------------------------------------------------------
+# A <button> with fourteen utilities is the kit written out by hand: it drifts from the brand and
+# from dark mode one copy at a time. templates/components/ui.html (and the .btn/.input classes in
+# assets/app.css) say it in a few words. A deliberate one ends its line with
+# {# offrails-check: classes ok #} (a reason after "ok" is welcome).
+if [ -d templates ]; then
+  class_hits=$(find templates -name '*.html' ! -path 'templates/components/*' ! -path 'templates/kernel/*' \
+      ! -path 'templates/mailers/*' 2>/dev/null | sort | while IFS= read -r f; do
+    awk -v f="$f" -v max="${CLASS_LIST_MAX:-8}" '
+      /offrails-check: classes ok/ { next }
+      {
+        rest = $0
+        while (match(rest, /<(button|input|select|textarea|a)[[:space:]][^>]*class="[^"]*"/)) {
+          tag = substr(rest, RSTART, RLENGTH)
+          rest = substr(rest, RSTART + RLENGTH)
+          name = tag; sub(/^</, "", name); sub(/[[:space:]].*/, "", name)
+          cls = tag; sub(/.*class="/, "", cls); sub(/"$/, "", cls)
+          gsub(/[{][{][^}]*[}][}]|[{]%[^%]*%[}]/, " ", cls)
+          n = split(cls, parts, /[[:space:]]+/)
+          count = 0
+          for (i = 1; i <= n; i++) if (parts[i] != "") count++
+          if (name == "a" && !(cls ~ /(^|[[:space:]])bg-/ && cls ~ /(^|[[:space:]])px-/)) continue
+          if (count > max) printf "%s:%d: <%s> with %d classes\n", f, NR, name, count
+        }
+      }' "$f"
+  done)
+  if [ -n "$class_hits" ]; then
+    printf '%s\n' "$class_hits" | head -n 20 | while IFS= read -r h; do printf 'WARN [classes] %s\n' "$h"; done
+    total=$(printf '%s\n' "$class_hits" | wc -l | tr -d ' ')
+    warnings=$((warnings + total))
+    [ "$total" -gt 20 ] && printf '     … and %s more\n' "$((total - 20))"
+    # shellcheck disable=SC2016  # literal braces and backticks
+    printf '     fix: {%% import "components/ui.html" as ui %%} and {%% call ui::button(…) %%}{%% endcall %%}, ui::field, ui::link_button…\n'
+    printf '          or the classes .btn .btn-secondary .btn-sm .input (.offrails/guides/views.md#components);\n'
+    printf '          a deliberate one: end the line with {# offrails-check: classes ok #}\n'
+  elif find templates -name '*.html' 2>/dev/null | grep -q .; then
+    pass classes "no long ad-hoc class lists on buttons and inputs"
   fi
 fi
 

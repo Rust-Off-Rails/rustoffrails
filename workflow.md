@@ -59,7 +59,8 @@ cargo offrails verify          # --fast, after every slice: fmt --check, the CSS
 cargo offrails verify --full   # once, before you say done: also offrails-check, coverage (the SQLite run, instrumented),
                                # cargo deny, gitleaks, the no-unwrap review, routes vs docs/routes.md, the TS checks
                                # (web/), and the browser smokes when BASE=<the URL bin/dev printed> is set (the kernel
-                               # pages; every page after a boosted link: "skip: no Chrome" without a browser)
+                               # pages; every page after a boosted link: "skip: no Chrome" without a browser), brand --check,
+                               # and `prove` (screenshots + checks of every page → docs/proof/PROOF.md)
 ```
 
 It prints one line per step with its time and test counts, the tail of each failure (full logs in `target/verify/`), and exits non-zero on any failure. Postgres comes from `TEST_DATABASE_URL` (the environment or `.env`), else the compose `db` URL when something listens on `localhost:${DB_PORT:-5432}`; with neither, the Postgres run is reported **skipped**, never passed. `cargo fmt --all` fixes what `fmt --check` reports.
@@ -101,6 +102,7 @@ Plus, each with the command that proves it (paste its output, or say which item 
 | **Security-relevant changes** (auth, sessions, permissions, tenancy, payments, uploads, realtime, APIs, webhooks, outbound fetches, anything new in `headers_test.rs`) | `/offrails:security` or its checklist; the spec's `## Security` STRIDE table names an **attack test** per threat (failing first, then fixed), and `offrails-check` finds each one. A Non-negotiable ([security](guides/security.md#non-negotiables)) is never weakened without a decision **and** the human's explicit OK. ZAP runs in CI; run it locally when you add routes or change headers |
 | User-visible changes: you ran the app and exercised it. **UI changes: a real-browser smoke** of the changed flow ([test-standards §9](guides/test-standards.md#9-real-browser-smoke)) | `BASE=<the URL bin/dev printed> bash .offrails/tools/browser-smoke/run.sh` (styling, Back/Forward, no console errors or CSP violations); every page after a boosted link: `BASE=… node .offrails/tools/browser-smoke/smoke-boosted.mjs` ([testing](guides/testing.md#browser-smoke-boosted-navigation); both run in `verify --full` with `BASE` set); accounts: `SCENARIO=tests/e2e/smoke.scenario.mjs … run.sh login` (no certificate overrides: the session must survive a fresh page load); `… run.sh a11y` (axe, light + dark); live pages: `… run.sh live-tabs`. `curl -s $BASE/dev/introspect.json \| jq .css.stale,.migrations.current` prints `false`, `true`. Emails: `curl -s $BASE/dev/mailbox/latest.json`. Jobs: `cargo run -- jobs list --state discarded` is empty |
 | Templates correct in both color schemes; the built CSS has every class (htmx) | `cargo nextest run theme_test` ([test-standards §11](guides/test-standards.md#11-theme-and-css-guards)) |
+| **Proof** (apps with pages): every page screenshotted and checked, each acceptance criterion traced to its passing tests and pages. **Link `docs/proof/PROOF.md` in your final message** | `BASE=<the URL bin/dev printed> cargo offrails prove` ([testing](guides/testing.md#proof-cargo-offrails-prove); `verify --full` runs it with `BASE` set) |
 
 ## When something fails
 
@@ -137,4 +139,4 @@ One commit per vertical slice. Message format: `<resource>: <what changed>` plus
 
 ## Talking to the human
 
-Report in product terms ("Books can now be reviewed; owners get an email"), then list files changed, then any assumptions made. Never tell the human to edit code. Tell them which spec to edit, or just to tell you.
+Report in product terms ("Books can now be reviewed; owners get an email"), then link the proof (`docs/proof/PROOF.md`: what each criterion's tests and screenshots show), then list files changed, then any assumptions made. Never tell the human to edit code. Tell them which spec to edit, or just to tell you.
