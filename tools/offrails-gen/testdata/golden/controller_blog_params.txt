@@ -32,9 +32,10 @@ pub async fn index(
 
 === create templates/blog/index.html
 {% extends "layouts/application.html" %}
+{% import "components/ui.html" as ui %}
 {% block content %}
-<h1 class="text-3xl font-semibold tracking-tight">Blog</h1>
-<p class="mt-4 text-gray-700 dark:text-gray-300">APP: what this page shows (templates/blog/index.html).</p>
+{% call ui::page_header("Blog") %}{% endcall %}
+<p>APP: what this page shows (templates/blog/index.html).</p>
 {% endblock %}
 
 === create src/controllers/blog/show.rs
@@ -63,9 +64,10 @@ pub async fn show(
 
 === create templates/blog/show.html
 {% extends "layouts/application.html" %}
+{% import "components/ui.html" as ui %}
 {% block content %}
-<h1 class="text-3xl font-semibold tracking-tight">Blog show</h1>
-<p class="mt-4 text-gray-700 dark:text-gray-300">APP: what this page shows for <code>{{ slug }}</code> (templates/blog/show.html).</p>
+{% call ui::page_header("Blog show") %}{% endcall %}
+<p>APP: what this page shows for <code>{{ slug }}</code> (templates/blog/show.html).</p>
 {% endblock %}
 
 === wire src/controllers/mod.rs @ samples: controller mods

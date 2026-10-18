@@ -1,7 +1,7 @@
 # template/snippets/pagination/snippet.toml (the format of a part's sample.toml).
 name = "pagination"
 version = "0.7.3"
-summary = "Pager::new(base, page, more) and shared/_pager.html: newer/older links, per kept, ?page clamped"
+summary = "PageLinks::new(base, page, more) and shared/_pager.html: the kit's pagination, per kept, ?page clamped"
 depends_on = []
 
 [[wire]]

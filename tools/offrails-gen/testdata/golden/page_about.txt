@@ -72,11 +72,10 @@ pub struct PagesAbout {
 
 === create templates/pages/about.html
 {% extends "layouts/application.html" %}
+{% import "components/ui.html" as ui %}
 {% block content %}
-<article class="py-6">
-  <h1 class="text-3xl font-semibold tracking-tight">About</h1>
-  <p class="mt-4 text-gray-700 dark:text-gray-300">APP: the about page's words (templates/pages/about.html).</p>
-</article>
+{% call ui::page_header("About") %}{% endcall %}
+<p>APP: the about page's words (templates/pages/about.html).</p>
 {% endblock %}
 
 === create src/routes/about.rs

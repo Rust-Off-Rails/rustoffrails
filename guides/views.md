@@ -155,9 +155,9 @@ cargo offrails brand            # renders everything below; `new` runs it; --che
 | `icon_button` | `icon, label, variant="ghost", toggle="", type="button"` | `label` is the accessible name; `toggle` = id it shows/hides |
 | `confirm_button` | `label, action, message, variant="danger", size="md"` | a one-button POST form, confirmed first |
 | `icon` | `name, size="size-4"` | sprite `components/_icons.html`: x menu chevron-down/left/right check check-circle info alert x-circle plus search arrow-up/down arrows-up-down inbox home user settings book chart |
-| `field` | `errors, name, label, value="", type="text", hint="", required=false, autocomplete="", placeholder=""` | `value` = params (kept on 422; a password never is); id = name |
-| `textarea` | `errors, name, label, value="", rows=4, hint="", required=false` | |
-| `select` | `errors, name, label, options, selected="", hint="", required=false, blank=""` | `options`: (value, label) pairs; `blank`: an empty first option |
+| `field` | `errors, name, label, value="", type="text", hint="", required=false, autocomplete="", placeholder="", maxlength=0, inputmode="", step="", mono=false, key=""` | `value` = params (kept on 422; a password never is); id = name; `mono`: monospace, no autocorrect; `key`: the errors' key when it isn't `name` |
+| `textarea` | `errors, name, label, value="", rows=4, hint="", required=false, mono=false, key=""` | |
+| `select` | `errors, name, label, options, selected="", hint="", required=false, blank="", key=""` | `options`: (value, label) pairs, values strings or ids (`Vec<(i64, String)>`); `blank`: an empty first option; a `book_id` select reports on `key = "book"` |
 | `checkbox` | `errors, name, label, checked=false, value="true", hint=""` | |
 | `radios` | `errors, name, label, options, selected="", hint=""` | a fieldset with a legend |
 | `form_actions` | `submit="Save", cancel_href="", cancel="Cancel"` | **body**: more buttons |

@@ -14,7 +14,7 @@
 | [`atom-feed`](atom-feed/README.md) | `GET /feed.xml`: an Atom feed (escaped, RFC 3339 dates, newest 20) and its `<link rel="alternate">` on every page | — |
 | [`slug`](slug/README.md) | `slugify(title)` (accents folded, 80 characters) and `unique(base, query)`: `-2`, `-3`…, unique per owner or global | — |
 | [`markdown`](markdown/README.md) | `markdown::to_html`: CommonMark rendered by pulldown-cmark, sanitized by ammonia (no scripts, handlers, `javascript:`) | crates `pulldown-cmark`, `ammonia` |
-| [`pagination`](pagination/README.md) | `Pager::new(base, page, more)` and `shared/_pager.html`; `?page=` clamped, so a huge one is never a 500 | — |
+| [`pagination`](pagination/README.md) | `PageLinks::new(base, page, more)` and `shared/_pager.html` (the kit's `ui::pagination`); `?page=` clamped, so a huge one is never a 500 | — |
 | [`theme-toggle`](theme-toggle/README.md) | a System/Light/Dark button in the nav: an app-side partial and one delegated handler in `static/app.js` | — |
 | [`seed-backdated`](seed-backdated/README.md) | seeds with a history: create through the model, then `backdate::<E>(db, id, days_ago(30))` | the `resource` snippet (its test) |
 | [`public-show-by-slug`](public-show-by-slug/README.md) | `GET /read/notes/{slug}`: a public page per record by slug, a route with a path parameter end to end | the `resource` and `slug` snippets |

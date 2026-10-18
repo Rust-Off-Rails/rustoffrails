@@ -2,5 +2,5 @@
    to /theme (controllers/theme.rs sets the cookie and comes back); static/app.js switches in place. #}
 <form method="post" action="{{ crate::routes::paths::theme() }}" class="inline" hx-boost="false" data-theme-toggle>
   <input type="hidden" name="return_to" value="{{ ctx.path }}">
-  <button type="submit" name="theme" value="{{ ctx.theme.next().as_str() }}" class="rounded-md px-2 py-1 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500" aria-label="Theme: {{ ctx.theme.label() }} (switch to {{ ctx.theme.next().label() }})">{{ ctx.theme.label() }}</button>
+  <button type="submit" name="theme" value="{{ ctx.theme.next().as_str() }}" class="btn-ghost btn-sm" aria-label="Theme: {{ ctx.theme.label() }} (switch to {{ ctx.theme.next().label() }})">{{ ctx.theme.label() }}</button>
 </form>

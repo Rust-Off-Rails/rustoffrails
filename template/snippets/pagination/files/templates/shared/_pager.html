@@ -1,8 +1,4 @@
-{# Newer / older links (the pagination snippet). The including struct has `pager: Pager` (src/views/pager.rs). #}
-{% if pager.is_needed() %}
-<nav class="mt-6 flex items-center justify-between text-sm" aria-label="Pages">
-  {% if let Some(href) = pager.newer.as_deref() %}<a href="{{ href }}" class="link" rel="prev">&larr; Newer</a>{% else %}<span></span>{% endif %}
-  <span class="text-gray-600 dark:text-gray-400">Page {{ pager.number }}</span>
-  {% if let Some(href) = pager.older.as_deref() %}<a href="{{ href }}" class="link" rel="next">Older &rarr;</a>{% else %}<span></span>{% endif %}
-</nav>
-{% endif %}
+{#- A paged list's links (the pagination snippet): the component kit's pagination. The including
+    struct has `pager: PageLinks` (src/views/pager.rs). -#}
+{% import "components/ui.html" as ui %}
+{% call ui::pagination(pager.number, pager.pages, pager.base) %}{% endcall %}

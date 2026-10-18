@@ -66,8 +66,9 @@ struct Args {
     flags: Vec<(String, Option<String>)>,
 }
 
-const VALUE_FLAGS: [&str; 13] = [
+const VALUE_FLAGS: [&str; 14] = [
     "--as",
+    "--layout",
     "--base",
     "--queue",
     "--every",
@@ -188,11 +189,12 @@ fn real_main() -> Result<()> {
                 "--queue",
                 "--every",
                 "--path",
+                "--layout",
                 "--forget",
             ])?;
             let app = args.app()?;
             let mut values = std::collections::BTreeMap::new();
-            for k in ["--queue", "--every", "--path"] {
+            for k in ["--queue", "--every", "--path", "--layout"] {
                 if let Some(v) = args.value(k) {
                     values.insert(k.trim_start_matches('-').to_owned(), v);
                 }

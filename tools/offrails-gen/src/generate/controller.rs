@@ -97,6 +97,7 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
         )));
     }
     let mut plan = Plan::new("controller", &n.singular, args);
+    let layout = super::html::layout(info, flags, &mut plan)?;
     let path = flags.recorded("path").or_else(|| flags.value("path"));
     let acts = actions(&n, &args[1..], path.as_deref())?;
     if let Some(p) = &path {
@@ -223,6 +224,7 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
                     ("TITLE", &title),
                     ("SHOWS", &shows),
                     ("TEMPLATE", &a.template),
+                    ("LAYOUT", &layout),
                 ],
             ),
         );

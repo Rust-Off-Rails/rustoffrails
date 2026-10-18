@@ -47,30 +47,33 @@
 {#- ---- forms ------------------------------------------------------------------------------------
     `errors` is the page's models::Errors; `value` is what the person typed (params), so a 422
     re-render keeps it. The input's id is its name. type: text | email | password | number | url |
-    tel | date | datetime-local | search (a password is never echoed back). #}
-{% macro field(errors, name, label, value = "", type = "text", hint = "", required = false, autocomplete = "", placeholder = "") -%}
-{%- let errs = errors.on(name) -%}
+    tel | date | datetime-local | search (a password is never echoed back). `maxlength`, `inputmode`
+    and `step` are the input's attributes (0 / "" = none); `mono`: monospace, no autocorrect (ids,
+    codes, JSON). `key`: the errors' key when it isn't the name (a `book_id` select reports `book`). #}
+{% macro field(errors, name, label, value = "", type = "text", hint = "", required = false, autocomplete = "", placeholder = "", maxlength = 0, inputmode = "", step = "", mono = false, key = "") -%}
+{%- let errs = errors.on(crate::views::helpers::error_key(key, name)) -%}
 <div class="mt-4 first:mt-0">
   <label class="label" for="{{ name }}">{{ label }}{% if required %} <span aria-hidden="true">*</span>{% endif %}</label>
-  <input class="input" id="{{ name }}" name="{{ name }}" type="{{ type }}"{% if type != "password" %} value="{{ value }}"{% endif %}{% if required %} required{% endif %}{% if !autocomplete.is_empty() %} autocomplete="{{ autocomplete }}"{% endif %}{% if !placeholder.is_empty() %} placeholder="{{ placeholder }}"{% endif %}{% if !errs.is_empty() %} aria-invalid="true"{% endif %}{% if !hint.is_empty() || !errs.is_empty() %} aria-describedby="{% if !hint.is_empty() %}{{ name }}-hint{% if !errs.is_empty() %} {% endif %}{% endif %}{% if !errs.is_empty() %}{{ name }}-error{% endif %}"{% endif %}>
+  <input class="input{% if mono %} font-mono{% endif %}" id="{{ name }}" name="{{ name }}" type="{{ type }}"{% if type != "password" %} value="{{ value }}"{% endif %}{% if required %} required{% endif %}{% if !autocomplete.is_empty() %} autocomplete="{{ autocomplete }}"{% endif %}{% if !placeholder.is_empty() %} placeholder="{{ placeholder }}"{% endif %}{% if maxlength > 0 %} maxlength="{{ maxlength }}"{% endif %}{% if !inputmode.is_empty() %} inputmode="{{ inputmode }}"{% endif %}{% if !step.is_empty() %} step="{{ step }}"{% endif %}{% if mono %} autocapitalize="off" spellcheck="false"{% endif %}{% if !errs.is_empty() %} aria-invalid="true"{% endif %}{% if !hint.is_empty() || !errs.is_empty() %} aria-describedby="{% if !hint.is_empty() %}{{ name }}-hint{% if !errs.is_empty() %} {% endif %}{% endif %}{% if !errs.is_empty() %}{{ name }}-error{% endif %}"{% endif %}>
   {%- if !hint.is_empty() %}<p class="hint" id="{{ name }}-hint">{{ hint }}</p>{% endif %}
   {%- if !errs.is_empty() %}<p class="field-error" id="{{ name }}-error">{% for msg in errs %}{{ label }} {{ msg }}{% if !loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
 </div>
 {%- endmacro %}
 
-{% macro textarea(errors, name, label, value = "", rows = 4, hint = "", required = false) -%}
-{%- let errs = errors.on(name) -%}
+{% macro textarea(errors, name, label, value = "", rows = 4, hint = "", required = false, mono = false, key = "") -%}
+{%- let errs = errors.on(crate::views::helpers::error_key(key, name)) -%}
 <div class="mt-4 first:mt-0">
   <label class="label" for="{{ name }}">{{ label }}{% if required %} <span aria-hidden="true">*</span>{% endif %}</label>
-  <textarea class="input" id="{{ name }}" name="{{ name }}" rows="{{ rows }}"{% if required %} required{% endif %}{% if !errs.is_empty() %} aria-invalid="true"{% endif %}{% if !hint.is_empty() || !errs.is_empty() %} aria-describedby="{% if !hint.is_empty() %}{{ name }}-hint{% if !errs.is_empty() %} {% endif %}{% endif %}{% if !errs.is_empty() %}{{ name }}-error{% endif %}"{% endif %}>{{ value }}</textarea>
+  <textarea class="input{% if mono %} font-mono{% endif %}" id="{{ name }}" name="{{ name }}" rows="{{ rows }}"{% if required %} required{% endif %}{% if mono %} spellcheck="false"{% endif %}{% if !errs.is_empty() %} aria-invalid="true"{% endif %}{% if !hint.is_empty() || !errs.is_empty() %} aria-describedby="{% if !hint.is_empty() %}{{ name }}-hint{% if !errs.is_empty() %} {% endif %}{% endif %}{% if !errs.is_empty() %}{{ name }}-error{% endif %}"{% endif %}>{{ value }}</textarea>
   {%- if !hint.is_empty() %}<p class="hint" id="{{ name }}-hint">{{ hint }}</p>{% endif %}
   {%- if !errs.is_empty() %}<p class="field-error" id="{{ name }}-error">{% for msg in errs %}{{ label }} {{ msg }}{% if !loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
 </div>
 {%- endmacro %}
 
-{#- `options`: (value, label) pairs. `blank`: a first, empty option's text ("" = none). #}
-{% macro select(errors, name, label, options, selected = "", hint = "", required = false, blank = "") -%}
-{%- let errs = errors.on(name) -%}
+{#- `options`: (value, label) pairs, the values strings or numbers. `blank`: a first, empty option's
+    text ("" = none). `key`: as for field. #}
+{% macro select(errors, name, label, options, selected = "", hint = "", required = false, blank = "", key = "") -%}
+{%- let errs = errors.on(crate::views::helpers::error_key(key, name)) -%}
 <div class="mt-4 first:mt-0">
   <label class="label" for="{{ name }}">{{ label }}{% if required %} <span aria-hidden="true">*</span>{% endif %}</label>
   <select class="input" id="{{ name }}" name="{{ name }}"{% if required %} required{% endif %}{% if !errs.is_empty() %} aria-invalid="true"{% endif %}{% if !hint.is_empty() || !errs.is_empty() %} aria-describedby="{% if !hint.is_empty() %}{{ name }}-hint{% if !errs.is_empty() %} {% endif %}{% endif %}{% if !errs.is_empty() %}{{ name }}-error{% endif %}"{% endif %}>
@@ -250,7 +253,7 @@
 {% macro page_header(title, subtitle = "") -%}
 <div class="mb-6 flex flex-wrap items-end justify-between gap-4">
   <div class="min-w-0">
-    <h1 class="text-2xl font-semibold tracking-tight">{{ title }}</h1>
+    <h1 class="text-2xl font-semibold tracking-tight break-words">{{ title }}</h1>
     {%- if !subtitle.is_empty() %}<p class="muted mt-1">{{ subtitle }}</p>{% endif %}
   </div>
   <div class="flex flex-wrap items-center gap-2">{{ caller() }}</div>

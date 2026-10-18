@@ -79,11 +79,10 @@ pub struct PagesProfile {
 
 === create templates/pages/profile.html
 {% extends "layouts/application.html" %}
+{% import "components/ui.html" as ui %}
 {% block content %}
-<article class="py-6">
-  <h1 class="text-3xl font-semibold tracking-tight">Profile</h1>
-  <p class="mt-4 text-gray-700 dark:text-gray-300">APP: the profile page's words for <code>{{ handle }}</code> (templates/pages/profile.html).</p>
-</article>
+{% call ui::page_header("Profile") %}{% endcall %}
+<p>APP: the profile page's words for <code>{{ handle }}</code> (templates/pages/profile.html).</p>
 {% endblock %}
 
 === create src/routes/profile.rs

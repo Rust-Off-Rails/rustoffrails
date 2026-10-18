@@ -1,19 +1,20 @@
 @@ README
 The HTML `cargo offrails g controller` and `g page` write (one section per piece; `@@ <name>` starts
-one). `__NAME__` tokens are filled by src/generate/controller.rs and page.rs.
+one). `__NAME__` tokens are filled by src/generate/controller.rs and page.rs; `__LAYOUT__` is
+`--layout` (default application). Built from the component kit (templates/components/ui.html).
 @@ action
-{% extends "layouts/application.html" %}
+{% extends "layouts/__LAYOUT__.html" %}
+{% import "components/ui.html" as ui %}
 {% block content %}
-<h1 class="text-3xl font-semibold tracking-tight">__TITLE__</h1>
-<p class="mt-4 text-gray-700 dark:text-gray-300">APP: what this page shows__SHOWS__ (templates/__TEMPLATE__).</p>
+{% call ui::page_header("__TITLE__") %}{% endcall %}
+<p>APP: what this page shows__SHOWS__ (templates/__TEMPLATE__).</p>
 {% endblock %}
 @@ page
-{% extends "layouts/application.html" %}
+{% extends "layouts/__LAYOUT__.html" %}
+{% import "components/ui.html" as ui %}
 {% block content %}
-<article class="py-6">
-  <h1 class="text-3xl font-semibold tracking-tight">__TITLE__</h1>
-  <p class="mt-4 text-gray-700 dark:text-gray-300">APP: the __LOWER__ page's words__SHOWS__ (templates/pages/__NAME__.html).</p>
-</article>
+{% call ui::page_header("__TITLE__") %}{% endcall %}
+<p>APP: the __LOWER__ page's words__SHOWS__ (templates/pages/__NAME__.html).</p>
 {% endblock %}
 @@ param
  <code>{{ __PARAM__ }}</code>

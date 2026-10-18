@@ -32,9 +32,10 @@ pub async fn index(
 
 === create templates/reports/index.html
 {% extends "layouts/application.html" %}
+{% import "components/ui.html" as ui %}
 {% block content %}
-<h1 class="text-3xl font-semibold tracking-tight">Reports</h1>
-<p class="mt-4 text-gray-700 dark:text-gray-300">APP: what this page shows (templates/reports/index.html).</p>
+{% call ui::page_header("Reports") %}{% endcall %}
+<p>APP: what this page shows (templates/reports/index.html).</p>
 {% endblock %}
 
 === create src/controllers/reports/summary.rs
@@ -58,9 +59,10 @@ pub async fn summary(
 
 === create templates/reports/summary.html
 {% extends "layouts/application.html" %}
+{% import "components/ui.html" as ui %}
 {% block content %}
-<h1 class="text-3xl font-semibold tracking-tight">Reports summary</h1>
-<p class="mt-4 text-gray-700 dark:text-gray-300">APP: what this page shows (templates/reports/summary.html).</p>
+{% call ui::page_header("Reports summary") %}{% endcall %}
+<p>APP: what this page shows (templates/reports/summary.html).</p>
 {% endblock %}
 
 === wire src/controllers/mod.rs @ samples: controller mods

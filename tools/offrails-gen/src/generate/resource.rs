@@ -47,6 +47,8 @@ struct Ctx<'a> {
     info: &'a AppInfo,
     /// The guard test exists: unscoped lines carry `// unscoped:`.
     guard: bool,
+    /// The layout the pages extend (`--layout`).
+    layout: String,
 }
 
 impl Ctx<'_> {
@@ -399,7 +401,7 @@ impl Ctx<'_> {
         }
         out.push_str("        }\n    }\n}\n\n");
         out.push_str(&format!(
-            "/// `GET /{kb}`\n#[derive(Template)]\n#[template(path = \"{p}/index.html\")]\npub struct {pc}Index {{\n    pub ctx: Ctx,\n    pub {p}: Vec<{m}View>,\n    pub page: u64,\n    pub more: bool,\n}}\n\nimpl {pc}Index {{\n    pub fn newer(&self) -> Option<String> {{\n        (self.page > 1).then(|| format!(\"{{}}?page={{}}\", paths::{p}(), self.page - 1))\n    }}\n\n    pub fn older(&self) -> Option<String> {{\n        self.more\n            .then(|| format!(\"{{}}?page={{}}\", paths::{p}(), self.page + 1))\n    }}\n}}\n\n",
+            "/// `GET /{kb}`\n#[derive(Template)]\n#[template(path = \"{p}/index.html\")]\npub struct {pc}Index {{\n    pub ctx: Ctx,\n    pub {p}: Vec<{m}View>,\n    pub page: u64,\n    pub more: bool,\n}}\n\nimpl {pc}Index {{\n    /// The pagination component's page count: this one, and the next when the query found more\n    /// (no COUNT query).\n    pub fn pages(&self) -> u64 {{\n        self.page + u64::from(self.more)\n    }}\n\n    /// Where its links go (`{{base}}page=n`).\n    pub fn page_base(&self) -> String {{\n        format!(\"{{}}?\", paths::{p}())\n    }}\n}}\n\n",
             kb = n.kebab
         ));
         out.push_str(&format!(
@@ -439,6 +441,7 @@ impl Ctx<'_> {
             ("LOWER", n.lower.clone()),
             ("S", n.singular.clone()),
             ("P", n.plural.clone()),
+            ("LAYOUT", self.layout.clone()),
         ]
     }
 
@@ -451,16 +454,19 @@ impl Ctx<'_> {
 
     fn index_html(&self) -> String {
         let s = &self.spec.names.singular;
-        let mut head = html::resource("index th", &[("LABEL", "Name")]);
+        let mut columns = vec![html::resource_inline("index column", &[("LABEL", "Name")])];
         let mut cells = html::resource("index label td", &[("S", s)]);
         for f in index_columns(&self.spec.fields) {
-            head.push_str(&html::resource("index th", &[("LABEL", &f.human())]));
+            columns.push(html::resource_inline("index column", &[("LABEL", &f.human())]));
             cells.push_str(&html::resource(
                 "index td",
                 &[("S", s), ("COL", &f.column())],
             ));
         }
-        self.page("index", &[("HEAD", head), ("CELLS", cells)])
+        self.page(
+            "index",
+            &[("COLUMNS", columns.join(", ")), ("CELLS", cells)],
+        )
     }
 
     fn show_html(&self) -> String {
@@ -496,72 +502,41 @@ impl Ctx<'_> {
     }
 
     fn form_field(&self, f: &Field) -> String {
-        let s = &self.spec.names.singular;
-        let p = f.param();
-        let key = f.name.clone();
-        let id = format!("{s}_{p}");
-        let label = f.human();
-        let invalid = html::resource_inline("invalid", &[("KEY", &key), ("ID", &id)]);
         let required = if f.nullable || f.kind == Kind::Boolean {
             String::new()
         } else {
             html::resource_inline("required", &[])
         };
-        let hint = if f.nullable {
-            html::resource_inline("optional hint", &[])
-        } else {
-            String::new()
-        };
-        let errors = html::resource("errors", &[("KEY", &key), ("ID", &id), ("LABEL", &label)]);
-        let max = model::max_len(f).to_string();
-        let vars = |extra: &[(&'static str, &str)]| -> Vec<(&'static str, String)> {
-            let mut v: Vec<(&'static str, String)> =
-                extra.iter().map(|(k, x)| (*k, (*x).to_owned())).collect();
-            v.extend([
-                ("REQUIRED", required.clone()),
-                ("INVALID", invalid.clone()),
-                ("ID", id.clone()),
-                ("NAME", p.clone()),
-                ("KEY", key.clone()),
-                ("MAX", max.clone()),
-            ]);
-            v
-        };
-        let control_of = |section: &str, extra: &[(&'static str, &str)]| -> String {
-            let v = vars(extra);
-            let refs: Vec<(&str, &str)> = v.iter().map(|(k, x)| (*k, x.as_str())).collect();
-            html::resource(section, &refs)
-        };
-        let control = match &f.kind {
-            Kind::String => control_of("control string", &[]),
-            Kind::Text => control_of("control text", &[]),
-            Kind::Integer | Kind::BigInt => control_of("control integer", &[]),
-            Kind::Decimal { .. } => control_of("control decimal", &[]),
-            Kind::Money => control_of("control money", &[]),
-            Kind::DateTime => control_of("control datetime", &[]),
-            Kind::Date => control_of("control date", &[]),
-            Kind::Uuid => control_of("control uuid", &[]),
-            Kind::Json => control_of("control json", &[]),
-            Kind::Boolean if !f.nullable => {
-                return control_of("checkbox field", &[("LABEL", &label), ("ERRORS", &errors)]);
+        let section = match &f.kind {
+            Kind::String => "control string",
+            Kind::Text => "control text",
+            Kind::Integer | Kind::BigInt => "control integer",
+            Kind::Decimal { .. } => "control decimal",
+            Kind::Money => "control money",
+            Kind::DateTime => "control datetime",
+            Kind::Date => "control date",
+            Kind::Uuid => "control uuid",
+            Kind::Json => "control json",
+            Kind::Boolean if !f.nullable => "control boolean",
+            Kind::Boolean => "control optional boolean",
+            Kind::References { .. } if self.spec.target(f).is_some_and(|t| t.choices) => {
+                "control reference select"
             }
-            Kind::Boolean => control_of("control optional boolean", &[]),
-            Kind::References { target } => {
-                if self.spec.target(f).is_some_and(|t| t.choices) {
-                    control_of("control reference select", &[("TARGET", &target.lower)])
-                } else {
-                    control_of("control reference id", &[])
-                }
-            }
+            Kind::References { .. } => "control reference id",
+        };
+        let target = match &f.kind {
+            Kind::References { target } => target.lower.clone(),
+            _ => String::new(),
         };
         html::resource(
-            "field",
+            section,
             &[
-                ("ID", &id),
-                ("LABEL", &label),
-                ("HINT", &hint),
-                ("CONTROL", &control),
-                ("ERRORS", &errors),
+                ("REQUIRED", &required),
+                ("NAME", &f.param()),
+                ("KEY", &f.name),
+                ("LABEL", &f.human()),
+                ("MAX", &model::max_len(f).to_string()),
+                ("TARGET", &target),
             ],
         )
     }
@@ -885,10 +860,12 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
     spec.plan_into(&mut plan, &stamp);
 
     let guard = info.exists("tests/app/guard_test.rs") || spec.scope == Scope::User;
+    let layout = html::layout(info, flags, &mut plan)?;
     let ctx = Ctx {
         spec: &spec,
         info,
         guard,
+        layout,
     };
     let (p, s) = (&n.plural, &n.singular);
     let c = format!("src/controllers/{p}");

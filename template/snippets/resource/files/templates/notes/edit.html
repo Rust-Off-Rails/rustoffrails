@@ -1,8 +1,6 @@
 {% extends "layouts/application.html" %}
+{% import "components/ui.html" as ui %}
 {% block content %}
-<div class="flex flex-wrap items-end justify-between gap-4">
-  <h1 class="text-3xl font-semibold tracking-tight">Edit note</h1>
-  <a href="{{ paths::note(*id) }}" class="btn-secondary">Show</a>
-</div>
-{% include "notes/_form.html" %}
+{% call ui::page_header("Edit note") %}{% call ui::link_button("Show", paths::note(*id), "secondary") %}{% endcall %}{% endcall %}
+{% call ui::card() %}{% include "notes/_form.html" %}{% endcall %}
 {% endblock %}

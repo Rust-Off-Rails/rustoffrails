@@ -39,13 +39,15 @@ pub struct NotesIndex {
 }
 
 impl NotesIndex {
-    pub fn newer(&self) -> Option<String> {
-        (self.page > 1).then(|| format!("{}?page={}", paths::notes(), self.page - 1))
+    /// The pagination component's page count: this one, and the next when the query found more
+    /// (no COUNT query).
+    pub fn pages(&self) -> u64 {
+        self.page + u64::from(self.more)
     }
 
-    pub fn older(&self) -> Option<String> {
-        self.more
-            .then(|| format!("{}?page={}", paths::notes(), self.page + 1))
+    /// Where its links go (`{base}page=n`).
+    pub fn page_base(&self) -> String {
+        format!("{}?", paths::notes())
     }
 }
 

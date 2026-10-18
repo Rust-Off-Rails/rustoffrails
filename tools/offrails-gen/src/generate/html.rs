@@ -3,6 +3,38 @@
 //! Swapping the markup (a component kit, other design tokens) is editing those files; the golden
 //! files then show every changed template.
 
+use super::Flags;
+use super::app::AppInfo;
+use super::plan::Plan;
+use crate::util::{Fail, Result};
+
+/// The layouts a generated page may extend (`--layout`, templates/layouts/<name>.html).
+pub const LAYOUTS: [&str; 5] = ["application", "sidebar", "marketing", "auth", "docs"];
+
+/// The layout the generated pages extend: `--layout <name>` (recorded, so a re-run and `destroy`
+/// see the same pages), default `application` (the top nav: guides/views.md#layouts).
+pub fn layout(info: &AppInfo, flags: &Flags, plan: &mut Plan) -> Result<String> {
+    let name = flags
+        .recorded("layout")
+        .or_else(|| flags.value("layout"))
+        .unwrap_or_else(|| "application".to_owned());
+    if !LAYOUTS.contains(&name.as_str()) {
+        return Err(Fail::usage(format!(
+            "--layout {name}: one of {}",
+            LAYOUTS.join(", ")
+        )));
+    }
+    if !info.exists(&format!("templates/layouts/{name}.html")) {
+        return Err(Fail::usage(format!(
+            "--layout {name}: this app has no templates/layouts/{name}.html (copy it from .offrails/template/app/templates/layouts/)"
+        )));
+    }
+    if name != "application" {
+        plan.option("layout", name.clone());
+    }
+    Ok(name)
+}
+
 const RESOURCE: &str = include_str!("files/html/resource.html");
 const PAGES: &str = include_str!("files/html/pages.html");
 
@@ -62,14 +94,17 @@ mod tests {
     fn sections_are_found_and_filled() {
         assert_eq!(
             resource("required", &[]),
-            " required\n",
+            ", required = true\n",
             "a section keeps its leading space and gets its newline"
         );
         assert_eq!(
             resource_inline("index td", &[("S", "post"), ("COL", "title")]),
-            "        <td class=\"px-4 py-3 text-gray-700 dark:text-gray-300\">{{ post.title }}</td>"
+            "        <td>{{ post.title }}</td>"
         );
         assert!(resource("index", &[("S", "post"), ("P", "posts")]).contains("paths::new_post()"));
-        assert!(pages("page", &[("TITLE", "About")]).contains(">About</h1>"));
+        assert!(
+            pages("page", &[("TITLE", "About"), ("LAYOUT", "docs")])
+                .contains("{% extends \"layouts/docs.html\" %}")
+        );
     }
 }

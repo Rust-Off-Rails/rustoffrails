@@ -65,6 +65,8 @@ options:
   --public       model/resource/api/controller: no accounts, anyone may read and write (refused otherwise
                  when the app has no auth part)
   --no-nav       resource: no nav link          --nav   page/controller: add a nav link
+  --layout <l>   resource/controller/page: the layout the pages extend: application (default, the top
+                 nav), sidebar, marketing, auth or docs (guides/views.md#layouts)
   --queue <q>    job: its queue (default: default)
   --no-fmt       don't run cargo fmt afterwards
   --app <dir>    the app (default: .)

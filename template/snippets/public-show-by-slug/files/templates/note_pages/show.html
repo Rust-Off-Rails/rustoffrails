@@ -1,7 +1,8 @@
 {% extends "layouts/application.html" %}
+{% import "components/ui.html" as ui %}
 {% block content %}
-<article class="py-6">
-  <h1 class="text-3xl font-semibold tracking-tight break-words">{{ note.title }}</h1>
-  <div class="mt-6 whitespace-pre-line break-words text-gray-800 dark:text-gray-200">{{ note.body }}</div>
+<article>
+  {% call ui::page_header(note.title) %}{% endcall %}
+  <div class="whitespace-pre-line break-words">{{ note.body }}</div>
 </article>
 {% endblock %}

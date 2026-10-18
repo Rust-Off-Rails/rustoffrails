@@ -25,7 +25,7 @@
 
 ## After adding
 
-`bin/tailwindcss -i assets/app.css -o static/app.css --minify` (the button's classes), then `cargo offrails verify`, and look at it in both schemes (`run.sh a11y` checks contrast in light and dark).
+The button is the kit's `btn-ghost btn-sm` (`assets/app.css`; the kit has no theme switch of its own), so no CSS rebuild; then `cargo offrails verify`, and look at it in both schemes (`run.sh a11y` checks contrast in light and dark).
 
 ## Adapting it
 

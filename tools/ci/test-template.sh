@@ -58,7 +58,7 @@ pg_url="${TEST_DATABASE_URL:-}"
 # OFFRAILS_CI_TAG: a suffix for the apps' crate names, so runs sharing a Postgres server (another
 # checkout's CI on the same machine) never share test databases (they are named after the crate).
 tag="${OFFRAILS_CI_TAG:-}"
-# OFFRAILS_CI_PORT: the first of the two ports the browser smokes serve on (default 3911).
+# OFFRAILS_CI_PORT: the first of the four ports the browser smokes serve on (default 3911).
 smoke_port="${OFFRAILS_CI_PORT:-3911}"
 unset TEST_DATABASE_URL
 
@@ -465,12 +465,12 @@ GENS
       for kind in bare all; do
         if [ "$kind" = bare ]; then
           fresh_keep prove_bare
-          (cd "$work/$name" && gen new prove_bare prove_bare "Prove Bare") || return 1
-          port=3913
+          (cd "$work/$name" && gen new prove_bare "prove_bare$tag" "Prove Bare") || return 1
+          port=$((smoke_port + 2))
         else
           fresh_keep prove_all
-          (cd "$work/$name" && gen new prove_all prove_all "Prove All" --parts all) || return 1
-          port=3914
+          (cd "$work/$name" && gen new prove_all "prove_all$tag" "Prove All" --parts all) || return 1
+          port=$((smoke_port + 3))
         fi
         step "fixture feature" proof_fixture || return 1
         step "tailwind" sh -c 'bin/setup-tailwind >/dev/null' || return 1

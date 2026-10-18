@@ -1081,13 +1081,15 @@ pub struct ItemsIndex {
 }
 
 impl ItemsIndex {
-    pub fn newer(&self) -> Option<String> {
-        (self.page > 1).then(|| format!("{}?page={}", paths::items(), self.page - 1))
+    /// The pagination component's page count: this one, and the next when the query found more
+    /// (no COUNT query).
+    pub fn pages(&self) -> u64 {
+        self.page + u64::from(self.more)
     }
 
-    pub fn older(&self) -> Option<String> {
-        self.more
-            .then(|| format!("{}?page={}", paths::items(), self.page + 1))
+    /// Where its links go (`{base}page=n`).
+    pub fn page_base(&self) -> String {
+        format!("{}?", paths::items())
     }
 }
 
@@ -1125,204 +1127,123 @@ pub mod items; // items
 
 === create templates/items/index.html
 {% extends "layouts/application.html" %}
+{% import "components/ui.html" as ui %}
 {% block content %}
-<div class="flex flex-wrap items-end justify-between gap-4">
-  <h1 class="text-3xl font-semibold tracking-tight">Items</h1>
-  <a href="{{ paths::new_item() }}" class="btn">New item</a>
-</div>
+{% call ui::page_header("Items") %}{% call ui::link_button("New item", paths::new_item(), icon = "plus") %}{% endcall %}{% endcall %}
 {% if items.is_empty() %}
-<p class="mt-10 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 p-10 text-center text-gray-600 dark:text-gray-400">No items yet. <a href="{{ paths::new_item() }}" class="link">Create the first one</a>.</p>
+{% call ui::empty_state("No items yet", "Create the first one.", "New item", paths::new_item()) %}{% endcall %}
 {% else %}
-<div class="mt-8 overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
-  <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-800 text-sm">
-    <thead class="bg-gray-50 dark:bg-gray-900">
-      <tr>
-        <th scope="col" class="px-4 py-3 text-left font-medium text-gray-700 dark:text-gray-300">Name</th>
-        <th scope="col" class="px-4 py-3 text-left font-medium text-gray-700 dark:text-gray-300">Count</th>
-        <th scope="col" class="px-4 py-3 text-left font-medium text-gray-700 dark:text-gray-300">Big</th>
-        <th scope="col" class="px-4 py-3 text-left font-medium text-gray-700 dark:text-gray-300">Flag</th>
-        <th scope="col" class="px-4 py-3 text-left font-medium text-gray-700 dark:text-gray-300">Active</th>
-        <th scope="col" class="px-4 py-3"><span class="sr-only">Actions</span></th>
-      </tr>
-    </thead>
-    <tbody class="divide-y divide-gray-200 dark:divide-gray-800 bg-white dark:bg-gray-950">
+{% call ui::table("Items, newest first", [("", "Name"), ("", "Count"), ("", "Big"), ("", "Flag"), ("", "Active")]) %}
       {% for item in items %}
       <tr id="item_{{ item.id }}">
-        <td class="px-4 py-3"><a href="{{ paths::item(*item.id) }}" class="link">{{ item.label }}</a></td>
-        <td class="px-4 py-3 text-gray-700 dark:text-gray-300">{{ item.count }}</td>
-        <td class="px-4 py-3 text-gray-700 dark:text-gray-300">{{ item.big }}</td>
-        <td class="px-4 py-3 text-gray-700 dark:text-gray-300">{{ item.flag }}</td>
-        <td class="px-4 py-3 text-gray-700 dark:text-gray-300">{{ item.active }}</td>
-        <td class="px-4 py-3 text-right whitespace-nowrap"><a href="{{ paths::edit_item(*item.id) }}" class="link">Edit</a></td>
+        <td><a href="{{ paths::item(*item.id) }}" class="link">{{ item.label }}</a></td>
+        <td>{{ item.count }}</td>
+        <td>{{ item.big }}</td>
+        <td>{{ item.flag }}</td>
+        <td>{{ item.active }}</td>
       </tr>
       {% endfor %}
-    </tbody>
-  </table>
-</div>
+{% endcall %}
 {% endif %}
-{% if newer().is_some() || older().is_some() %}
-<nav class="mt-6 flex justify-between text-sm" aria-label="Pages">
-  {% if let Some(href) = newer() %}<a href="{{ href }}" class="link">&larr; Newer</a>{% else %}<span></span>{% endif %}
-  {% if let Some(href) = older() %}<a href="{{ href }}" class="link">Older &rarr;</a>{% endif %}
-</nav>
-{% endif %}
+{% call ui::pagination(page, pages(), page_base()) %}{% endcall %}
 {% endblock %}
 
 === create templates/items/show.html
 {% extends "layouts/application.html" %}
+{% import "components/ui.html" as ui %}
 {% block content %}
-<div class="flex flex-wrap items-end justify-between gap-4">
-  <h1 class="text-3xl font-semibold tracking-tight break-words">{{ item.label }}</h1>
-  <div class="flex items-center gap-2">
-    <a href="{{ paths::edit_item(*item.id) }}" class="btn-secondary">Edit</a>
-    <form method="post" action="{{ paths::delete_item(*item.id) }}" data-confirm="Delete this item? This can't be undone.">
-      <button class="btn-danger">Delete</button>
-    </form>
+{% call ui::page_header(item.label) %}
+  {%- call ui::link_button("Edit", paths::edit_item(*item.id), "secondary") %}{% endcall %}
+  {%- call ui::confirm_button("Delete", paths::delete_item(*item.id), "Delete this item? This can't be undone.") %}{% endcall %}
+{% endcall %}
+{% call ui::card() %}
+<dl class="divide-y divide-gray-200 dark:divide-gray-800">
+  <div class="grid gap-1 py-3 first:pt-0 last:pb-0 sm:grid-cols-3 sm:gap-4">
+    <dt class="muted font-medium">Name</dt>
+    <dd class="text-sm break-words sm:col-span-2">{{ item.name }}</dd>
   </div>
-</div>
-<dl class="mt-8 divide-y divide-gray-200 dark:divide-gray-800 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
-  <div class="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-4">
-    <dt class="text-sm font-medium text-gray-600 dark:text-gray-400">Name</dt>
-    <dd class="text-sm text-gray-900 dark:text-gray-100 sm:col-span-2">{{ item.name }}</dd>
+  <div class="grid gap-1 py-3 first:pt-0 last:pb-0 sm:grid-cols-3 sm:gap-4">
+    <dt class="muted font-medium">Notes</dt>
+    <dd class="text-sm break-words sm:col-span-2 whitespace-pre-line">{{ item.notes }}</dd>
   </div>
-  <div class="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-4">
-    <dt class="text-sm font-medium text-gray-600 dark:text-gray-400">Notes</dt>
-    <dd class="text-sm text-gray-900 dark:text-gray-100 sm:col-span-2 whitespace-pre-line break-words">{{ item.notes }}</dd>
+  <div class="grid gap-1 py-3 first:pt-0 last:pb-0 sm:grid-cols-3 sm:gap-4">
+    <dt class="muted font-medium">Count</dt>
+    <dd class="text-sm break-words sm:col-span-2">{{ item.count }}</dd>
   </div>
-  <div class="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-4">
-    <dt class="text-sm font-medium text-gray-600 dark:text-gray-400">Count</dt>
-    <dd class="text-sm text-gray-900 dark:text-gray-100 sm:col-span-2">{{ item.count }}</dd>
+  <div class="grid gap-1 py-3 first:pt-0 last:pb-0 sm:grid-cols-3 sm:gap-4">
+    <dt class="muted font-medium">Big</dt>
+    <dd class="text-sm break-words sm:col-span-2">{{ item.big }}</dd>
   </div>
-  <div class="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-4">
-    <dt class="text-sm font-medium text-gray-600 dark:text-gray-400">Big</dt>
-    <dd class="text-sm text-gray-900 dark:text-gray-100 sm:col-span-2">{{ item.big }}</dd>
+  <div class="grid gap-1 py-3 first:pt-0 last:pb-0 sm:grid-cols-3 sm:gap-4">
+    <dt class="muted font-medium">Flag</dt>
+    <dd class="text-sm break-words sm:col-span-2">{{ item.flag }}</dd>
   </div>
-  <div class="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-4">
-    <dt class="text-sm font-medium text-gray-600 dark:text-gray-400">Flag</dt>
-    <dd class="text-sm text-gray-900 dark:text-gray-100 sm:col-span-2">{{ item.flag }}</dd>
+  <div class="grid gap-1 py-3 first:pt-0 last:pb-0 sm:grid-cols-3 sm:gap-4">
+    <dt class="muted font-medium">Active</dt>
+    <dd class="text-sm break-words sm:col-span-2">{{ item.active }}</dd>
   </div>
-  <div class="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-4">
-    <dt class="text-sm font-medium text-gray-600 dark:text-gray-400">Active</dt>
-    <dd class="text-sm text-gray-900 dark:text-gray-100 sm:col-span-2">{{ item.active }}</dd>
+  <div class="grid gap-1 py-3 first:pt-0 last:pb-0 sm:grid-cols-3 sm:gap-4">
+    <dt class="muted font-medium">Weight</dt>
+    <dd class="text-sm break-words sm:col-span-2">{{ item.weight }}</dd>
   </div>
-  <div class="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-4">
-    <dt class="text-sm font-medium text-gray-600 dark:text-gray-400">Weight</dt>
-    <dd class="text-sm text-gray-900 dark:text-gray-100 sm:col-span-2">{{ item.weight }}</dd>
+  <div class="grid gap-1 py-3 first:pt-0 last:pb-0 sm:grid-cols-3 sm:gap-4">
+    <dt class="muted font-medium">Price</dt>
+    <dd class="text-sm break-words sm:col-span-2">{{ item.price_cents }}</dd>
   </div>
-  <div class="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-4">
-    <dt class="text-sm font-medium text-gray-600 dark:text-gray-400">Price</dt>
-    <dd class="text-sm text-gray-900 dark:text-gray-100 sm:col-span-2">{{ item.price_cents }}</dd>
+  <div class="grid gap-1 py-3 first:pt-0 last:pb-0 sm:grid-cols-3 sm:gap-4">
+    <dt class="muted font-medium">At</dt>
+    <dd class="text-sm break-words sm:col-span-2">{{ item.at }}</dd>
   </div>
-  <div class="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-4">
-    <dt class="text-sm font-medium text-gray-600 dark:text-gray-400">At</dt>
-    <dd class="text-sm text-gray-900 dark:text-gray-100 sm:col-span-2">{{ item.at }}</dd>
+  <div class="grid gap-1 py-3 first:pt-0 last:pb-0 sm:grid-cols-3 sm:gap-4">
+    <dt class="muted font-medium">Day</dt>
+    <dd class="text-sm break-words sm:col-span-2">{{ item.day }}</dd>
   </div>
-  <div class="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-4">
-    <dt class="text-sm font-medium text-gray-600 dark:text-gray-400">Day</dt>
-    <dd class="text-sm text-gray-900 dark:text-gray-100 sm:col-span-2">{{ item.day }}</dd>
+  <div class="grid gap-1 py-3 first:pt-0 last:pb-0 sm:grid-cols-3 sm:gap-4">
+    <dt class="muted font-medium">Code</dt>
+    <dd class="text-sm break-words sm:col-span-2">{{ item.code }}</dd>
   </div>
-  <div class="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-4">
-    <dt class="text-sm font-medium text-gray-600 dark:text-gray-400">Code</dt>
-    <dd class="text-sm text-gray-900 dark:text-gray-100 sm:col-span-2">{{ item.code }}</dd>
-  </div>
-  <div class="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-4">
-    <dt class="text-sm font-medium text-gray-600 dark:text-gray-400">Meta</dt>
-    <dd class="text-sm text-gray-900 dark:text-gray-100 sm:col-span-2 whitespace-pre-line break-words">{{ item.meta }}</dd>
+  <div class="grid gap-1 py-3 first:pt-0 last:pb-0 sm:grid-cols-3 sm:gap-4">
+    <dt class="muted font-medium">Meta</dt>
+    <dd class="text-sm break-words sm:col-span-2 whitespace-pre-line">{{ item.meta }}</dd>
   </div>
 </dl>
+{% endcall %}
 <p class="mt-6 text-sm"><a href="{{ paths::items() }}" class="link">&larr; All items</a></p>
 {% endblock %}
 
 === create templates/items/new.html
 {% extends "layouts/application.html" %}
+{% import "components/ui.html" as ui %}
 {% block content %}
-<h1 class="text-3xl font-semibold tracking-tight">New item</h1>
-{% include "items/_form.html" %}
+{% call ui::page_header("New item") %}{% endcall %}
+{% call ui::card() %}{% include "items/_form.html" %}{% endcall %}
 {% endblock %}
 
 === create templates/items/edit.html
 {% extends "layouts/application.html" %}
+{% import "components/ui.html" as ui %}
 {% block content %}
-<div class="flex flex-wrap items-end justify-between gap-4">
-  <h1 class="text-3xl font-semibold tracking-tight">Edit item</h1>
-  <a href="{{ paths::item(*id) }}" class="btn-secondary">Show</a>
-</div>
-{% include "items/_form.html" %}
+{% call ui::page_header("Edit item") %}{% call ui::link_button("Show", paths::item(*id), "secondary") %}{% endcall %}{% endcall %}
+{% call ui::card() %}{% include "items/_form.html" %}{% endcall %}
 {% endblock %}
 
 === create templates/items/_form.html
-<form method="post" action="{{ action }}" class="mt-8 space-y-6" novalidate>
+{% import "components/ui.html" as ui %}
+<form method="post" action="{{ action }}" novalidate>
   {% include "shared/_errors.html" %}
-  <div>
-    <label for="item_name" class="label">Name</label>
-    <input type="text" id="item_name" name="name" value="{{ params.name }}" class="input" maxlength="255" required{% if !errors.on("name").is_empty() %} aria-invalid="true" aria-describedby="item_name_error"{% endif %}>
-    {% for msg in errors.on("name") %}<p id="item_name_error" class="field-error">Name {{ msg }}</p>{% endfor %}
-  </div>
-  <div>
-    <label for="item_notes" class="label">Notes <span class="font-normal text-gray-600 dark:text-gray-400">(optional)</span></label>
-    <textarea id="item_notes" name="notes" rows="6" class="input"{% if !errors.on("notes").is_empty() %} aria-invalid="true" aria-describedby="item_notes_error"{% endif %}>{{ params.notes }}</textarea>
-    {% for msg in errors.on("notes") %}<p id="item_notes_error" class="field-error">Notes {{ msg }}</p>{% endfor %}
-  </div>
-  <div>
-    <label for="item_count" class="label">Count</label>
-    <input type="number" id="item_count" name="count" value="{{ params.count }}" class="input" step="1" inputmode="numeric" required{% if !errors.on("count").is_empty() %} aria-invalid="true" aria-describedby="item_count_error"{% endif %}>
-    {% for msg in errors.on("count") %}<p id="item_count_error" class="field-error">Count {{ msg }}</p>{% endfor %}
-  </div>
-  <div>
-    <label for="item_big" class="label">Big</label>
-    <input type="number" id="item_big" name="big" value="{{ params.big }}" class="input" step="1" inputmode="numeric" required{% if !errors.on("big").is_empty() %} aria-invalid="true" aria-describedby="item_big_error"{% endif %}>
-    {% for msg in errors.on("big") %}<p id="item_big_error" class="field-error">Big {{ msg }}</p>{% endfor %}
-  </div>
-  <div>
-    <div class="flex items-center gap-2">
-      <input type="checkbox" id="item_flag" name="flag" value="true" class="h-4 w-4 rounded border-gray-300 dark:border-gray-700 accent-indigo-600 dark:accent-indigo-400"{% if params.flag == "true" %} checked{% endif %}{% if !errors.on("flag").is_empty() %} aria-invalid="true" aria-describedby="item_flag_error"{% endif %}>
-      <label for="item_flag" class="label">Flag</label>
-    </div>
-    {% for msg in errors.on("flag") %}<p id="item_flag_error" class="field-error">Flag {{ msg }}</p>{% endfor %}
-  </div>
-  <div>
-    <label for="item_active" class="label">Active <span class="font-normal text-gray-600 dark:text-gray-400">(optional)</span></label>
-    <select id="item_active" name="active" class="input"{% if !errors.on("active").is_empty() %} aria-invalid="true" aria-describedby="item_active_error"{% endif %}>
-      <option value="">Not set</option>
-      <option value="true"{% if params.active == "true" %} selected{% endif %}>Yes</option>
-      <option value="false"{% if params.active == "false" %} selected{% endif %}>No</option>
-    </select>
-    {% for msg in errors.on("active") %}<p id="item_active_error" class="field-error">Active {{ msg }}</p>{% endfor %}
-  </div>
-  <div>
-    <label for="item_weight" class="label">Weight</label>
-    <input type="text" id="item_weight" name="weight" value="{{ params.weight }}" class="input" inputmode="decimal" required{% if !errors.on("weight").is_empty() %} aria-invalid="true" aria-describedby="item_weight_error"{% endif %}>
-    {% for msg in errors.on("weight") %}<p id="item_weight_error" class="field-error">Weight {{ msg }}</p>{% endfor %}
-  </div>
-  <div>
-    <label for="item_price" class="label">Price</label>
-    <input type="text" id="item_price" name="price" value="{{ params.price }}" class="input" inputmode="decimal" placeholder="0.00" required{% if !errors.on("price").is_empty() %} aria-invalid="true" aria-describedby="item_price_error"{% endif %}>
-    {% for msg in errors.on("price") %}<p id="item_price_error" class="field-error">Price {{ msg }}</p>{% endfor %}
-  </div>
-  <div>
-    <label for="item_at" class="label">At</label>
-    <input type="datetime-local" id="item_at" name="at" value="{{ params.at }}" class="input" required{% if !errors.on("at").is_empty() %} aria-invalid="true" aria-describedby="item_at_error"{% endif %}>
-    {% for msg in errors.on("at") %}<p id="item_at_error" class="field-error">At {{ msg }}</p>{% endfor %}
-  </div>
-  <div>
-    <label for="item_day" class="label">Day <span class="font-normal text-gray-600 dark:text-gray-400">(optional)</span></label>
-    <input type="date" id="item_day" name="day" value="{{ params.day }}" class="input"{% if !errors.on("day").is_empty() %} aria-invalid="true" aria-describedby="item_day_error"{% endif %}>
-    {% for msg in errors.on("day") %}<p id="item_day_error" class="field-error">Day {{ msg }}</p>{% endfor %}
-  </div>
-  <div>
-    <label for="item_code" class="label">Code</label>
-    <input type="text" id="item_code" name="code" value="{{ params.code }}" class="input font-mono" autocapitalize="off" spellcheck="false" required{% if !errors.on("code").is_empty() %} aria-invalid="true" aria-describedby="item_code_error"{% endif %}>
-    {% for msg in errors.on("code") %}<p id="item_code_error" class="field-error">Code {{ msg }}</p>{% endfor %}
-  </div>
-  <div>
-    <label for="item_meta" class="label">Meta <span class="font-normal text-gray-600 dark:text-gray-400">(optional)</span></label>
-    <textarea id="item_meta" name="meta" rows="6" class="input font-mono" spellcheck="false"{% if !errors.on("meta").is_empty() %} aria-invalid="true" aria-describedby="item_meta_error"{% endif %}>{{ params.meta }}</textarea>
-    {% for msg in errors.on("meta") %}<p id="item_meta_error" class="field-error">Meta {{ msg }}</p>{% endfor %}
-  </div>
-  <div class="flex flex-wrap items-center gap-3">
-    <button class="btn">Save item</button>
-    <a href="{{ paths::items() }}" class="btn-secondary">Cancel</a>
-  </div>
+  {% call ui::field(errors, "name", "Name", params.name, required = true, maxlength = 255) %}{% endcall %}
+  {% call ui::textarea(errors, "notes", "Notes", params.notes, 6) %}{% endcall %}
+  {% call ui::field(errors, "count", "Count", params.count, "number", required = true, step = "1", inputmode = "numeric") %}{% endcall %}
+  {% call ui::field(errors, "big", "Big", params.big, "number", required = true, step = "1", inputmode = "numeric") %}{% endcall %}
+  {% call ui::checkbox(errors, "flag", "Flag", params.flag == "true") %}{% endcall %}
+  {% call ui::select(errors, "active", "Active", [("true", "Yes"), ("false", "No")], params.active, blank = "Not set") %}{% endcall %}
+  {% call ui::field(errors, "weight", "Weight", params.weight, required = true, inputmode = "decimal") %}{% endcall %}
+  {% call ui::field(errors, "price", "Price", params.price, required = true, placeholder = "0.00", inputmode = "decimal") %}{% endcall %}
+  {% call ui::field(errors, "at", "At", params.at, "datetime-local", required = true) %}{% endcall %}
+  {% call ui::field(errors, "day", "Day", params.day, "date") %}{% endcall %}
+  {% call ui::field(errors, "code", "Code", params.code, required = true, mono = true) %}{% endcall %}
+  {% call ui::textarea(errors, "meta", "Meta", params.meta, 6, mono = true) %}{% endcall %}
+  {% call ui::form_actions("Save item", paths::items()) %}{% endcall %}
 </form>
 
 === create src/routes/items.rs

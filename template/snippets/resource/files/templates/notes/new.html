@@ -1,5 +1,6 @@
 {% extends "layouts/application.html" %}
+{% import "components/ui.html" as ui %}
 {% block content %}
-<h1 class="text-3xl font-semibold tracking-tight">New note</h1>
-{% include "notes/_form.html" %}
+{% call ui::page_header("New note") %}{% endcall %}
+{% call ui::card() %}{% include "notes/_form.html" %}{% endcall %}
 {% endblock %}

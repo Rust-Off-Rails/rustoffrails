@@ -1,20 +1,23 @@
-//! Newer / older links for a paged list (the pagination snippet), built from the `Page` the
-//! handler extracted. `Page` clamps `?page=` to 1..=`Page::MAX_PAGE` and `?per=` to 1..=100, so a
-//! huge or hostile page number is an empty page with sane links, never an overflow (a 500).
+//! The numbers for a paged list's links (the pagination snippet), built from the `Page` the handler
+//! extracted; `templates/shared/_pager.html` shows them with the component kit's `ui::pagination`.
+//! `Page` clamps `?page=` to 1..=`Page::MAX_PAGE` and `?per=` to 1..=100, so a huge or hostile page
+//! number is an empty page with sane links, never an overflow (a 500). `?per=` is kept in the links.
 //! GUIDE: .offrails/template/snippets/pagination/README.md
 
 use crate::models::Page;
 
 /// What `templates/shared/_pager.html` shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Pager {
+pub struct PageLinks {
     /// 1-based, as clamped.
     pub number: u64,
-    pub newer: Option<String>,
-    pub older: Option<String>,
+    /// The pages known: this one, and the next when the query found more (no COUNT query).
+    pub pages: u64,
+    /// The links' prefix, `{base}page=n`: the list's path, `?`, and `per=n&` when it isn't the default.
+    pub base: String,
 }
 
-impl Pager {
+impl PageLinks {
     /// `base`: the list's path (`paths::notes()`, no query). `more`: the query found a row past
     /// this page (the generated `all`/`all_for` return it).
     pub fn new(base: &str, page: Page, more: bool) -> Self {
@@ -22,19 +25,22 @@ impl Pager {
         let per = if page.per() == Page::DEFAULT_PER {
             String::new()
         } else {
-            format!("&per={}", page.per())
+            format!("per={}&", page.per())
         };
-        let link = |n: u64| format!("{base}?page={n}{per}");
         Self {
             number,
-            newer: (number > 1).then(|| link(number - 1)),
-            older: (more && number < Page::MAX_PAGE).then(|| link(number + 1)),
+            pages: if more && number < Page::MAX_PAGE {
+                number + 1
+            } else {
+                number
+            },
+            base: format!("{base}?{per}"),
         }
     }
 
-    /// Whether there's anywhere to go (a single page shows no pager).
+    /// Whether there's anywhere to go (a single page shows no links).
     pub fn is_needed(&self) -> bool {
-        self.newer.is_some() || self.older.is_some()
+        self.pages > 1
     }
 }
 
@@ -46,45 +52,46 @@ mod tests {
 
     #[test]
     fn links_go_both_ways_and_keep_per() {
-        let p = Pager::new("/notes", Page::new(2, 25), true);
-        assert_eq!(p.newer.as_deref(), Some("/notes?page=1"));
-        assert_eq!(p.older.as_deref(), Some("/notes?page=3"));
-        let p = Pager::new("/notes", Page::new(1, 10), true);
-        assert_eq!(p.newer, None);
-        assert_eq!(p.older.as_deref(), Some("/notes?page=2&per=10"));
-        assert!(!Pager::new("/notes", Page::new(1, 25), false).is_needed());
+        let p = PageLinks::new("/notes", Page::new(2, 25), true);
+        assert_eq!((p.number, p.pages, p.base.as_str()), (2, 3, "/notes?"));
+        let p = PageLinks::new("/notes", Page::new(1, 10), true);
+        assert_eq!((p.pages, p.base.as_str()), (2, "/notes?per=10&"));
+        assert!(!PageLinks::new("/notes", Page::new(1, 25), false).is_needed());
     }
 
     /// `?page=18446744073709551615`: clamped, and the links stay in range.
     #[test]
     fn a_huge_page_is_clamped() {
-        let p = Pager::new("/notes", Page::new(u64::MAX, u64::MAX), true);
+        let p = PageLinks::new("/notes", Page::new(u64::MAX, u64::MAX), true);
         assert_eq!(p.number, Page::MAX_PAGE);
-        assert_eq!(
-            p.newer,
-            Some(format!("/notes?page={}&per=100", Page::MAX_PAGE - 1))
-        );
-        assert_eq!(p.older, None);
+        assert_eq!(p.pages, Page::MAX_PAGE, "no page past MAX_PAGE");
+        assert_eq!(p.base, "/notes?per=100&");
     }
 
     #[derive(Template)]
     #[template(path = "shared/_pager.html")]
     struct Probe {
-        pager: Pager,
+        pager: PageLinks,
     }
 
     #[test]
     fn the_partial_renders_the_links() {
         let html = Probe {
-            pager: Pager::new("/notes", Page::new(2, 25), true),
+            pager: PageLinks::new("/notes", Page::new(2, 25), true),
         }
         .render()
         .unwrap();
         assert!(html.contains("href=\"/notes?page=1\""), "{html}");
         assert!(html.contains("href=\"/notes?page=3\""), "{html}");
-        assert!(html.contains("Page 2"), "{html}");
+        assert!(html.contains("aria-current=\"page\">2<"), "{html}");
+        let per = Probe {
+            pager: PageLinks::new("/notes", Page::new(1, 10), true),
+        }
+        .render()
+        .unwrap();
+        assert!(per.contains("href=\"/notes?per=10&amp;page=2\""), "{per}");
         let none = Probe {
-            pager: Pager::new("/notes", Page::new(1, 25), false),
+            pager: PageLinks::new("/notes", Page::new(1, 25), false),
         }
         .render()
         .unwrap();

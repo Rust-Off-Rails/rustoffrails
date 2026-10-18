@@ -36,6 +36,7 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
         )));
     }
     let mut plan = Plan::new("page", name, args);
+    let layout = super::html::layout(info, flags, &mut plan)?;
     let url = flags
         .recorded("path")
         .or_else(|| flags.value("path"))
@@ -146,6 +147,7 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
             &[
                 ("TITLE", &title),
                 ("LOWER", &title.to_lowercase()),
+                ("LAYOUT", &layout),
                 ("SHOWS", &shows),
                 ("NAME", name),
             ],

@@ -27,10 +27,20 @@ pub fn pluralize(count: u64, singular: &str) -> String {
 
 // ---- the component kit's helpers (templates/components/ui.html) -------------------------------
 
-/// `a == b` for any two string-likes (`&&str`, `&String`, `&str`): macro arguments arrive with
-/// different levels of reference.
-pub fn same(a: impl AsRef<str>, b: impl AsRef<str>) -> bool {
-    a.as_ref() == b.as_ref()
+/// `a == b` for any two displayable values (`&&str`, `&String`, `&i64`…): macro arguments arrive
+/// with different levels of reference, and a `<select>`'s option values may be ids.
+pub fn same(a: impl std::fmt::Display, b: impl std::fmt::Display) -> bool {
+    a.to_string() == b.to_string()
+}
+
+/// The key a form control's errors are under: `key` when given, else the control's `name`.
+pub fn error_key<'a, K, N>(key: &'a K, name: &'a N) -> &'a str
+where
+    K: AsRef<str> + ?Sized,
+    N: AsRef<str> + ?Sized,
+{
+    let key = key.as_ref();
+    if key.is_empty() { name.as_ref() } else { key }
 }
 
 /// The icon (components/_icons.html) for a tone.
@@ -146,6 +156,11 @@ mod tests {
         let (a, owned) = ("a", String::from("a"));
         let (a_ref, owned_ref) = (&a, &owned);
         assert!(same(a_ref, owned_ref) && !same("a", "b"));
+        let id = 7_i64;
+        assert!(same(&id, "7") && !same(&id, ""), "a select's option values may be ids");
+        assert_eq!(error_key("", "title"), "title");
+        assert_eq!(error_key("book", "book_id"), "book");
+        assert_eq!(error_key(&"", &"title"), "title");
         assert_eq!(initials("Ada  Lovelace Byron"), "AL");
         assert_eq!(initials("éa"), "É");
         assert_eq!(initials(""), "");
