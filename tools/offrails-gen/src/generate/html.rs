@@ -29,6 +29,16 @@ pub fn layout(info: &AppInfo, flags: &Flags, plan: &mut Plan) -> Result<String> 
             "--layout {name}: this app has no templates/layouts/{name}.html (copy it from .offrails/template/app/templates/layouts/)"
         )));
     }
+    // The pages call the component kit, with the field options and the helpers 0.7.3 added.
+    let kit = info
+        .read("templates/components/ui.html")
+        .unwrap_or_default();
+    let helpers = info.read("src/views/helpers.rs").unwrap_or_default();
+    if !flags.replan && (!kit.contains("error_key") || !helpers.contains("fn error_key")) {
+        return Err(Fail::usage(
+            "the generated pages are built from the component kit, and this app's is missing or older than 0.7.3: copy templates/components/ (and its helpers in src/views/helpers.rs: same, error_key, Pager…) from .offrails/template/app/ (CHANGELOG 0.7.3, Polish and proof → App migration)",
+        ));
+    }
     if name != "application" {
         plan.option("page_layout", name.clone());
     }
