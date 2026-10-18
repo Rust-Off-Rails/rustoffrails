@@ -5129,14 +5129,29 @@ async fn jobs_are_traced_with_their_sql() {
         ))
         .await;
     }
-    let t = lock(&HUB.traces)
-        .list(false)
-        .into_iter()
-        .find(|t| t.kind == "job")
-        .expect("a job trace");
-    assert_eq!(t.route, "send_digest");
-    assert_eq!(t.request_id, "job-9");
-    assert_eq!(t.statements, 1, "its SQL is its own");
+    // WHY: by its identity (job 9's request id), not "the first job trace": the hub is the
+    // process's, so any other `job` span lands there too; a failure prints every trace held.
+    let traces = lock(&HUB.traces).list(false);
+    let held = || {
+        traces
+            .iter()
+            .map(|t| {
+                format!(
+                    "{} {} {} sql={}",
+                    t.kind, t.route, t.request_id, t.statements
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let t = traces
+        .iter()
+        .find(|t| t.request_id == "job-9")
+        .cloned()
+        .unwrap_or_else(|| panic!("job 9's trace, among {:?}", held()));
+    assert_eq!(t.kind, "job", "{:?}", held());
+    assert_eq!(t.route, "send_digest", "{:?}", held());
+    let sql: Vec<&str> = t.sql.iter().map(|s| &*s.sql).collect();
+    assert_eq!(t.statements, 1, "its SQL is its own: {sql:?}");
     app.get("/dev/dashboard/traces/lookup?job=9")
         .await
         .assert_ok()

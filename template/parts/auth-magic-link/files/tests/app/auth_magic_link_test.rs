@@ -152,6 +152,9 @@ async fn links_follow_the_app_url_being_served_not_a_stale_port() {
         ..Config::test()
     };
     let app = TestApp::with_config(config).await;
+    // An existing account, so the email goes out whatever `DEFAULT_SIGNUP` is (invite-only
+    // sends links only to accounts).
+    factories::user(app.db(), "ada@example.com").await;
     let mail = mail_for(&app, "ada@example.com").await;
     assert!(
         mail.text.contains("http://localhost:3960/login_links/"),
@@ -232,6 +235,9 @@ async fn any_browser_can_be_allowed_by_config() {
         ..Config::test()
     })
     .await;
+    // An existing account, so this holds whatever `DEFAULT_SIGNUP` is (invite-only sends links
+    // only to accounts).
+    factories::user(app.db(), "ada@example.com").await;
     let link = app.link_in(&mail_for(&app, "ada@example.com").await, "/login_links/");
     app.clear_cookies();
     app.post_form(&link, &[])
