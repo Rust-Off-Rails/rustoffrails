@@ -69,8 +69,8 @@ The agent decides which parts the app needs from what the human said and the spe
 | Sends any email: sign-in links, notifications, digests, receipts, a contact form | `mailer` + `dev-mailbox` | Templated HTML + text mail with SMTP in production, and every email visible at `/dev/mailbox` in development |
 | Anything slow, retried, scheduled or sent later: emails in the background, imports, digests, reminders, cleanups, webhooks out | `jobs` + `jobs-dashboard` | A database-backed queue with retries, cron and an `/admin/jobs` console; no extra infrastructure |
 | People sign in (any `ACCOUNTS` but `none`) | `auth-core` + one method | Users, database sessions, the account security page; brings `mailer` and `dev-mailbox` |
-| `ACCOUNTS: magic-link` or `magic-link-invite` | `auth-magic-link` | Emailed link plus a 6-digit code |
-| `ACCOUNTS: signup` or `invite` (passwords) | `auth-password` | argon2id, verification, reset |
+| `ACCOUNTS: magic-link` (or `magic-link invite`) | `auth-magic-link` | Emailed link plus a 6-digit code |
+| `ACCOUNTS: password` (or `password invite`) | `auth-password` | argon2id, verification, reset |
 | Two-factor, admin accounts that guard money or personal data | `auth-totp` | Authenticator-app codes with recovery codes |
 | Chat, presence ("who's online"), typing indicators, multiplayer, live updates pushed to other users | `realtime` | Channels over WebSocket with SSE and long-poll fallbacks |
 | None of the above (a content site, an internal read-only tool) | `dev-dashboard` only | The base already has `/dev`, the cache, security headers and the theme switch |

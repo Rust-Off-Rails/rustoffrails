@@ -12,7 +12,7 @@ API:            {{none | rest | graphql | both}}   (a versioned API for other pr
 DEV_DATABASE:   sqlite (storage/development.sqlite3)
 PROD_DATABASE:  {{postgres | sqlite}}
 DEPLOY_TARGET:  {{later | fly | kamal | railway | render}}
-ACCOUNTS:       {{none | magic-link | magic-link-invite | signup | invite}}  ROLES: {{none | admin+member | …}}  TENANCY: {{per-user | teams | shared | none}}
+ACCOUNTS:       {{none | <methods>[ invite]: password | magic-link | password+magic-link, then " invite" when sign-up is closed}}  ROLES: {{none | admin+member | …}}  TENANCY: {{per-user | teams | shared | none}}
 EMAIL:          dev: local mailbox (/dev/mailbox); prod: {{smtp via <provider> | not yet (logged only)}}
 ```
 

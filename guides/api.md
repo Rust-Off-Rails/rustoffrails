@@ -80,7 +80,7 @@ api_tokens:
 
 | Route | What |
 |-------|------|
-| `POST /api/v1/users` | Sign-up (`ACCOUNTS: signup`): creates the user **and the first token in one transaction**, enqueues the welcome email, returns `201 {"token": "…", "data": TokenJson, "user": UserJson}` |
+| `POST /api/v1/users` | Sign-up (`ACCOUNTS: password`, open sign-up): creates the user **and the first token in one transaction**, enqueues the welcome email, returns `201 {"token": "…", "data": TokenJson, "user": UserJson}` |
 | `POST /api/v1/tokens` | Email + password (+ optional `name`, `scopes`, `expires_in_days` 1..=365) → a new token. Same 422 (`base: "Invalid email or password"`) for an unknown email and a wrong password; one argon2 verify either way |
 | `GET /api/v1/tokens` | The caller's tokens, metadata only |
 | `DELETE /api/v1/tokens/current` | Log out: revoke the token making the request |

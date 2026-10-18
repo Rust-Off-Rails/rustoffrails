@@ -678,15 +678,15 @@ fn update_header(app: &Path, part: &str) -> Result<()> {
             );
         }
         "auth-password" | "auth-magic-link" => {
-            let accounts = util::header_value(&text, "ACCOUNTS").unwrap_or_default();
-            if accounts.starts_with("none") {
-                let rest = accounts.trim_start_matches("none").to_owned();
-                let kind = if part == "auth-password" {
-                    "signup"
-                } else {
-                    "magic-link"
-                };
-                util::set_header(&mut text, "ACCOUNTS", &format!("{kind}{rest}"));
+            let value = util::header_value(&text, "ACCOUNTS").unwrap_or_default();
+            let method = if part == "auth-password" {
+                "password"
+            } else {
+                "magic-link"
+            };
+            let updated = accounts_with(&value, method);
+            if updated != value {
+                util::set_header(&mut text, "ACCOUNTS", &updated);
             }
         }
         _ => {}
@@ -696,6 +696,73 @@ fn update_header(app: &Path, part: &str) -> Result<()> {
         println!("  header AGENTS.md (updated for {part}; check it matches the interview)");
     }
     Ok(())
+}
+
+/// The `ACCOUNTS` header's own words (before `ROLES:`), in the grammar `<method>[+<method>…]
+/// [invite]` (`password`, `magic-link`, `password+magic-link invite`), and the rest of the line.
+/// The words before 0.7.3 map: `signup` = `password`, `invite` = `password invite`,
+/// `magic-link-invite` = `magic-link invite`.
+pub fn parse_accounts(value: &str) -> (Vec<String>, bool, String) {
+    let (own, rest) = match value.find("ROLES:") {
+        Some(i) => (&value[..i], value[i..].to_owned()),
+        None => (value, String::new()),
+    };
+    let mut methods: Vec<String> = Vec::new();
+    let mut invite = false;
+    let add = |m: &str, methods: &mut Vec<String>| {
+        if !m.is_empty() && !methods.iter().any(|x| x == m) {
+            methods.push(m.to_owned());
+        }
+    };
+    for word in own.split_whitespace() {
+        match word {
+            "none" => {}
+            "signup" => add("password", &mut methods),
+            "invite" => {
+                if methods.is_empty() {
+                    add("password", &mut methods);
+                }
+                invite = true;
+            }
+            "magic-link-invite" => {
+                add("magic-link", &mut methods);
+                invite = true;
+            }
+            other => {
+                for m in other.split('+') {
+                    add(m, &mut methods);
+                }
+            }
+        }
+    }
+    (methods, invite, rest)
+}
+
+/// The `ACCOUNTS` value written back: the methods `+`-joined (`none` without one), ` invite`, then
+/// two spaces and the rest of the line (`ROLES: … TENANCY: …`).
+pub fn format_accounts(methods: &[String], invite: bool, rest: &str) -> String {
+    let mut own = if methods.is_empty() {
+        "none".to_owned()
+    } else {
+        methods.join("+")
+    };
+    if invite && !methods.is_empty() {
+        own.push_str(" invite");
+    }
+    if rest.is_empty() {
+        own
+    } else {
+        format!("{own}  {rest}")
+    }
+}
+
+/// `ACCOUNTS` with this sign-in method among its methods (old words normalized).
+fn accounts_with(value: &str, method: &str) -> String {
+    let (mut methods, invite, rest) = parse_accounts(value);
+    if !methods.iter().any(|m| m == method) {
+        methods.push(method.to_owned());
+    }
+    format_accounts(&methods, invite, &rest)
 }
 
 /// `list-parts`: every part, what it adds, what it needs, and whether the app has it.
@@ -742,6 +809,60 @@ pub fn list(fw: &Path, app: Option<&Path>) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_accounts_header_grammar_and_its_old_words() {
+        let rest = "ROLES: none  TENANCY: none";
+        let cases = [
+            (
+                "none  ROLES: none  TENANCY: none",
+                "password",
+                "password  ROLES: none  TENANCY: none",
+            ),
+            (
+                "password  ROLES: none  TENANCY: none",
+                "magic-link",
+                "password+magic-link  ROLES: none  TENANCY: none",
+            ),
+            (
+                "magic-link invite  ROLES: none  TENANCY: none",
+                "magic-link",
+                "magic-link invite  ROLES: none  TENANCY: none",
+            ),
+            (
+                "signup  ROLES: none  TENANCY: none",
+                "password",
+                "password  ROLES: none  TENANCY: none",
+            ),
+            (
+                "invite  ROLES: none  TENANCY: none",
+                "magic-link",
+                "password+magic-link invite  ROLES: none  TENANCY: none",
+            ),
+            (
+                "magic-link-invite  ROLES: none  TENANCY: none",
+                "password",
+                "magic-link+password invite  ROLES: none  TENANCY: none",
+            ),
+        ];
+        for (before, method, after) in cases {
+            assert_eq!(accounts_with(before, method), after, "{before} + {method}");
+        }
+        let (methods, invite, r) =
+            parse_accounts("password+magic-link invite  ROLES: none  TENANCY: none");
+        assert_eq!(
+            (methods, invite, r.as_str()),
+            (
+                vec!["password".to_owned(), "magic-link".to_owned()],
+                true,
+                rest
+            )
+        );
+        assert_eq!(
+            format_accounts(&[], true, rest),
+            "none  ROLES: none  TENANCY: none"
+        );
+    }
     use super::*;
 
     fn part(name: &str, deps: &[&str]) -> (String, Part) {

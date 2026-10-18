@@ -2,7 +2,7 @@
 
 > **TL;DR**
 > - Accounts are **parts**, not a recipe to type: `cargo offrails add auth-core auth-password` (email + password), `auth-core auth-magic-link` (passwordless), both, and `auth-totp` for two-factor. They bring users, database sessions, sign-in, the account security page, security emails, the audit trail, throttling and their own tests ([the parts](../template/README.md#choosing-parts), [samples](https://github.com/Rust-Off-Rails/samples)).
-> - Before: write `product/features/accounts.md`, and pick the variant from the interview (`ACCOUNTS: signup | magic-link | magic-link-invite | invite`). After: the header (`ACCOUNTS`, `TENANCY`), `APP_SECRET_KEY`, where people land after sign-in, your own handlers scoped to the user, the tenancy suites (the first scoped `g resource` writes them), and the browser smoke.
+> - Before: write `product/features/accounts.md`, and pick the variant from the interview (`ACCOUNTS: password | magic-link | password+magic-link`, plus ` invite` when sign-up is closed). After: the header (`ACCOUNTS`, `TENANCY`), `APP_SECRET_KEY`, where people land after sign-in, your own handlers scoped to the user, the tenancy suites (the first scoped `g resource` writes them), and the browser smoke.
 > - What's left is product, not plumbing: invite-only sign-up, roles, teams, the spec's own acceptance tests. Each is listed below with where it goes.
 >
 > Read it all when adding accounts to an app.
@@ -15,10 +15,10 @@ Write `product/features/accounts.md` from [`blueprints/feature-spec.md`](../blue
 
 | `ACCOUNTS` (interview) | Parts | Then |
 |------------------------|-------|------|
-| `signup` | `auth-core auth-password` | done: sign-up, verification, reset, sign-in |
+| `password` | `auth-core auth-password` | done: sign-up, verification, reset, sign-in |
 | `magic-link` | `auth-core auth-magic-link` | done: sign-up on first link |
-| `invite` | `auth-core auth-password` | make sign-up invite-only ([below](#invite-only)) |
-| `magic-link-invite` | `auth-core auth-magic-link` | make sign-up invite-only ([below](#invite-only)) |
+| `password+magic-link` | `auth-core auth-password auth-magic-link` | done: either method, one account |
+| `… invite` (`password invite`, `magic-link invite`) | the same | one switch: `DEFAULT_SIGNUP = Signup::Invite` ([below](#invite-only)) |
 | any, plus two-factor | `+ auth-totp` | optional per user; required for admins is yours ([below](#roles-and-teams)) |
 
 `auth-core` needs `mailer` and `dev-mailbox`; `add` installs them first.
@@ -44,7 +44,7 @@ cargo run -q -- db migrate                             # then prove it: db rollb
 
 ### Invite-only
 
-`ACCOUNTS: invite` (or `magic-link-invite`): no public sign-up. With `auth-password`, remove the `/registration*` routes and the "Sign up" links (the part's `auth nav links` and `sign in links` wiring), create users from an admin screen or a task (`user::find_or_create` + `password_credential::set`), and send them a reset link (`passwords::send_reset`) to choose a password. With `auth-magic-link`, refuse a link for an email that has no account yet (the part creates accounts on first use). Either way: an `AC-accounts-<n>` that a stranger can't create an account, with its test, and the part's tests that sign up (they assume open sign-up) adapted, not deleted. Check the part's README first: a newer version may ship invite-only as an option.
+`ACCOUNTS: password invite` (or `magic-link invite`): no public sign-up, and it is a switch, not code. `cargo offrails new … --parts auth-password --invite` sets it; in an existing app, set `pub const DEFAULT_SIGNUP: Signup = Signup::Invite;` in `src/config.rs` (auth-core's `// APP:` line; `APP_AUTH_SIGNUP=open|invite` overrides it per deploy, but keep the default closed so a forgotten variable can't open sign-up). Then the sign-up pages answer 404 and their links are hidden (`ctx.signup_open`), magic links go only to existing accounts and never create one, and people get in with `cargo run -- task auth_invite <email>` (production: `app task auth_invite <email>`; with passwords the invitation links to "Choose your password", which also verifies the address), or `crate::tasks::auth_invite::invite` from your admin screen. Keep the parts' routes and tests: the sign-up tests ask for `Signup::Open` themselves. Add the `AC-accounts-<n>` that a stranger can't create an account and cite `invite_only_has_no_public_sign_up` (passwords) or `invite_only_magic_links_never_create_accounts` (links).
 
 ### Roles and teams
 

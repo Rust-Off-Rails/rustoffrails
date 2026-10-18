@@ -26,7 +26,8 @@ The framework ships the app skeleton as real files: [`template/app/`](../templat
 ```sh
 cargo run -q --manifest-path "$FW/tools/offrails-gen/Cargo.toml" --target-dir <dir>/target/offrails-gen -- \
   new <dir> <crate_name> "<Display Name>" --pitch "<one-line pitch>" --parts <comma-separated parts, or none>
-# options: --prod-db postgres|sqlite (default postgres), --mode htmx|inertia|spa|api (§4), --no-git, --offline
+# options: --prod-db postgres|sqlite (default postgres), --mode htmx|inertia|spa|api (§4), --no-git, --offline,
+#          --invite (ACCOUNTS: … invite: DEFAULT_SIGNUP = Signup::Invite; needs auth-password or auth-magic-link)
 ```
 
 `--target-dir` keeps the generator's build out of `$FW` (the plugin's files are compared by content, and a build there reads as drift). On Linux, macOS or Git Bash, `sh "$FW/tools/new-app.sh" <dir> <crate_name> "<Display Name>" …` is the same command.

@@ -88,7 +88,10 @@ form { margin: 0; }
 .tile .figure { margin-top: auto; padding-top: .5rem; color: var(--accent); font-weight: 600; }
 .try { display: flex; gap: .5rem; flex-wrap: wrap; margin: .5rem 0 1rem; }
 .notice { padding: .75rem 1rem; border: 1px solid var(--warn); border-radius: 8px; background: color-mix(in srgb, var(--warn) 12%, var(--panel)); margin: 1rem; }
-.scroll { overflow-x: auto; }
+/* A phone never scrolls sideways: a wide table scrolls inside its .scroll box, and that box is the
+   containing block of the visually-hidden (absolute) labels in its cells: else they sit at the
+   table's far edge, outside the box, and widen the page. */
+.scroll { position: relative; max-width: 100%; overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: .88rem; background: var(--panel); }
 th, td { padding: .45rem .8rem; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
 th { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; white-space: nowrap; }

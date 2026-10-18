@@ -23,7 +23,7 @@ APP:            fixture
 FRAMEWORK:      Rust off Rails 0.6.0 (.offrails/, vendored 2026-10-13)
 FRONTEND_MODE:  htmx
 ISLANDS:        no
-ACCOUNTS:       signup  ROLES: none  TENANCY: per-user
+ACCOUNTS:       password  ROLES: none  TENANCY: per-user
 ```
 EOF
   cat > "$d/product/features/notes.md" <<'EOF'

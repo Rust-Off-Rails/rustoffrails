@@ -34,7 +34,7 @@ use util::{Fail, Result};
 
 const USAGE: &str = "usage:
   offrails-gen new <dir> <crate_name> \"<Display Name>\" [--pitch \"<one line>\"] [--parts a,b|none]
-                   [--mode htmx|inertia|spa|api] [--prod-db postgres|sqlite] [--no-git] [--offline]
+                   [--invite] [--mode htmx|inertia|spa|api] [--prod-db postgres|sqlite] [--no-git] [--offline]
                    [--framework <path>]
   offrails-gen generate <kind> <name> [args…] [--dry-run] [--force] [--public] [--app <dir>]   (alias: g)
                    migration | model | resource (scaffold) | controller | page | api | job | mailer | channel | test
@@ -273,6 +273,7 @@ fn real_main() -> Result<()> {
                 "--no-git",
                 "--offline",
                 "--title",
+                "--invite",
             ])?;
             let need = || {
                 Fail::usage(format!(
@@ -301,6 +302,7 @@ fn real_main() -> Result<()> {
                     prod_db: args.value("--prod-db").unwrap_or_else(|| "postgres".into()),
                     git: !args.flag("--no-git"),
                     offline: args.flag("--offline"),
+                    invite: args.flag("--invite"),
                 },
             )
         }

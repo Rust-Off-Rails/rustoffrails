@@ -42,6 +42,42 @@ pub struct NewOptions {
     pub prod_db: String,
     pub git: bool,
     pub offline: bool,
+    /// `--invite`: an invite-only app (`DEFAULT_SIGNUP = Signup::Invite`, `ACCOUNTS: … invite`).
+    pub invite: bool,
+}
+
+/// `new --invite`: nobody signs up; `app task auth_invite <email>` creates accounts. The auth parts
+/// read `DEFAULT_SIGNUP` (src/config.rs, from auth-core; `APP_AUTH_SIGNUP` overrides it per deploy).
+fn make_invite_only(app: &Path) -> Result<()> {
+    let config = app.join("src").join("config.rs");
+    let text = util::read_text(&config)?;
+    let open = "pub const DEFAULT_SIGNUP: Signup = Signup::Open;";
+    if !text.contains(open) {
+        return Err(Fail::new(format!(
+            "--invite: {} has no `{open}` (auth-core older than 0.7.3?)",
+            config.display()
+        )));
+    }
+    util::write_text(
+        &config,
+        &text.replace(open, "pub const DEFAULT_SIGNUP: Signup = Signup::Invite;"),
+    )?;
+    let agents = app.join("AGENTS.md");
+    if agents.is_file() {
+        let mut text = util::read_text(&agents)?;
+        let value = util::header_value(&text, "ACCOUNTS").unwrap_or_default();
+        let (methods, _, rest) = parts::parse_accounts(&value);
+        util::set_header(
+            &mut text,
+            "ACCOUNTS",
+            &parts::format_accounts(&methods, true, &rest),
+        );
+        util::write_text(&agents, &text)?;
+    }
+    println!(
+        "  invite-only: DEFAULT_SIGNUP = Signup::Invite in src/config.rs; accounts come from `cargo run -- task auth_invite <email>`"
+    );
+    Ok(())
 }
 
 pub fn validate_crate_name(name: &str) -> Result<()> {
@@ -217,6 +253,15 @@ pub fn run(fw: &Path, o: &NewOptions) -> Result<()> {
             )));
         }
     }
+    let auth = o
+        .parts
+        .iter()
+        .any(|p| matches!(p.as_str(), "all" | "auth-password" | "auth-magic-link"));
+    if o.invite && !auth {
+        return Err(Fail::usage(
+            "--invite needs a sign-in part: --parts auth-password (or auth-magic-link)",
+        ));
+    }
     let app = &o.dir;
     let template = fw.join("template").join("app");
     let version = util::framework_version(fw)?;
@@ -342,6 +387,10 @@ pub fn run(fw: &Path, o: &NewOptions) -> Result<()> {
                 quiet_next: true,
             },
         )?;
+    }
+
+    if o.invite {
+        make_invite_only(app)?;
     }
 
     // brand.toml carries the new name: the theme CSS, src/brand.rs, the favicon set and the card

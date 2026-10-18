@@ -15,6 +15,9 @@ for f in files:
             in_code = not in_code
         if not in_code and line.startswith("#"):
             anchors[f].add(slug(line.lstrip("#")))
+        if not in_code:
+            # An explicit anchor kept for links to a renamed heading: <a id="old-slug"></a>
+            anchors[f].update(re.findall(r'<a id="([^"]+)"></a>', line))
 
 bad = []
 for f in files:

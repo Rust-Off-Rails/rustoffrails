@@ -21,7 +21,7 @@ Rails asked its questions through `rails new` flags. Off Rails asks them in conv
    c) Invite-only: an admin creates accounts (internal tools; login by password, or by magic link if you say so)
    d) No accounts (public site)
 
-   Records as `ACCOUNTS: magic-link | signup | invite | magic-link-invite | none` ([auth variants](guides/auth.md#variants-accounts-in-the-apps-agentsmd)). Magic links need a real email provider before launch, so ask Round 2 Q4 with that in mind; the dev mailbox covers development.
+   Records as `ACCOUNTS:` the sign-in methods joined by `+`, then `invite` when only invited people get in: a) `magic-link`, b) `password`, c) `password invite` (or `magic-link invite`), d) `none`; both methods: `password+magic-link` ([auth variants](guides/auth.md#variants-accounts-in-the-apps-agentsmd)). Invite-only is a switch, not extra work: `new --invite`, or `DEFAULT_SIGNUP = Signup::Invite` in `src/config.rs`. Magic links need a real email provider before launch, so ask Round 2 Q4 with that in mind; the dev mailbox covers development.
 3. **Who owns data?**
    a) Each user owns their own records (Recommended)
    b) Teams/workspaces: users belong to an organization and share its records (multi-tenant)
