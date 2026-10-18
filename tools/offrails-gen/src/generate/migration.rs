@@ -410,10 +410,13 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
 /// `add_x_to_<table>`: the new columns go into the generated entity too (at `samples: columns`).
 fn entity_columns(info: &AppInfo, plan: &mut Plan, table: &str, fields: &[Field]) {
     let Ok(names) = Names::new(table) else { return };
-    let path = format!("src/models/{}.rs", names.singular);
-    let has_anchor = info
-        .read(&path)
-        .is_some_and(|t| t.lines().any(|l| l.trim() == "// samples: columns"));
+    let Some((path, text)) = info.model_source(&names.singular) else {
+        plan.next.push(format!(
+            "add the new column(s) to the `{table}` entity (src/models/): the entity mirrors the migration"
+        ));
+        return;
+    };
+    let has_anchor = text.lines().any(|l| l.trim() == "// samples: columns");
     if has_anchor {
         let text: String = fields
             .iter()

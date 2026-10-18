@@ -52,6 +52,14 @@ fn check(case: &str, kind: &str, args: &[&str], public: bool) {
         .recorded
         .insert("stamp".into(), "20261017_120000".into());
     let args: Vec<String> = args.iter().map(|s| (*s).to_owned()).collect();
+    let kind = if kind == "page_profile" {
+        flags
+            .values
+            .insert("path".into(), "/people/{handle}".into());
+        "page"
+    } else {
+        kind
+    };
     let plan = plan_for(kind, &info, &args, &flags).expect("a plan");
     let got = render(&plan);
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -144,6 +152,13 @@ fn golden_page_and_controller() {
         &["reports", "index", "summary"],
         false,
     );
+    check(
+        "controller_blog_params",
+        "controller",
+        &["blog", "index", "show:/blog/{slug}"],
+        false,
+    );
+    check("page_profile_param", "page_profile", &["profile"], false);
 }
 
 #[test]

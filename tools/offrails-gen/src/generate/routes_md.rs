@@ -14,17 +14,16 @@ pub struct Route {
     pub access: String,
 }
 
-/// Every row of `pub const ROUTES` in `src/routes.rs`.
+/// The rows of one file's table literal: `pub const ROUTES: &[…] = &[` (a feature's file, or
+/// `src/routes.rs` before 0.7.3) or `const APP_ROUTES: &[…] = &[` (`src/routes.rs`).
 pub fn parse(routes_rs: &str) -> Vec<Route> {
     let mut out = Vec::new();
     let mut inside = false;
     for line in routes_rs.lines() {
         let t = line.trim();
-        if t.starts_with("pub const ROUTES") {
-            inside = true;
-            continue;
-        }
         if !inside {
+            inside = (t.starts_with("pub const ROUTES") || t.starts_with("const APP_ROUTES"))
+                && t.ends_with("= &[");
             continue;
         }
         if t.starts_with("];") {
@@ -41,7 +40,7 @@ pub fn parse(routes_rs: &str) -> Vec<Route> {
         let access = quoted[6]
             .split("Access::")
             .nth(1)
-            .map(|a| a.trim_end_matches([')', ',', ' ']).to_ascii_lowercase())
+            .map(|a| a.split(')').next().unwrap_or(a).trim().to_ascii_lowercase())
             .unwrap_or_default();
         out.push(Route {
             method: quoted[1].to_owned(),
@@ -49,6 +48,69 @@ pub fn parse(routes_rs: &str) -> Vec<Route> {
             handler: quoted[5].to_owned(),
             access,
         });
+    }
+    out
+}
+
+/// The feature tables `src/routes.rs` lists in `TABLES` (`posts::ROUTES,` → `posts`), in order.
+pub fn feature_tables(routes_rs: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut inside = false;
+    for line in routes_rs.lines() {
+        let t = line.trim();
+        if !inside {
+            inside = t.starts_with("const TABLES") && t.ends_with("= &[");
+            continue;
+        }
+        if t.starts_with("];") {
+            break;
+        }
+        let code = t.split("//").next().unwrap_or("").trim();
+        if let Some(m) = code.strip_suffix("::ROUTES,")
+            && !m.is_empty()
+            && m.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            out.push(m.to_owned());
+        }
+    }
+    out
+}
+
+/// The whole table as `ROUTES` concatenates it: `src/routes.rs`'s own rows, then each feature's
+/// file (`src/routes/<feature>.rs`) in `TABLES` order.
+pub fn all(app: &Path) -> Vec<Route> {
+    let Ok(src) = std::fs::read_to_string(rel(app, "src/routes.rs")) else {
+        return Vec::new();
+    };
+    let mut routes = parse(&src);
+    for f in feature_tables(&src) {
+        if let Ok(text) = std::fs::read_to_string(rel(app, &format!("src/routes/{f}.rs"))) {
+            routes.extend(parse(&text));
+        }
+    }
+    routes
+}
+
+/// Every routes source: `src/routes.rs`, then each `src/routes/*.rs`, as (path, text).
+pub fn sources(app: &Path) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    if let Ok(t) = std::fs::read_to_string(rel(app, "src/routes.rs")) {
+        out.push(("src/routes.rs".to_owned(), t));
+    }
+    let mut files: Vec<String> = std::fs::read_dir(rel(app, "src/routes"))
+        .map(|d| {
+            d.filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .filter(|n| n.ends_with(".rs"))
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort();
+    for f in files {
+        let path = format!("src/routes/{f}");
+        if let Ok(t) = std::fs::read_to_string(rel(app, &path)) {
+            out.push((path, t));
+        }
     }
     out
 }
@@ -68,10 +130,7 @@ pub fn render(routes: &[Route]) -> String {
 
 /// Rewrites `docs/routes.md` when `ROUTES` says something else. Returns whether it changed.
 pub fn refresh(app: &Path) -> Result<bool> {
-    let Ok(src) = std::fs::read_to_string(rel(app, "src/routes.rs")) else {
-        return Ok(false);
-    };
-    let routes = parse(&src);
+    let routes = all(app);
     if routes.is_empty() {
         return Ok(false);
     }
@@ -98,6 +157,10 @@ mod tests {
         assert_eq!(r[1].path, "/x/{id}");
         assert!(render(&r).contains("| POST | `/x/{id}` | `x::update` | user |\n"));
         let template = include_str!("../../../../template/app/src/routes.rs");
+        assert!(feature_tables(template).is_empty());
+        let tables = "const TABLES: &[&[Route]] = &[\n    APP_ROUTES,\n    posts::ROUTES, // posts\n    about::ROUTES, // about\n    // samples: route tables\n];\n";
+        assert_eq!(feature_tables(tables), vec!["posts", "about"]);
+        assert!(parse("pub const ROUTES: &[Route] = &concat::<{ count(TABLES) }>(TABLES);\nconst TABLES: &[&[Route]] = &[\n    APP_ROUTES,\n];\n").is_empty());
         let doc = include_str!("../../../../template/app/docs/routes.md");
         assert_eq!(render(&parse(template)), doc.replace("\r\n", "\n"));
     }

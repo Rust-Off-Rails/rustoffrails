@@ -1,18 +1,23 @@
-//! `generate page <name> [--path /x] [--nav]`: a static public page (About, Pricing, Terms): a
-//! handler in the shared `controllers/pages.rs`, its struct in `views/pages.rs`, its template,
-//! the route (router, `paths::`, `ROUTES`), a sitemap entry and a test in `tests/app/pages_test.rs`.
+//! `generate page <name> [--path /x] [--nav]`: a public page (About, Pricing, Terms, or one with
+//! a path parameter: `--path /p/{slug}`). Its own files: `src/controllers/pages/<name>.rs`,
+//! `src/views/pages/<name>.rs`, `templates/pages/<name>.html`, `src/routes/<name>.rs`,
+//! `tests/app/pages/<name>_test.rs`; one marked line each in the shared `pages` modules, the
+//! sitemap (a page without parameters) and the nav (`--nav`).
 
 use super::Flags;
 use super::app::AppInfo;
 use super::controller::nav_link;
+use super::feature::{self, Mount};
 use super::names::{self, Names};
 use super::plan::Plan;
-use super::resource::{check_free, routes_table};
+use super::resource::RESERVED;
 use crate::util::{Fail, Result};
 
-const CONTROLLER: &str = "//! Static pages (`generate page`): About, Pricing, Terms… Public, no data.\n\nuse axum::response::{IntoResponse, Response};\n\nuse crate::error::AppError;\nuse crate::views::{self, Ctx, pages};\n\n// samples: page actions\n";
+const CONTROLLERS: &str = "//! Public pages (`generate page`): About, Pricing, Terms… One file per page.\n\n// samples: page mods\n";
 
-const VIEWS: &str = "//! Page structs for the static pages (`generate page`).\n\nuse askama::Template;\n\nuse super::Ctx;\n// The layout links with `paths::`.\nuse crate::routes::paths;\n\n// samples: page views\n";
+const VIEWS: &str = "//! Page structs for the public pages (`generate page`), one file per page.\n\n// samples: page view mods\n";
+
+const TESTS: &str = "//! The public pages (`generate page`): each renders, publicly; one file per page.\n\n// samples: page test mods\n";
 
 /// `generate page <name>`.
 pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
@@ -24,86 +29,151 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
         ));
     }
     let name = &n.singular;
+    if RESERVED.contains(&name.as_str()) || name == "mod" || name == "show" {
+        return Err(Fail::usage(format!(
+            "'{name}' is a module every app already has; pick another name"
+        )));
+    }
     let mut plan = Plan::new("page", name, args);
     let url = flags
         .recorded("path")
         .or_else(|| flags.value("path"))
         .unwrap_or_else(|| format!("/{}", name.replace('_', "-")));
-    if !url.starts_with('/') || url.contains('{') || url.contains(char::is_whitespace) {
+    let params = feature::check_path(&url)?;
+    if params.iter().any(|p| p == "ctx") {
         return Err(Fail::usage(format!(
-            "--path {url}: a page's path starts with / and takes no parameters"
+            "{url}: `ctx` is the handler's own name; call the parameter something else"
         )));
     }
     plan.option("path", url.clone());
     if flags.recorded("path").is_none() {
-        check_free(info, std::slice::from_ref(name), std::slice::from_ref(&url))?;
+        feature::check_free(
+            info,
+            Some(name),
+            std::slice::from_ref(name),
+            std::slice::from_ref(&url),
+        )?;
+    }
+    let nav = flags.nav || flags.recorded("nav").as_deref() == Some("yes");
+    if nav && !params.is_empty() {
+        return Err(Fail::usage(format!(
+            "--nav: {url} takes parameters, so the nav can't link to it; link to it from a page that knows them"
+        )));
     }
     let view = format!("Pages{}", n.model);
     let title = names::human(name);
     let k = &info.krate;
     let cmd = plan.command();
 
-    plan.shared("src/controllers/pages.rs", CONTROLLER);
-    plan.insert_for(
-        "src/controllers/pages.rs",
-        "src/controllers/mod.rs",
-        "controller mods",
-        "pub mod pages;\n",
-    );
-    plan.insert(
-        "src/controllers/pages.rs",
-        "page actions",
-        format!(
-            "/// `GET {url}` (`{cmd}`)\n#[tracing::instrument(skip_all)]\npub async fn {name}(ctx: Ctx) -> Result<Response, AppError> {{\n    // APP: a description for search results and link previews.\n    Ok(views::render(pages::{view} {{\n        ctx: ctx.titled(\"{title}\"),\n    }})?\n    .into_response())\n}}\n\n"
+    // The shared `pages` modules: created by the first page, removed with the last.
+    for (path, content, anchor, file, parent_anchor, parent) in [
+        (
+            "src/controllers/pages/mod.rs",
+            CONTROLLERS,
+            "page mods",
+            format!("pub mod {name};\n"),
+            "controller mods",
+            ("src/controllers/mod.rs", "pub mod pages;\n"),
         ),
-    );
-    plan.shared("src/views/pages.rs", VIEWS);
-    plan.insert_for(
-        "src/views/pages.rs",
-        "src/views/mod.rs",
-        "view mods",
-        "pub mod pages;\n",
-    );
-    plan.insert(
-        "src/views/pages.rs",
-        "page views",
-        format!(
-            "/// `GET {url}`\n#[derive(Template)]\n#[template(path = \"pages/{name}.html\")]\npub struct {view} {{\n    pub ctx: Ctx,\n}}\n\n"
+        (
+            "src/views/pages/mod.rs",
+            VIEWS,
+            "page view mods",
+            format!("pub mod {name};\n"),
+            "view mods",
+            ("src/views/mod.rs", "pub mod pages;\n"),
         ),
-    );
+        (
+            "tests/app/pages/mod.rs",
+            TESTS,
+            "page test mods",
+            format!("mod {name}_test;\n"),
+            "test mods",
+            ("tests/app/main.rs", "mod pages;\n"),
+        ),
+    ] {
+        plan.shared(path, content);
+        plan.insert_for(path, parent.0, parent_anchor, parent.1);
+        plan.insert(path, anchor, file);
+    }
+
+    let extract = feature::extractor(&params)
+        .map(|e| format!("    {e},\n"))
+        .unwrap_or_default();
+    let fields: String = params.iter().map(|p| format!("        {p},\n")).collect();
+    let axum_use = if params.is_empty() {
+        "use axum::response::{IntoResponse, Response};\n".to_owned()
+    } else {
+        "use axum::{\n    extract::Path,\n    response::{IntoResponse, Response},\n};\n".to_owned()
+    };
     plan.create(
-        format!("templates/pages/{name}.html"),
+        format!("src/controllers/pages/{name}.rs"),
         format!(
-            "{{% extends \"layouts/application.html\" %}}\n{{% block content %}}\n<article class=\"py-6\">\n  <h1 class=\"text-3xl font-semibold tracking-tight\">{title}</h1>\n  <p class=\"mt-4 text-gray-700 dark:text-gray-300\">APP: the {lower} page's words (templates/pages/{name}.html).</p>\n</article>\n{{% endblock %}}\n",
+            "//! `GET {url}`: the {lower} page. Generated by `{cmd}`.\n\n{axum_use}\nuse crate::error::AppError;\nuse crate::views::{{self, Ctx, pages::{name}::{view}}};\n\n/// `GET {url}`\n#[tracing::instrument(skip_all)]\npub async fn show(\n    ctx: Ctx,\n{extract}) -> Result<Response, AppError> {{\n    // APP: a description for search results and link previews: ctx.described(\"…\").\n    Ok(views::render({view} {{\n        ctx: ctx.titled(\"{title}\"),\n{fields}    }})?\n    .into_response())\n}}\n",
             lower = title.to_lowercase()
         ),
     );
-    plan.insert(
-        "src/routes.rs",
-        "routes",
+    let struct_fields: String = params
+        .iter()
+        .map(|p| {
+            format!(
+                "    /// From the path (`{{{p}}}`): untrusted; Askama escapes it.\n    pub {p}: {},\n",
+                feature::param_type(p)
+            )
+        })
+        .collect();
+    plan.create(
+        format!("src/views/pages/{name}.rs"),
         format!(
-            "// {title} (cargo offrails generate page {name})\napp = app.route(\"{url}\", get(crate::controllers::pages::{name}));\n\n"
+            "//! The {lower} page's struct. Generated by `{cmd}`.\n\nuse askama::Template;\n\nuse crate::views::Ctx;\n// The layout links with `paths::`.\nuse crate::routes::paths;\n\n/// `GET {url}`\n#[derive(Template)]\n#[template(path = \"pages/{name}.html\")]\npub struct {view} {{\n    pub ctx: Ctx,\n{struct_fields}}}\n",
+            lower = title.to_lowercase()
         ),
     );
-    plan.insert(
-        "src/routes.rs",
-        "paths",
-        format!("pub fn {name}() -> String {{\n    \"{url}\".into()\n}}\n"),
-    );
-    plan.insert(
-        "src/routes.rs",
-        "routes table",
-        routes_table(
-            &[("GET".into(), url.clone(), format!("pages::{name}"))],
-            "Public",
+    let shows: String = params
+        .iter()
+        .map(|p| format!(" <code>{{{{ {p} }}}}</code>"))
+        .collect();
+    let shows = if shows.is_empty() {
+        String::new()
+    } else {
+        format!(" for{shows}")
+    };
+    plan.create(
+        format!("templates/pages/{name}.html"),
+        format!(
+            "{{% extends \"layouts/application.html\" %}}\n{{% block content %}}\n<article class=\"py-6\">\n  <h1 class=\"text-3xl font-semibold tracking-tight\">{title}</h1>\n  <p class=\"mt-4 text-gray-700 dark:text-gray-300\">APP: the {lower} page's words{shows} (templates/pages/{name}.html).</p>\n</article>\n{{% endblock %}}\n",
+            lower = title.to_lowercase()
         ),
     );
-    plan.insert(
-        "src/controllers/meta.rs",
-        "sitemap paths",
-        format!("paths::{name}(),\n"),
+    feature::plan_into(
+        &mut plan,
+        &feature::Routes {
+            module: name.clone(),
+            what: format!(
+                "The {} page (`cargo offrails generate page {name}`)",
+                title.to_lowercase()
+            ),
+            mounts: vec![Mount::new(
+                url.clone(),
+                &[("get", &format!("crate::controllers::pages::{name}::show"))],
+            )],
+            paths: feature::helper(name, &url),
+            rows: vec![(
+                "GET".into(),
+                url.clone(),
+                format!("pages::{name}::show"),
+                "Public".into(),
+            )],
+            shared: false,
+        },
     );
-    let nav = flags.nav || flags.recorded("nav").as_deref() == Some("yes");
+    if params.is_empty() {
+        plan.insert(
+            "src/controllers/meta.rs",
+            "sitemap paths",
+            format!("paths::{name}(),\n"),
+        );
+    }
     plan.option("nav", if nav { "yes" } else { "no" });
     if nav {
         plan.insert(
@@ -112,30 +182,36 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
             nav_link(name, &title),
         );
     }
-    plan.shared(
-        "tests/app/pages_test.rs",
+    let call = format!("paths::{name}({})", feature::sample_args(&params));
+    let test = if params.is_empty() {
         format!(
-            "//! The static pages (`generate page`): each renders, publicly, and is in the sitemap.\n\nuse {k}::routes::paths;\n\nuse crate::support::TestApp;\n\n// samples: page tests\n"
-        ),
-    );
-    plan.insert_for(
-        "tests/app/pages_test.rs",
-        "tests/app/main.rs",
-        "test mods",
-        "mod pages_test;\n",
-    );
-    plan.insert(
-        "tests/app/pages_test.rs",
-        "page tests",
+            "#[tokio::test]\nasync fn {name}_renders_publicly_and_is_in_the_sitemap() {{\n    let app = TestApp::new().await;\n    app.get(&{call})\n        .await\n        .assert_ok()\n        .assert_contains(\"<title>{title} · \")\n        .assert_text(\"{title}\");\n    app.get(\"/sitemap.xml\")\n        .await\n        .assert_ok()\n        .assert_contains(&format!(\"{{}}</loc>\", {call}));\n}}\n"
+        )
+    } else {
+        let echo = if params.iter().any(|p| feature::param_type(p) == "String") {
+            "\n        .assert_text(\"example\")"
+        } else {
+            ""
+        };
         format!(
-            "#[tokio::test]\nasync fn {name}_renders_publicly_and_is_in_the_sitemap() {{\n    let app = TestApp::new().await;\n    app.get(&paths::{name}())\n        .await\n        .assert_ok()\n        .assert_contains(\"<title>{title} · \")\n        .assert_text(\"{title}\");\n    app.get(\"/sitemap.xml\")\n        .await\n        .assert_ok()\n        .assert_contains(&format!(\"{{}}</loc>\", paths::{name}()));\n}}\n\n"
+            "/// A page with a path parameter: not in the sitemap (APP: list the real ones in meta.rs).\n#[tokio::test]\nasync fn {name}_renders_publicly() {{\n    let app = TestApp::new().await;\n    app.get(&{call})\n        .await\n        .assert_ok()\n        .assert_contains(\"<title>{title} · \")\n        .assert_text(\"{title}\"){echo};\n}}\n"
+        )
+    };
+    plan.create(
+        format!("tests/app/pages/{name}_test.rs"),
+        format!(
+            "//! The {lower} page. Generated by `{cmd}`.\n\nuse {k}::routes::paths;\n\nuse crate::support::TestApp;\n\n{test}",
+            lower = title.to_lowercase()
         ),
     );
     plan.next.push(format!(
-        "write the page: templates/pages/{name}.html (and a `.described(\"…\")` in src/controllers/pages.rs)"
+        "write the page: templates/pages/{name}.html (and a `.described(\"…\")` in src/controllers/pages/{name}.rs)"
     ));
     plan.next.push(
         "bin/tailwindcss -i assets/app.css -o static/app.css --minify   # new classes (bin/dev does it live)".into(),
     );
+    plan.next.push(format!(
+        "commit now (git add -A && git commit -m \"generate page {name}\"), before you change anything"
+    ));
     Ok(plan)
 }

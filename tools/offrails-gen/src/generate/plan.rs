@@ -84,6 +84,9 @@ pub struct Plan {
     /// What to do next, printed after generating.
     pub next: Vec<String>,
     pub migrations: bool,
+    /// The marker a shared file's wiring carries (`// api` for every line the API kernel
+    /// adds), by shared-file path; default: the file's name.
+    pub shared_tags: BTreeMap<String, String>,
 }
 
 impl Plan {
@@ -165,6 +168,20 @@ impl Plan {
             })
             .collect()
     }
+    /// Marks every wiring line with its owner (`pub mod posts; // posts`), so a human, or
+    /// `destroy`, finds what a feature put into a shared file. `tag`: this generation's name.
+    pub fn mark_wiring(&mut self, tag: &str) {
+        let shared_tags = self.shared_tags.clone();
+        for a in &mut self.actions {
+            if let Action::Insert(i) = a {
+                let t = match &i.owner {
+                    Some(o) => shared_tags.get(o).cloned().unwrap_or_else(|| owner_tag(o)),
+                    None => tag.to_owned(),
+                };
+                i.text = mark(&i.file, &i.text, &t);
+            }
+        }
+    }
     pub fn command(&self) -> String {
         format!(
             "cargo offrails generate {} {}",
@@ -174,6 +191,148 @@ impl Plan {
         .trim_end()
         .to_owned()
     }
+}
+
+/// The default marker of a shared file's wiring: its name (`tests/app/models/mod.rs` → `models`).
+pub fn owner_tag(path: &str) -> String {
+    let p = Path::new(path);
+    let stem = p
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if stem == "mod" {
+        p.parent()
+            .and_then(|d| d.file_name())
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or(stem)
+    } else {
+        stem.trim_end_matches("_test").to_owned()
+    }
+}
+
+/// The comment that names a wiring line's owner, in `file`'s language.
+pub fn marker(file: &str, tag: &str) -> String {
+    if file.ends_with(".html") {
+        format!("{{# {tag} #}}")
+    } else if file.ends_with(".rs") || file.ends_with(".js") || file.ends_with(".css") {
+        format!("// {tag}")
+    } else {
+        format!("# {tag}")
+    }
+}
+
+/// `text` with its owner's marker. One statement or declaration (`pub mod posts;`, `app = …;`,
+/// a nav link): the marker ends its line. A list element, field or match arm (it ends with `,`),
+/// or several lines: the marker is a comment line above it, because rustfmt aligns a comment
+/// that follows a trailing one in a list. Already marked: unchanged.
+pub fn mark(file: &str, text: &str, tag: &str) -> String {
+    let m = marker(file, tag);
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    let code: Vec<usize> = (0..lines.len())
+        .filter(|i| !lines[*i].trim().is_empty())
+        .collect();
+    let Some(&first) = code.first() else {
+        return text.to_owned();
+    };
+    if lines
+        .iter()
+        .any(|l| l.trim_end().ends_with(m.as_str()) || l.trim() == m)
+    {
+        return text.to_owned();
+    }
+    let trailing = code.len() == 1 && !lines[first].trim_end().ends_with(',');
+    let mut out = String::with_capacity(text.len() + m.len() + 2);
+    for (i, l) in lines.iter().enumerate() {
+        if i == first {
+            if trailing {
+                let body = l.trim_end_matches(['\n', '\r']);
+                out.push_str(&format!("{body} {m}\n"));
+                continue;
+            }
+            let indent: String = l.chars().take_while(|c| *c == ' ').collect();
+            out.push_str(&format!("{indent}{m}\n"));
+        }
+        out.push_str(l);
+    }
+    out
+}
+
+/// A `mod x;` / `pub mod x;` / `use …;` / `pub use …;` line: (kind, the name rustfmt sorts by).
+fn decl_key(line: &str) -> Option<(&'static str, String)> {
+    let code = line.split("//").next().unwrap_or("").trim();
+    let code = code.strip_suffix(';')?;
+    let code = code
+        .strip_prefix("pub(crate) ")
+        .or_else(|| code.strip_prefix("pub "))
+        .unwrap_or(code);
+    if let Some(name) = code.strip_prefix("mod ") {
+        return Some(("mod", name.trim().to_owned()));
+    }
+    if let Some(path) = code.strip_prefix("use ") {
+        return Some(("use", path.trim().to_owned()));
+    }
+    None
+}
+
+/// rustfmt's version sort, closely enough for generated names: digit runs compare as numbers,
+/// everything else byte by byte (`api` < `api2` < `api_v1_posts` < `apix`).
+fn version_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    let (mut i, mut j) = (0, 0);
+    while i < a.len() && j < b.len() {
+        if a[i].is_ascii_digit() && b[j].is_ascii_digit() {
+            let si = i;
+            while i < a.len() && a[i].is_ascii_digit() {
+                i += 1;
+            }
+            let sj = j;
+            while j < b.len() && b[j].is_ascii_digit() {
+                j += 1;
+            }
+            let (x, y) = (
+                std::str::from_utf8(&a[si..i])
+                    .unwrap_or("0")
+                    .trim_start_matches('0'),
+                std::str::from_utf8(&b[sj..j])
+                    .unwrap_or("0")
+                    .trim_start_matches('0'),
+            );
+            let o = x.len().cmp(&y.len()).then(x.cmp(y));
+            if o != std::cmp::Ordering::Equal {
+                return o;
+            }
+            continue;
+        }
+        if a[i] != b[j] {
+            return a[i].cmp(&b[j]);
+        }
+        i += 1;
+        j += 1;
+    }
+    (a.len() - i).cmp(&(b.len() - j))
+}
+
+/// Where a one-line declaration goes above `anchor_at`: before the first line of the run of the
+/// same declarations right above the anchor that sorts after it, so the list stays sorted and
+/// rustfmt never moves a marked line (it would move the marker onto another line).
+fn sorted_spot(lines: &[&str], anchor_at: usize, text: &str) -> usize {
+    let code: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    let [one] = code.as_slice() else {
+        return anchor_at;
+    };
+    let Some((kind, key)) = decl_key(one) else {
+        return anchor_at;
+    };
+    let mut start = anchor_at;
+    while start > 0 && decl_key(lines[start - 1]).is_some_and(|(k, _)| k == kind) {
+        start -= 1;
+    }
+    (start..anchor_at)
+        .find(|i| {
+            decl_key(lines[*i])
+                .is_some_and(|(_, k)| version_cmp(&k, &key) == std::cmp::Ordering::Greater)
+        })
+        .unwrap_or(anchor_at)
 }
 
 /// Code compared for "is it still what we wrote": whitespace, commas and braces dropped, so
@@ -315,13 +474,22 @@ fn insert_text(file: &str, anchor: &Anchor, text: &str) -> std::result::Result<O
         return Ok(None);
     }
     match anchor {
-        Anchor::Named(name) => match parts::insert_at(file, name, text) {
-            Some(out) => Ok(Some(out)),
-            None => {
-                let present = file.lines().any(|l| parts::is_anchor_line(l, name));
-                if present { Ok(None) } else { Err(()) }
+        Anchor::Named(name) => {
+            let lines: Vec<&str> = file.split_inclusive('\n').collect();
+            if let Some(at) = lines.iter().position(|l| parts::is_anchor_line(l, name)) {
+                let spot = sorted_spot(&lines, at, text);
+                if spot < at {
+                    return Ok(Some(splice(file, &lines, spot, text)));
+                }
             }
-        },
+            match parts::insert_at(file, name, text) {
+                Some(out) => Ok(Some(out)),
+                None => {
+                    let present = file.lines().any(|l| parts::is_anchor_line(l, name));
+                    if present { Ok(None) } else { Err(()) }
+                }
+            }
+        }
         Anchor::Before { after, pattern } => {
             let lines: Vec<&str> = file.split_inclusive('\n').collect();
             let from = match after {
@@ -783,6 +951,65 @@ mod tests {
             Some(&Some("pub mod b;\n// samples: mods\n".to_owned()))
         );
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn wiring_carries_its_owners_marker() {
+        assert_eq!(
+            mark("src/a.rs", "pub mod posts;\n", "posts"),
+            "pub mod posts; // posts\n"
+        );
+        assert_eq!(
+            mark("templates/shared/_nav.html", "<a href=\"/x\">X</a>\n", "x"),
+            "<a href=\"/x\">X</a> {# x #}\n"
+        );
+        assert_eq!(
+            mark("src/a.rs", "\nfn a() {}\nfn b() {}\n\n", "posts"),
+            "\n// posts\nfn a() {}\nfn b() {}\n\n"
+        );
+        assert_eq!(
+            mark("src/a.rs", "posts::ROUTES,\n", "posts"),
+            "// posts\nposts::ROUTES,\n"
+        );
+        let once = mark("src/a.rs", "pub mod posts;\n", "posts");
+        assert_eq!(mark("src/a.rs", &once, "posts"), once);
+        assert_eq!(owner_tag("tests/app/models/mod.rs"), "models");
+        assert_eq!(owner_tag("tests/app/pages_test.rs"), "pages");
+        assert_eq!(owner_tag("src/controllers/api.rs"), "api");
+    }
+
+    #[test]
+    fn declarations_go_in_sorted_so_rustfmt_never_moves_a_marker() {
+        let file = "pub mod about; // about\npub mod books; // books\n// samples: route mods\n";
+        let out = insert_text(
+            file,
+            &Anchor::Named("route mods".into()),
+            "pub mod blog; // blog\n",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            out,
+            "pub mod about; // about\npub mod blog; // blog\npub mod books; // books\n// samples: route mods\n"
+        );
+        let last = insert_text(
+            file,
+            &Anchor::Named("route mods".into()),
+            "pub mod zz; // zz\n",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(last.ends_with("pub mod zz; // zz\n// samples: route mods\n"));
+        assert_eq!(version_cmp("api", "api2"), std::cmp::Ordering::Less);
+        assert_eq!(
+            version_cmp("api2", "api_v1_posts"),
+            std::cmp::Ordering::Less
+        );
+        assert_eq!(
+            version_cmp("api_v1_posts", "apix"),
+            std::cmp::Ordering::Less
+        );
+        assert_eq!(version_cmp("m2", "m10"), std::cmp::Ordering::Less);
     }
 
     #[test]

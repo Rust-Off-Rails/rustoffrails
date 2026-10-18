@@ -225,7 +225,13 @@ async fn unavailable_carries_retry_after() {
 
 #[tokio::test]
 async fn tasks_run_by_name_and_refuse_unknown_ones() {
-    let app = TestApp::new().await;
+    // Seeds are for development (a seed may refuse to run anywhere else), so the dispatcher is
+    // proven under a development config, on the test database.
+    let app = TestApp::with_config(Config {
+        env: AppEnv::Development,
+        ..Config::test()
+    })
+    .await;
     offrails_app::tasks::run(&app.state, "seed", vec![])
         .await
         .unwrap();

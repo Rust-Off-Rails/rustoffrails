@@ -172,6 +172,7 @@ fn real_main() -> Result<()> {
                 "--queue",
                 "--every",
                 "--path",
+                "--forget",
             ])?;
             let app = args.app()?;
             let mut values = std::collections::BTreeMap::new();
@@ -187,6 +188,7 @@ fn real_main() -> Result<()> {
                 public: args.flag("--public"),
                 no_nav: args.flag("--no-nav"),
                 nav: args.flag("--nav"),
+                forget: args.flag("--forget"),
                 values,
                 ..generate::Flags::default()
             };

@@ -60,7 +60,8 @@ fn humanize(field: &str) -> String {
     }
 }
 
-/// `?page=&per=` pagination. `per` is clamped to 1..=100 (default 25).
+/// `?page=&per=` pagination. `per` is clamped to 1..=100 (default 25), `page` to
+/// 1..=`MAX_PAGE`, so a huge `?page=` is an empty page, never an overflowed offset (a 500).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub struct Page {
     #[serde(default)]
@@ -71,6 +72,8 @@ pub struct Page {
 
 impl Page {
     pub const DEFAULT_PER: u64 = 25;
+    /// The last page anyone can ask for: 100 000 pages of 100 is ten million rows deep.
+    pub const MAX_PAGE: u64 = 100_000;
 
     pub fn new(page: u64, per: u64) -> Self {
         Self {
@@ -81,7 +84,7 @@ impl Page {
 
     /// 1-based page number.
     pub fn number(&self) -> u64 {
-        self.page.unwrap_or(1).max(1)
+        self.page.unwrap_or(1).clamp(1, Self::MAX_PAGE)
     }
 
     pub fn per(&self) -> u64 {
@@ -114,5 +117,14 @@ mod tests {
         assert_eq!((p.number(), p.per(), p.offset()), (1, 100, 0));
         assert_eq!(Page::default().per(), 25);
         assert_eq!(Page::new(3, 10).offset(), 20);
+    }
+
+    /// `?page=18446744073709551615` used to overflow `(page - 1) * per` (a panic, a 500).
+    #[test]
+    fn a_huge_page_is_clamped_not_overflowed() {
+        let p = Page::new(u64::MAX, u64::MAX);
+        assert_eq!(p.number(), Page::MAX_PAGE);
+        assert_eq!(p.offset(), (Page::MAX_PAGE - 1) * 100);
+        assert!(i64::try_from(p.offset()).is_ok(), "fits a SQL OFFSET");
     }
 }

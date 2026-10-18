@@ -25,7 +25,7 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
         )));
     }
     let mut plan = Plan::new("channel", name, args);
-    let model_src = info.read(&format!("src/models/{name}.rs"));
+    let model_src = info.model_source(name).map(|(_, t)| t);
     let by_model = match flags.recorded("by").as_deref() {
         Some(b) => b == "model",
         None => {

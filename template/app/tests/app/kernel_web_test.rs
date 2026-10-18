@@ -204,7 +204,8 @@ async fn production_with_a_pending_migration_is_unhealthy_but_serves() {
     app.get("/up")
         .await
         .assert_status(StatusCode::SERVICE_UNAVAILABLE);
-    app.get("/").await.assert_ok();
+    // A static route: an app's `/` may read a table the pending migration creates.
+    app.get("/robots.txt").await.assert_ok();
     app.post_form("/dev/migrations", &[])
         .await
         .assert_status(StatusCode::NOT_FOUND);

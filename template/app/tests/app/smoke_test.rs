@@ -136,12 +136,7 @@ async fn every_listed_route_is_routable_in_development() {
     let app = TestApp::with_config(config).await;
 
     for (method, path, handler, _access) in ROUTES {
-        let path = path
-            .replace("{id}", "1")
-            .replace("{n}", "0")
-            .replace("{token}", "not-a-real-token")
-            .replace("{mailer}", "no_such_mailer")
-            .replace("{action}", "no_such_action");
+        let path = crate::security_test::concrete(path);
         // WHY: GETs read headers only: a streaming route (SSE) never ends its body.
         let (status, headers) = match *method {
             "GET" => app.request_head(&path, &[]).await,

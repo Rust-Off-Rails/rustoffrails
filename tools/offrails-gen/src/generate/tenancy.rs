@@ -55,7 +55,7 @@ fn tenancy_file(info: &AppInfo, own_prefix: &str) -> String {
     let k = &info.krate;
     // Id routes the parts already have (sessions, sockets…): not a tenant's record; their own
     // suites test them.
-    let routes = routes_md::parse(&info.read("src/routes.rs").unwrap_or_default());
+    let routes = routes_md::all(&info.dir);
     let mut not_tenant = String::new();
     let mut seen: Vec<String> = Vec::new();
     for r in routes {

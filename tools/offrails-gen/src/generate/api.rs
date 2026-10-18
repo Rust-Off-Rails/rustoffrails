@@ -8,13 +8,13 @@
 
 use super::Flags;
 use super::app::AppInfo;
+use super::feature::{self, Mount};
 use super::fields::{Field, Kind};
 use super::manifest::Manifest;
 use super::migration;
 use super::model::{ModelSpec, Scope};
 use super::names::Names;
 use super::plan::Plan;
-use super::resource::{check_free, routes_table};
 use crate::util::{Fail, Result};
 
 const MOD: &str = include_str!("files/api_mod.rs.txt");
@@ -79,37 +79,22 @@ fn kernel(info: &AppInfo, plan: &mut Plan, flags: &Flags) {
         "controller mods",
         "pub mod api;\n",
     );
-    plan.insert_for(
-        KERNEL,
-        "src/routes.rs",
-        "routes",
-        "// The public API (cargo offrails generate api): .offrails/guides/api.md\napp = app\n    .route(\"/api/openapi.json\", get(crate::controllers::api::openapi_json))\n    .route(\"/api/v1/me\", get(crate::controllers::api::me));\n\n",
-    );
-    plan.insert_for(
-        KERNEL,
-        "src/routes.rs",
-        "paths",
-        "pub fn api_openapi() -> String {\n    \"/api/openapi.json\".into()\n}\npub fn api_me() -> String {\n    \"/api/v1/me\".into()\n}\n",
-    );
-    plan.insert_for(
-        KERNEL,
-        "src/routes.rs",
-        "routes table",
-        format!(
-            "{}{}",
-            routes_table(
-                &[(
-                    "GET".into(),
-                    "/api/openapi.json".into(),
-                    "api::openapi_json".into()
-                )],
-                "Public"
-            ),
-            routes_table(
-                &[("GET".into(), "/api/v1/me".into(), "api::me".into())],
-                "User"
-            )
-        ),
+    feature::plan_into(
+        plan,
+        &feature::Routes {
+            module: "api".into(),
+            what: "The API's own routes (`cargo offrails generate api`; .offrails/guides/api.md)".into(),
+            mounts: vec![
+                Mount::new("/api/openapi.json", &[("get", "crate::controllers::api::openapi_json")]),
+                Mount::new("/api/v1/me", &[("get", "crate::controllers::api::me")]),
+            ],
+            paths: "pub fn api_openapi() -> String {\n    \"/api/openapi.json\".into()\n}\n\npub fn api_me() -> String {\n    \"/api/v1/me\".into()\n}\n".into(),
+            rows: vec![
+                ("GET".into(), "/api/openapi.json".into(), "api::openapi_json".into(), "Public".into()),
+                ("GET".into(), "/api/v1/me".into(), "api::me".into(), "User".into()),
+            ],
+            shared: true,
+        },
     );
     let task = "src/tasks/tokens.rs";
     plan.shared(task, TOKEN_TASK);
@@ -132,6 +117,17 @@ fn kernel(info: &AppInfo, plan: &mut Plan, flags: &Flags) {
         ),
     );
     plan.byproduct(KERNEL, "docs/openapi.json");
+    // Every line the kernel wires in is marked `api`: it goes with the last API resource.
+    for owner in [
+        mig.as_str(),
+        model,
+        KERNEL,
+        "src/routes/api.rs",
+        task,
+        tests,
+    ] {
+        plan.shared_tags.insert(owner.to_owned(), "api".into());
+    }
     // Apps made before 0.7.2 have no JSON request helper in TestApp.
     let helper = match flags.recorded("json_helper").as_deref() {
         Some(v) => v == "inserted",
@@ -234,10 +230,10 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
         .find("resource", &names.plural)
         .or_else(|| manifest.find("model", &names.singular))
         .cloned();
-    let model_path = format!("src/models/{}.rs", names.singular);
+    let model_path = format!("src/models/{}/", names.singular);
     let reuse = match flags.recorded("model").as_deref() {
         Some(m) => m == "reused",
-        None => info.exists(&model_path),
+        None => info.model_source(&names.singular).is_some(),
     };
     plan.option("model", if reuse { "reused" } else { "new" });
     let model_args: Vec<String> = if reuse {
@@ -275,8 +271,9 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
     let n = &spec.names;
     let (s, p, m, pc, kb) = (&n.singular, &n.plural, &n.model, &n.plural_camel, &n.kebab);
     if fresh {
-        check_free(
+        feature::check_free(
             info,
+            Some(&format!("api_v1_{p}")),
             &[format!("api_{p}"), format!("api_{s}")],
             &[format!("/api/v1/{kb}")],
         )?;
@@ -357,46 +354,51 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
         "api schemas",
         format!("{vj}::{m}Json,\n{vj}::{m}Body,\n{vj}::{pc}Page,\n{vj}::{m}Input,\n"),
     );
-    plan.insert(
-        "src/routes.rs",
-        "routes",
-        format!(
-            "// {hp} API (cargo offrails generate api {p})\napp = app\n    .route(\"{base}\", get({h}::index).post({h}::create))\n    .route(\n        \"{base}/{{id}}\",\n        get({h}::show).patch({h}::update).delete({h}::destroy),\n    );\n\n",
-            hp = n.human_plural
-        ),
-    );
-    plan.insert(
-        "src/routes.rs",
-        "paths",
-        format!(
-            "pub fn api_{p}() -> String {{\n    \"{base}\".into()\n}}\npub fn api_{s}(id: i64) -> String {{\n    format!(\"{base}/{{id}}\")\n}}\n"
-        ),
-    );
-    plan.insert(
-        "src/routes.rs",
-        "routes table",
-        routes_table(
-            &[
-                ("GET".into(), base.clone(), format!("api_v1_{p}::index")),
-                ("POST".into(), base.clone(), format!("api_v1_{p}::create")),
-                (
-                    "GET".into(),
-                    format!("{base}/{{id}}"),
-                    format!("api_v1_{p}::show"),
+    let h = |a: &str| format!("crate::controllers::api_v1_{p}::{a}");
+    feature::plan_into(
+        &mut plan,
+        &feature::Routes {
+            module: format!("api_v1_{p}"),
+            what: format!(
+                "The {} API (`cargo offrails generate api {p}`)",
+                n.human_plural
+            ),
+            mounts: vec![
+                Mount::new(
+                    base.clone(),
+                    &[("get", &h("index")), ("post", &h("create"))],
                 ),
-                (
-                    "PATCH".into(),
+                Mount::new(
                     format!("{base}/{{id}}"),
-                    format!("api_v1_{p}::update"),
-                ),
-                (
-                    "DELETE".into(),
-                    format!("{base}/{{id}}"),
-                    format!("api_v1_{p}::destroy"),
+                    &[
+                        ("get", &h("show")),
+                        ("patch", &h("update")),
+                        ("delete", &h("destroy")),
+                    ],
                 ),
             ],
-            "User",
-        ),
+            paths: format!(
+                "pub fn api_{p}() -> String {{\n    \"{base}\".into()\n}}\n\npub fn api_{s}(id: i64) -> String {{\n    format!(\"{base}/{{id}}\")\n}}\n"
+            ),
+            rows: [
+                ("GET", base.clone(), "index"),
+                ("POST", base.clone(), "create"),
+                ("GET", format!("{base}/{{id}}"), "show"),
+                ("PATCH", format!("{base}/{{id}}"), "update"),
+                ("DELETE", format!("{base}/{{id}}"), "destroy"),
+            ]
+            .into_iter()
+            .map(|(m, path, a)| {
+                (
+                    m.to_owned(),
+                    path,
+                    format!("api_v1_{p}::{a}"),
+                    "User".to_owned(),
+                )
+            })
+            .collect(),
+            shared: false,
+        },
     );
     // The tenancy sweep signs in with a cookie; API routes take a token and test their own 404s.
     let tenancy = info.read("tests/app/tenancy_test.rs");

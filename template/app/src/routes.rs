@@ -30,6 +30,10 @@ use crate::{
     state::AppState,
 };
 
+// Feature route files, one per feature (src/routes/<feature>.rs: its router, `paths::` helpers
+// and `ROUTES` rows), each wired in by one line per spot, marked with the feature's name.
+// samples: route mods
+
 /// Who may call a route. The security suite requests every route as each actor
 /// (`.offrails/guides/test-standards.md` §3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -161,10 +165,23 @@ pub mod paths {
     // samples: paths
 }
 
-/// The route table. `app routes` prints it and writes docs/routes.md. Tests assert every entry
-/// is routable (not the router fallback) and enforce its access level.
+/// One row of the route table: method, path pattern, handler, who may call it.
+pub type Route = (&'static str, &'static str, &'static str, Access);
+
+/// The route table: the app's own rows, then each feature's (`src/routes/<feature>.rs`), in
+/// order. `app routes` prints it and writes docs/routes.md. Tests assert every entry is routable
+/// (not the router fallback) and enforce its access level.
+pub const ROUTES: &[Route] = &concat::<{ count(TABLES) }>(TABLES);
+
+/// The tables `ROUTES` is made of: one line per feature.
+const TABLES: &[&[Route]] = &[
+    APP_ROUTES,
+    // samples: route tables
+];
+
+/// The kernel's rows, and the parts'.
 #[rustfmt::skip]
-pub const ROUTES: &[(&str, &str, &str, Access)] = &[
+const APP_ROUTES: &[Route] = &[
     ("GET",  "/",                    "home::index",     Access::Public),
     ("GET",  "/up",                  "health::up",      Access::Public),
     ("GET",  "/robots.txt",          "meta::robots",    Access::Public),
@@ -179,3 +196,30 @@ pub const ROUTES: &[(&str, &str, &str, Access)] = &[
     ("POST", "/dev/migrations",      "migrations::run", Access::Dev),
     // samples: routes table
 ];
+
+/// How many rows the tables hold (compile time).
+const fn count(tables: &[&[Route]]) -> usize {
+    let mut n = 0;
+    let mut i = 0;
+    while i < tables.len() {
+        n += tables[i].len();
+        i += 1;
+    }
+    n
+}
+
+/// The tables, one after the other (compile time: `ROUTES` stays a plain `&[Route]`).
+const fn concat<const N: usize>(tables: &[&[Route]]) -> [Route; N] {
+    let mut out: [Route; N] = [("", "", "", Access::Public); N];
+    let (mut k, mut i) = (0, 0);
+    while i < tables.len() {
+        let mut j = 0;
+        while j < tables[i].len() {
+            out[k] = tables[i][j];
+            k += 1;
+            j += 1;
+        }
+        i += 1;
+    }
+    out
+}

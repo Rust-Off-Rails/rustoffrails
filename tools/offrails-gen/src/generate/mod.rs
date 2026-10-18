@@ -8,6 +8,7 @@ pub mod api;
 pub mod app;
 pub mod channel;
 pub mod controller;
+pub mod feature;
 pub mod fields;
 pub mod job;
 pub mod mailer;
@@ -81,6 +82,11 @@ pub struct Flags {
     pub recorded: BTreeMap<String, String>,
     /// Every shared file some generation recorded.
     pub manifest_shared: BTreeSet<String>,
+    /// Re-planning a recorded generation (destroy, a re-run, another one's wiring): what it
+    /// wrote then is what `recorded` says, markers included only when its layout had them.
+    pub replan: bool,
+    /// destroy: drop the record only (a generation an older offrails-gen wrote).
+    pub forget: bool,
 }
 
 impl Flags {
@@ -109,7 +115,55 @@ pub fn canonical(kind: &str) -> Option<&'static str> {
     })
 }
 
+/// The layout 0.7.3 writes: small files per feature, routes in `src/routes/<feature>.rs`, and
+/// every wiring line marked with its owner. Recorded as `layout = "2"`.
+pub const LAYOUT: &str = "2";
+
+/// Kinds whose files moved in 0.7.3 (a split per feature): a generation an older offrails-gen
+/// recorded can't be re-planned by this one.
+const SPLIT_KINDS: [&str; 5] = ["resource", "model", "controller", "page", "api"];
+
+/// A generation from before 0.7.3 of a kind whose layout changed.
+fn old_layout(e: &Entry) -> bool {
+    SPLIT_KINDS.contains(&e.kind.as_str())
+        && e.options.get("layout").map(String::as_str) != Some(LAYOUT)
+}
+
+fn old_layout_refusal(e: &Entry) -> Fail {
+    let files: Vec<&str> = e.files.keys().map(String::as_str).collect();
+    Fail::new(format!(
+        "`generate {kind} {name}` was recorded by an offrails-gen before 0.7.3 (one file per controller and \
+         model, its rows in src/routes.rs); this one writes the split layout and can't re-plan the old one. \
+         Nothing changed. Its files: {files}. To remove it, delete them and its wiring lines by hand \
+         (each anchor in src/routes.rs, src/controllers/mod.rs, src/views/mod.rs, src/models/mod.rs, \
+         tests/app/main.rs, the nav), then `cargo offrails destroy {kind} {name} --forget` drops the record",
+        kind = e.kind,
+        name = e.name,
+        files = if files.is_empty() {
+            "(none recorded)".to_owned()
+        } else {
+            files.join(", ")
+        }
+    ))
+}
+
 fn plan_for(kind: &str, info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
+    let mut plan = plan_kind(kind, info, args, flags)?;
+    let marked = !flags.replan || flags.recorded("layout").as_deref() == Some(LAYOUT);
+    if marked {
+        let tag = plan
+            .name
+            .rsplit(':')
+            .next()
+            .unwrap_or(&plan.name)
+            .to_owned();
+        plan.mark_wiring(&tag);
+        plan.option("layout", LAYOUT);
+    }
+    Ok(plan)
+}
+
+fn plan_kind(kind: &str, info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
     match kind {
         "migration" => migration::plan(info, args, flags),
         "model" => model::plan(info, args, flags),
@@ -153,12 +207,13 @@ fn foreign_inserts(
 ) -> Vec<(String, plan::Insert)> {
     let mut out = Vec::new();
     for e in &manifest.entries {
-        if e.kind == kind && e.name == name {
+        if e.kind == kind && e.name == name || old_layout(e) {
             continue;
         }
         let mut f = flags.clone();
         f.recorded = e.options.clone();
         f.force = false;
+        f.replan = true;
         if let Ok(p) = plan_for(&e.kind, info, &e.args, &f) {
             for a in p.actions {
                 if let Action::Insert(i) = a {
@@ -234,8 +289,12 @@ pub fn generate(app: &Path, kind: &str, args: &[String], mut flags: Flags) -> Re
     let mut undo_snapshot: Vec<(String, Option<String>)> = Vec::new();
     let mut owned: BTreeSet<String> = BTreeSet::new();
     if let Some(entry) = manifest.find(kind, &name).cloned() {
+        if old_layout(&entry) {
+            return Err(old_layout_refusal(&entry));
+        }
         let mut old_flags = flags.clone();
         old_flags.recorded = entry.options.clone();
+        old_flags.replan = true;
         let old = plan_for(kind, &info, &entry.args, &old_flags)?;
         let others = manifest.shared_by_others(kind, &name);
         let foreign: Vec<plan::Insert> = foreign_inserts(&info, &manifest, kind, &name, &flags)
@@ -437,12 +496,35 @@ pub fn destroy(app: &Path, kind: &str, args: &[String], mut flags: Flags) -> Res
             }
         )));
     };
+    if flags.forget {
+        let files: Vec<&str> = entry.files.keys().map(String::as_str).collect();
+        if flags.dry_run {
+            println!("plan to forget {kind} {name} (--dry-run: the record stays)");
+            return Ok(());
+        }
+        manifest.remove(kind, &name);
+        manifest.save(app)?;
+        println!(
+            "forgot {kind} {name}: docs/generated.toml no longer records it; nothing else changed.\n  \
+             its files (delete them by hand if they're still there): {}",
+            if files.is_empty() {
+                "(none)".to_owned()
+            } else {
+                files.join(", ")
+            }
+        );
+        return Ok(());
+    }
+    if old_layout(&entry) {
+        return Err(old_layout_refusal(&entry));
+    }
     flags.manifest_shared = manifest
         .entries
         .iter()
         .flat_map(|e| e.shared.iter().cloned())
         .collect();
     flags.recorded = entry.options.clone();
+    flags.replan = true;
     let plan = plan_for(kind, &info, &entry.args, &flags)?;
     let others = manifest.shared_by_others(kind, &name);
     let foreign = foreign_inserts(&info, &manifest, kind, &name, &flags);

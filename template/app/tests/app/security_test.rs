@@ -32,6 +32,17 @@ pub fn concrete(path: &str) -> String {
         .replace("{mailer}", "no_such_mailer")
         .replace("{action}", "no_such_action")
         .replace("{name}", "default")
+        .split('/')
+        .map(|seg| {
+            // Any other parameter (`{slug}`, `{post_id}`…): a value no record has.
+            if seg.starts_with('{') && seg.ends_with('}') {
+                if seg == "{id}" || seg.ends_with("_id}") { "1" } else { "example" }
+            } else {
+                seg
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 async fn request(app: &TestApp, method: &str, path: &str) -> StatusCode {
@@ -129,11 +140,25 @@ fn every_mounted_route_is_in_the_routes_table() {
     let listed: std::collections::BTreeSet<&str> = ROUTES.iter().map(|(_, p, _, _)| *p).collect();
     let mut missing = Vec::new();
     let mut checked = 0;
+    // Each feature's routes file (src/routes/<feature>.rs) mounts its own.
+    let mut files: Vec<String> = std::fs::read_dir("src/routes")
+        .map(|dir| {
+            dir.filter_map(Result::ok)
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|x| x == "rs"))
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort();
     for file in [
         "src/routes.rs",
         "src/controllers/dev.rs",
         // samples: router sources
-    ] {
+    ]
+    .into_iter()
+    .chain(files.iter().map(String::as_str))
+    {
         let source = std::fs::read_to_string(file).expect("read source");
         for (start, _) in source
             .match_indices(".route(\"")

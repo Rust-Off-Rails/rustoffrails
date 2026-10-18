@@ -63,6 +63,25 @@ impl AppInfo {
         std::fs::read_to_string(self.path(slash)).ok()
     }
 
+    /// A model's source, wherever it lives: `src/models/<x>/` (mod.rs, params.rs, queries.rs; what
+    /// generators write) or `src/models/<x>.rs` (one file: parts, hand-written models, apps
+    /// generated before 0.7.3). Returns (the file with the entity, all of its text).
+    pub fn model_source(&self, singular: &str) -> Option<(String, String)> {
+        let dir = format!("src/models/{singular}");
+        if let Some(entity) = self.read(&format!("{dir}/mod.rs")) {
+            let mut all = entity;
+            for f in ["params.rs", "queries.rs"] {
+                if let Some(t) = self.read(&format!("{dir}/{f}")) {
+                    all.push('\n');
+                    all.push_str(&t);
+                }
+            }
+            return Some((format!("{dir}/mod.rs"), all));
+        }
+        let file = format!("{dir}.rs");
+        self.read(&file).map(|t| (file, t))
+    }
+
     /// htmx pages: the generators that write templates refuse the other modes for now.
     pub fn require_htmx(&self, what: &str) -> Result<()> {
         if self.mode == "htmx" {
@@ -91,8 +110,16 @@ pub fn anchor_hint(anchor: &str) -> &'static str {
         "controller mods" => "src/controllers/mod.rs, after the `pub mod` lines",
         "view mods" => "src/views/mod.rs, after the `pub mod` lines",
         "routes" => "src/routes.rs, after the last app `.route(…)` statement in `router`",
+        "route mods" => {
+            "src/routes.rs, after the `use` lines (one `pub mod <feature>;` per src/routes/<feature>.rs)"
+        }
+        "route tables" => {
+            "src/routes.rs, the last line inside `TABLES: &[…]` (after `APP_ROUTES,`)"
+        }
         "paths" => "src/routes.rs, the last line inside `pub mod paths { … }`",
-        "routes table" => "src/routes.rs, the last line inside `ROUTES: &[…]`",
+        "routes table" => {
+            "src/routes.rs, the last line inside `APP_ROUTES: &[…]` (`ROUTES` before 0.7.3)"
+        }
         "nav links" => {
             "templates/shared/_nav.html, inside the links <div> ({# samples: nav links #})"
         }
@@ -110,8 +137,8 @@ pub fn anchor_hint(anchor: &str) -> &'static str {
         "relations" => "the model's `pub enum Relation { … }`, as its last line",
         "related" => "the model file, after its last `impl Related<…>` block",
         "model test mods" => "tests/app/models/mod.rs, after the `mod …;` lines",
-        "page actions" | "page views" | "page tests" => {
-            "the shared pages file the first `generate page` wrote, at its end"
+        "page mods" | "page view mods" | "page test mods" => {
+            "the shared pages module the first `generate page` wrote (src/controllers/pages/mod.rs, src/views/pages/mod.rs, tests/app/pages/mod.rs), at its end"
         }
         "api paths" | "api schemas" => {
             "src/controllers/api.rs (the first `generate api` wrote it): in ApiDoc's `paths(…)` and `schemas(…)`"
