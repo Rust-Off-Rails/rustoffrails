@@ -8,16 +8,12 @@
 //
 //   BASE=<the URL bin/dev printed> node .offrails/tools/browser-smoke/smoke-components.mjs
 //
-// Same driver as prove.mjs (Node >= 18, the installed Chrome, no npm install). No browser: exit 77.
-import { spawn } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { Cdp, Tab, findChrome } from "./prove.mjs";
+// The driver every smoke here shares, cdp.mjs (Node >= 18, the installed Chrome, no npm install).
+// No browser: exit 77.
+import { Tab, launch, requireChrome, sleep } from "./cdp.mjs";
 
 const BASE = (process.env.BASE ?? "").replace(/\/$/, "");
 const PAGE = process.env.COMPONENTS_PATH ?? "/dev/components";
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failures = 0;
 const check = (ok, what) => {
   if (!ok) failures += 1;
@@ -71,21 +67,13 @@ async function main() {
     console.error("usage: BASE=<the URL bin/dev printed> node .offrails/tools/browser-smoke/smoke-components.mjs");
     process.exit(2);
   }
-  const chrome = findChrome();
-  if (!chrome) {
-    console.log("skip: no Chrome (install Google Chrome or Chromium, or set CHROME_PATH)");
-    process.exit(77);
-  }
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), "offrails-components-"));
-  const args = ["--remote-debugging-pipe", `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--disable-extensions"];
-  if (process.env.HEADED !== "1") args.push("--headless=new");
-  if (process.platform === "linux" && (process.env.CI || process.getuid?.() === 0)) args.push("--no-sandbox");
-  args.push("about:blank");
-  const proc = spawn(chrome, args, { stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"] });
-  const cdp = new Cdp(proc);
+  const chrome = requireChrome();
   let code = 0;
+  let close = null;
   try {
-    await cdp.send("Browser.getVersion", {}, undefined, 30000);
+    const launched = await launch(chrome, { prefix: "offrails-components-" });
+    close = launched.close;
+    const { cdp } = launched;
     const tab = await Tab.open(cdp, "components");
     await tab.viewport({ width: 1280, height: 800, mobile: false }, "light");
     await tab.goto(`${BASE}${PAGE}`);
@@ -121,12 +109,7 @@ async function main() {
     console.log(`FAIL ${e.message}`);
     code = 1;
   } finally {
-    await cdp.send("Browser.close", {}, undefined, 5000).catch(() => {});
-    if (proc.exitCode === null) {
-      await Promise.race([new Promise((r) => proc.once("exit", r)), sleep(3000)]);
-      if (proc.exitCode === null) proc.kill();
-    }
-    fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    await close?.();
   }
   console.log(`\nsmoke-components: ${failures} failure(s)`);
   process.exit(code);

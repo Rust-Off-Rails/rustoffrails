@@ -30,7 +30,7 @@
 // `data-smoke-skip` on an element or a container leaves it out.
 //
 // Zero dependencies: Node >= 18 and an installed Chrome, Chromium or Edge, driven over the Chrome
-// DevTools Protocol on a pipe. It never downloads a browser: CHROME_PATH (or CHROME) names one,
+// DevTools Protocol on a pipe (cdp.mjs, shared with prove.mjs). It never downloads a browser: CHROME_PATH (or CHROME) names one,
 // else it looks in the usual places on macOS, Linux and Windows. No browser: it prints
 // "skip: no Chrome" and exits 77, which `verify` and the CI scripts report as skipped, never passed.
 // Like the other smokes it launches Chrome with a throwaway profile and NO certificate overrides.
@@ -41,12 +41,11 @@
 // for routes with parameters: /posts/1,/posts/1/edit), SMOKE_EMAIL, SMOKE_PASSWORD, SMOKE_LOGIN
 // (default /session/new), SMOKE_IGNORE (a regular expression of console messages to allow),
 // HEADED=1 (a visible window). Exit status: 0 green, 1 a failure, 2 usage, 77 no browser.
-import { spawn } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
-const SKIP_EXIT = 77;
+import { Tab, launch, requireChrome, sleep } from "./cdp.mjs";
+
 const BASE = (process.env.BASE ?? "").replace(/\/$/, "");
 const ROUTES = process.env.ROUTES ?? path.join("docs", "routes.md");
 const LOGIN = process.env.SMOKE_LOGIN ?? "/session/new";
@@ -64,174 +63,13 @@ const check = (ok, what) => {
 };
 const note = (what) => console.log(`skip ${what}`);
 
-// ---- the browser ------------------------------------------------------------------------------
+// ---- the browser: cdp.mjs (findChrome, launch, Cdp, Tab), shared with prove.mjs ----------------
 
-function findChrome() {
-  const given = process.env.CHROME_PATH || process.env.CHROME;
-  if (given) return fs.existsSync(given) ? given : null;
-  const candidates = [];
-  if (process.platform === "darwin") {
-    for (const root of ["/Applications", path.join(os.homedir(), "Applications")]) {
-      candidates.push(
-        `${root}/Google Chrome.app/Contents/MacOS/Google Chrome`,
-        `${root}/Chromium.app/Contents/MacOS/Chromium`,
-        `${root}/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary`,
-        `${root}/Microsoft Edge.app/Contents/MacOS/Microsoft Edge`,
-      );
-    }
-  } else if (process.platform === "win32") {
-    const roots = [process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"], process.env.LOCALAPPDATA].filter(Boolean);
-    for (const root of roots) {
-      candidates.push(
-        path.join(root, "Google", "Chrome", "Application", "chrome.exe"),
-        path.join(root, "Chromium", "Application", "chrome.exe"),
-        path.join(root, "Microsoft", "Edge", "Application", "msedge.exe"),
-      );
-    }
-  } else {
-    const names = ["google-chrome-stable", "google-chrome", "chromium", "chromium-browser", "chrome", "microsoft-edge"];
-    for (const dir of (process.env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
-      for (const n of names) candidates.push(path.join(dir, n));
-    }
-    candidates.push("/opt/google/chrome/chrome", "/snap/bin/chromium");
-  }
-  return candidates.find((c) => {
-    try {
-      return fs.statSync(c).isFile();
-    } catch {
-      return false;
-    }
-  }) ?? null;
-}
-
-/** A CDP connection over --remote-debugging-pipe: fd 3 to Chrome, fd 4 from it, NUL-framed JSON. */
-class Cdp {
-  constructor(proc) {
-    this.writer = proc.stdio[3];
-    this.nextId = 0;
-    this.pending = new Map();
-    this.listeners = new Set();
-    let buffered = Buffer.alloc(0);
-    proc.stdio[4].on("data", (chunk) => {
-      buffered = Buffer.concat([buffered, chunk]);
-      let end;
-      while ((end = buffered.indexOf(0)) !== -1) {
-        const msg = JSON.parse(buffered.subarray(0, end).toString("utf8"));
-        buffered = buffered.subarray(end + 1);
-        if (msg.id !== undefined) {
-          const p = this.pending.get(msg.id);
-          this.pending.delete(msg.id);
-          if (!p) continue;
-          if (msg.error) p.reject(new Error(`${p.method}: ${msg.error.message}`));
-          else p.resolve(msg.result);
-        } else {
-          for (const l of this.listeners) l(msg);
-        }
-      }
-    });
-    proc.on("exit", () => {
-      for (const p of this.pending.values()) p.reject(new Error("Chrome exited"));
-      this.pending.clear();
-    });
-  }
-  send(method, params = {}, sessionId = undefined, timeout = 30000) {
-    const id = ++this.nextId;
-    const msg = sessionId ? { id, method, params, sessionId } : { id, method, params };
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`${method}: no answer in ${timeout} ms`));
-      }, timeout);
-      this.pending.set(id, {
-        method,
-        resolve: (v) => { clearTimeout(timer); resolve(v); },
-        reject: (e) => { clearTimeout(timer); reject(e); },
-      });
-      this.writer.write(`${JSON.stringify(msg)}\0`);
-    });
-  }
-  on(fn) {
-    this.listeners.add(fn);
-    return () => this.listeners.delete(fn);
-  }
-}
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/** One tab, in its own browser context (its own cookies). Collects console errors. */
-class Tab {
-  static async open(cdp, label) {
-    const { browserContextId } = await cdp.send("Target.createBrowserContext", { disposeOnDetach: true });
-    const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank", browserContextId });
-    const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
-    const tab = new Tab(cdp, sessionId, label);
-    await Promise.all([tab.send("Page.enable"), tab.send("Runtime.enable"), tab.send("Log.enable")]);
-    await tab.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
-    return tab;
-  }
-  constructor(cdp, sessionId, label) {
-    this.cdp = cdp;
-    this.sessionId = sessionId;
-    this.label = label;
-    this.phase = "start";
-    this.errors = [];
-    cdp.on((m) => {
-      if (m.sessionId !== sessionId) return;
-      const p = m.params;
-      let text = null;
-      if (m.method === "Runtime.consoleAPICalled" && (p.type === "error" || p.type === "assert")) {
-        text = p.args.map((a) => a.value ?? a.description ?? a.type).join(" ");
-      } else if (m.method === "Runtime.exceptionThrown") {
-        const d = p.exceptionDetails;
-        text = `uncaught: ${d.exception?.description ?? d.text}`;
-      } else if (m.method === "Log.entryAdded" && p.entry.level === "error") {
-        text = `${p.entry.text}${p.entry.url ? ` (${p.entry.url})` : ""}`;
-      } else if (m.method === "Page.javascriptDialogOpening") {
-        this.send("Page.handleJavaScriptDialog", { accept: false }).catch(() => {});
-      }
-      if (text && !(IGNORE && IGNORE.test(text))) this.errors.push(`${this.phase}: ${text.split("\n")[0]}`);
-    });
-  }
-  send(method, params = {}) {
-    return this.cdp.send(method, params, this.sessionId);
-  }
-  /** Runs `fn(...args)` in the page and returns its (awaited, JSON) value. */
-  async eval(fn, ...args) {
-    const r = await this.send("Runtime.evaluate", {
-      expression: `(${fn})(...${JSON.stringify(args)})`,
-      awaitPromise: true,
-      returnByValue: true,
-    });
-    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
-    return r.result.value;
-  }
-  /** A full page load: navigates and waits for `load`, htmx and a quiet moment. */
-  async goto(url) {
-    const loaded = new Promise((resolve) => {
-      const off = this.cdp.on((m) => {
-        if (m.sessionId === this.sessionId && m.method === "Page.loadEventFired") {
-          off();
-          resolve();
-        }
-      });
-      setTimeout(() => { off(); resolve(); }, 20000);
-    });
-    const nav = await this.send("Page.navigate", { url });
-    if (nav.errorText) throw new Error(`${url}: ${nav.errorText}`);
-    await loaded;
-    await this.settle();
-  }
-  /** Waits until the document is complete, htmx is idle and nothing is swapping. */
-  async settle() {
-    for (let i = 0; i < 100; i += 1) {
-      const idle = await this.eval(() =>
-        document.readyState === "complete" && !document.querySelector(".htmx-request, .htmx-swapping, .htmx-settling"),
-      ).catch(() => false);
-      if (idle) break;
-      await sleep(50);
-    }
-    await sleep(QUIET_MS);
-  }
+/** A tab at the smoke's window size, its console errors prefixed with what it was doing. */
+async function openTab(cdp, label) {
+  const tab = await Tab.open(cdp, label, { ignore: IGNORE, viewport: { width: 1280, height: 900 } });
+  tab.phase = "start";
+  return tab;
 }
 
 // ---- in the page ------------------------------------------------------------------------------
@@ -479,7 +317,7 @@ async function smokePage(tab, p, who, layoutHead) {
 }
 
 async function pass(cdp, who, paths, { login = false } = {}) {
-  const tab = await Tab.open(cdp, who);
+  const tab = await openTab(cdp, who);
   if (login && !(await signIn(tab))) return;
   tab.phase = `${who}: /`;
   try {
@@ -527,14 +365,7 @@ async function main() {
     console.error("usage: BASE=<the URL bin/dev printed> node .offrails/tools/browser-smoke/smoke-boosted.mjs (from the app root)");
     process.exit(2);
   }
-  const chrome = findChrome();
-  if (!chrome) {
-    const given = process.env.CHROME_PATH || process.env.CHROME;
-    console.log(given
-      ? `skip: no Chrome (CHROME_PATH=${given} is not a file)`
-      : "skip: no Chrome (install Google Chrome or Chromium, or set CHROME_PATH=<the browser executable>)");
-    process.exit(SKIP_EXIT);
-  }
+  const chrome = requireChrome();
   const all = routes();
   const skip = process.env.SMOKE_SKIP !== undefined ? patterns(process.env.SMOKE_SKIP) : ["/dev/lab*"];
   const only = patterns(process.env.SMOKE_ONLY);
@@ -544,33 +375,13 @@ async function main() {
   for (const p of patterns(process.env.SMOKE_PATHS)) if (!paths.includes(p)) paths.push(p);
   const passwordSignIn = all.some((r) => r.method === "GET" && r.path === LOGIN) && all.some((r) => r.method === "POST" && r.path === "/session/password");
 
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), "offrails-boosted-"));
-  const args = [
-    "--remote-debugging-pipe",
-    `--user-data-dir=${profile}`,
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--disable-extensions",
-    "--disable-background-networking",
-    "--disable-component-update",
-    "--disable-sync",
-    "--mute-audio",
-    "--window-size=1280,900",
-  ];
-  if (process.env.HEADED !== "1") args.push("--headless=new");
-  // GitHub's Ubuntu runners restrict the user namespaces Chrome's sandbox needs.
-  if (process.platform === "linux" && (process.env.CI || process.getuid?.() === 0)) args.push("--no-sandbox");
-  args.push("about:blank");
-  const proc = spawn(chrome, args, { stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"] });
-  let stderr = "";
-  proc.stderr.on("data", (d) => { stderr = (stderr + d).slice(-4000); });
-  const cdp = new Cdp(proc);
   let code = 0;
+  let close = null;
   try {
-    const v = await cdp.send("Browser.getVersion", {}, undefined, 30000).catch((e) => {
-      throw new Error(`${chrome} did not start (${e.message})\n${stderr}`);
-    });
-    console.log(`smoke-boosted: ${v.product} against ${BASE}, ${paths.length} GET routes without parameters`);
+    const launched = await launch(chrome, { prefix: "offrails-boosted-", args: ["--window-size=1280,900"] });
+    close = launched.close;
+    const { cdp } = launched;
+    console.log(`smoke-boosted: ${launched.version.product} against ${BASE}, ${paths.length} GET routes without parameters`);
     let pages = await pass(cdp, "signed out", paths);
     if (passwordSignIn) pages += (await pass(cdp, "signed in", paths, { login: true })) ?? 0;
     else if (all.some((r) => r.path === LOGIN)) note(`signed-in pages: no password sign-in (POST /session/password) to sign in with`);
@@ -580,16 +391,7 @@ async function main() {
     console.log(`FAIL ${e.message}`);
     code = 1;
   } finally {
-    await cdp.send("Browser.close", {}, undefined, 5000).catch(() => {});
-    if (proc.exitCode === null) {
-      await Promise.race([new Promise((r) => proc.once("exit", r)), sleep(3000)]);
-      if (proc.exitCode === null) proc.kill();
-    }
-    try {
-      fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-    } catch {
-      // Windows can hold the profile a moment longer; it is in the temp dir
-    }
+    await close?.();
   }
   process.exit(code);
 }

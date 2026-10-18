@@ -22,7 +22,7 @@ impl Renderer {
 }
 
 /// `CHROME_PATH` / `CHROME`, then the usual install places on macOS, Windows and Linux
-/// (tools/browser-smoke/smoke-boosted.mjs looks in the same ones), then `rsvg-convert` on PATH.
+/// (tools/browser-smoke/cdp.mjs looks in the same ones), then `rsvg-convert` on PATH.
 /// `OFFRAILS_BRAND_RENDERER=chrome|rsvg|none` forces one.
 pub fn find() -> Option<Renderer> {
     let forced = std::env::var("OFFRAILS_BRAND_RENDERER").unwrap_or_default();

@@ -20,7 +20,7 @@
 // diff images in docs/proof/diff/. PNGs are git-ignored unless --commit-screenshots.
 //
 // Zero dependencies: Node >= 18 and an installed Chrome, Chromium or Edge over the DevTools
-// Protocol on a pipe, the same driver and browser discovery as smoke-boosted.mjs. axe-core comes
+// Protocol on a pipe: cdp.mjs, the driver and browser discovery every smoke here shares. axe-core comes
 // from the browser smokes' cache (run.sh installs it); when it isn't there, prove installs that one
 // pinned package into the same cache with npm, or reports axe as skipped. No browser: "skip: no
 // Chrome", exit 77.
@@ -31,14 +31,15 @@
 // PROVE_DIFF_THRESHOLD (percent of pixels, default 0.5), PROVE_AXE=0 (skip axe),
 // PROVE_MAX_HEIGHT (default 8000 px per screenshot), PROVE_LINK_SKIP (paths not to fetch),
 // HEADED=1. Exit status: 0 proven, 1 a check failed, 2 usage, 77 no browser.
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import zlib from "node:zlib";
 
-const SKIP_EXIT = 77;
+import { Tab, launch, requireChrome, sleep } from "./cdp.mjs";
+
 const AXE_VERSION = "4.13.0"; // the a11y smoke's pin (run.sh)
 const BASE = (process.env.BASE ?? "").replace(/\/$/, "");
 const ROUTES = process.env.ROUTES ?? path.join("docs", "routes.md");
@@ -58,192 +59,10 @@ const VIEWPORTS = [
 const SCHEMES = ["light", "dark"];
 
 const started = Date.now();
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const patterns = (v) => (v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 const matches = (list, p) => list.some((x) => (x.endsWith("*") ? p.startsWith(x.slice(0, -1)) : p === x));
 
-// ---- the browser (the driver smoke-boosted.mjs uses) ------------------------------------------
-
-export function findChrome() {
-  const given = process.env.CHROME_PATH || process.env.CHROME;
-  if (given) return fs.existsSync(given) ? given : null;
-  const candidates = [];
-  if (process.platform === "darwin") {
-    for (const root of ["/Applications", path.join(os.homedir(), "Applications")]) {
-      candidates.push(
-        `${root}/Google Chrome.app/Contents/MacOS/Google Chrome`,
-        `${root}/Chromium.app/Contents/MacOS/Chromium`,
-        `${root}/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary`,
-        `${root}/Microsoft Edge.app/Contents/MacOS/Microsoft Edge`,
-      );
-    }
-  } else if (process.platform === "win32") {
-    const roots = [process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"], process.env.LOCALAPPDATA].filter(Boolean);
-    for (const root of roots) {
-      candidates.push(
-        path.join(root, "Google", "Chrome", "Application", "chrome.exe"),
-        path.join(root, "Chromium", "Application", "chrome.exe"),
-        path.join(root, "Microsoft", "Edge", "Application", "msedge.exe"),
-      );
-    }
-  } else {
-    const names = ["google-chrome-stable", "google-chrome", "chromium", "chromium-browser", "chrome", "microsoft-edge"];
-    for (const dir of (process.env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
-      for (const n of names) candidates.push(path.join(dir, n));
-    }
-    candidates.push("/opt/google/chrome/chrome", "/snap/bin/chromium");
-  }
-  return candidates.find((c) => {
-    try {
-      return fs.statSync(c).isFile();
-    } catch {
-      return false;
-    }
-  }) ?? null;
-}
-
-/** A CDP connection over --remote-debugging-pipe: fd 3 to Chrome, fd 4 from it, NUL-framed JSON. */
-export class Cdp {
-  constructor(proc) {
-    this.writer = proc.stdio[3];
-    this.nextId = 0;
-    this.pending = new Map();
-    this.listeners = new Set();
-    let buffered = Buffer.alloc(0);
-    proc.stdio[4].on("data", (chunk) => {
-      buffered = Buffer.concat([buffered, chunk]);
-      let end;
-      while ((end = buffered.indexOf(0)) !== -1) {
-        const msg = JSON.parse(buffered.subarray(0, end).toString("utf8"));
-        buffered = buffered.subarray(end + 1);
-        if (msg.id !== undefined) {
-          const p = this.pending.get(msg.id);
-          this.pending.delete(msg.id);
-          if (!p) continue;
-          if (msg.error) p.reject(new Error(`${p.method}: ${msg.error.message}`));
-          else p.resolve(msg.result);
-        } else {
-          for (const l of this.listeners) l(msg);
-        }
-      }
-    });
-    proc.on("exit", () => {
-      for (const p of this.pending.values()) p.reject(new Error("Chrome exited"));
-      this.pending.clear();
-    });
-  }
-  send(method, params = {}, sessionId = undefined, timeout = 60000) {
-    const id = ++this.nextId;
-    const msg = sessionId ? { id, method, params, sessionId } : { id, method, params };
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`${method}: no answer in ${timeout} ms`));
-      }, timeout);
-      this.pending.set(id, {
-        method,
-        resolve: (v) => { clearTimeout(timer); resolve(v); },
-        reject: (e) => { clearTimeout(timer); reject(e); },
-      });
-      this.writer.write(`${JSON.stringify(msg)}\0`);
-    });
-  }
-  on(fn) {
-    this.listeners.add(fn);
-    return () => this.listeners.delete(fn);
-  }
-}
-
-/** One tab in its own browser context (its own cookies). Collects console errors and CSP reports. */
-export class Tab {
-  static async open(cdp, label) {
-    const { browserContextId } = await cdp.send("Target.createBrowserContext", { disposeOnDetach: true });
-    const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank", browserContextId });
-    const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
-    const tab = new Tab(cdp, sessionId, label);
-    await Promise.all([tab.send("Page.enable"), tab.send("Runtime.enable"), tab.send("Log.enable")]);
-    return tab;
-  }
-  constructor(cdp, sessionId, label) {
-    this.cdp = cdp;
-    this.sessionId = sessionId;
-    this.label = label;
-    this.errors = [];
-    cdp.on((m) => {
-      if (m.sessionId !== sessionId) return;
-      const p = m.params;
-      let text = null;
-      if (m.method === "Runtime.consoleAPICalled" && (p.type === "error" || p.type === "assert")) {
-        text = p.args.map((a) => a.value ?? a.description ?? a.type).join(" ");
-      } else if (m.method === "Runtime.exceptionThrown") {
-        const d = p.exceptionDetails;
-        text = `uncaught: ${d.exception?.description ?? d.text}`;
-      } else if (m.method === "Log.entryAdded" && p.entry.level === "error") {
-        text = `${p.entry.text}${p.entry.url ? ` (${p.entry.url})` : ""}`;
-      } else if (m.method === "Page.javascriptDialogOpening") {
-        this.send("Page.handleJavaScriptDialog", { accept: false }).catch(() => {});
-      }
-      if (text && !(IGNORE && IGNORE.test(text))) this.errors.push(text.split("\n")[0]);
-    });
-  }
-  send(method, params = {}, timeout) {
-    return this.cdp.send(method, params, this.sessionId, timeout);
-  }
-  async eval(fn, ...args) {
-    const r = await this.send("Runtime.evaluate", {
-      expression: `(${fn})(...${JSON.stringify(args)})`,
-      awaitPromise: true,
-      returnByValue: true,
-    });
-    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
-    return r.result.value;
-  }
-  async goto(url) {
-    const loaded = new Promise((resolve) => {
-      const off = this.cdp.on((m) => {
-        if (m.sessionId === this.sessionId && m.method === "Page.loadEventFired") {
-          off();
-          resolve();
-        }
-      });
-      setTimeout(() => { off(); resolve(); }, 20000);
-    });
-    const nav = await this.send("Page.navigate", { url });
-    if (nav.errorText) throw new Error(`${url}: ${nav.errorText}`);
-    await loaded;
-    await this.settle();
-  }
-  async settle() {
-    for (let i = 0; i < 100; i += 1) {
-      const idle = await this.eval(() =>
-        document.readyState === "complete" && !document.querySelector(".htmx-request, .htmx-swapping, .htmx-settling"),
-      ).catch(() => false);
-      if (idle) break;
-      await sleep(50);
-    }
-    // Fonts and images, then a moment for transitions (screenshots must be stable run to run).
-    await this.eval(() => (document.fonts ? document.fonts.ready.then(() => true) : true)).catch(() => {});
-    await sleep(150);
-  }
-  async viewport(vp, scheme) {
-    await this.send("Emulation.setDeviceMetricsOverride", {
-      width: vp.width, height: vp.height, deviceScaleFactor: 1, mobile: vp.mobile,
-    });
-    await this.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: scheme }] });
-  }
-  async screenshot() {
-    const m = await this.send("Page.getLayoutMetrics");
-    const size = m.cssContentSize ?? m.contentSize;
-    const vw = m.cssLayoutViewport?.clientWidth ?? size.width;
-    const height = Math.min(Math.ceil(size.height), MAX_HEIGHT);
-    const shot = await this.send("Page.captureScreenshot", {
-      format: "png",
-      captureBeyondViewport: true,
-      clip: { x: 0, y: 0, width: vw, height, scale: 1 },
-    });
-    return { png: Buffer.from(shot.data, "base64"), cut: size.height > MAX_HEIGHT };
-  }
-}
+// ---- the browser: cdp.mjs (findChrome, launch, Cdp, Tab), shared with the other smokes ----------
 
 // ---- in the page ------------------------------------------------------------------------------
 
@@ -727,7 +546,7 @@ async function provePage(tab, page, axe, results) {
           else failures.push(msg);
         }
       }
-      const { png, cut } = await tab.screenshot();
+      const { png, cut } = await tab.screenshot(MAX_HEIGHT);
       const name = `${slug(page.path)}${page.who === "signed in" ? "--signed-in" : ""}--${key}.png`;
       shots[key] = { name, cut };
       const file = path.join(OUT, "screens", name);
@@ -774,14 +593,7 @@ async function main() {
     console.error("usage: BASE=<the URL bin/dev printed> cargo offrails prove (from the app root; it starts nothing)");
     process.exit(2);
   }
-  const chrome = findChrome();
-  if (!chrome) {
-    const given = process.env.CHROME_PATH || process.env.CHROME;
-    console.log(given
-      ? `skip: no Chrome (CHROME_PATH=${given} is not a file)`
-      : "skip: no Chrome (install Google Chrome or Chromium, or set CHROME_PATH=<the browser executable>)");
-    process.exit(SKIP_EXIT);
-  }
+  const chrome = requireChrome();
   const all = routes();
   const skip = process.env.SMOKE_SKIP !== undefined ? patterns(process.env.SMOKE_SKIP) : ["/dev/lab*"];
   const linkSkip = [...skip, ...patterns(process.env.PROVE_LINK_SKIP)];
@@ -802,34 +614,25 @@ async function main() {
   const axe = axeSource();
   if (axe.skip) console.log(`prove: axe skipped: ${axe.skip}`);
 
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), "offrails-prove-"));
-  const args = [
-    "--remote-debugging-pipe", `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check",
-    "--disable-extensions", "--disable-background-networking", "--disable-component-update", "--disable-sync",
-    "--mute-audio", "--hide-scrollbars", "--force-color-profile=srgb", "--font-render-hinting=none", "--window-size=1280,800",
-  ];
-  if (process.env.HEADED !== "1") args.push("--headless=new");
-  if (process.platform === "linux" && (process.env.CI || process.getuid?.() === 0)) args.push("--no-sandbox");
-  args.push("about:blank");
-  const proc = spawn(chrome, args, { stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"] });
-  let stderr = "";
-  proc.stderr.on("data", (d) => { stderr = (stderr + d).slice(-4000); });
-  const cdp = new Cdp(proc);
   const results = [];
   const skipped = [];
   const broken = [];
   let browser = "";
   let signInProblem = null;
   let code = 0;
+  let close = null;
   try {
-    const v = await cdp.send("Browser.getVersion", {}, undefined, 30000).catch((e) => {
-      throw new Error(`${chrome} did not start (${e.message})\n${stderr}`);
+    const launched = await launch(chrome, {
+      prefix: "offrails-prove-",
+      args: ["--hide-scrollbars", "--force-color-profile=srgb", "--font-render-hinting=none", "--window-size=1280,800"],
     });
-    browser = v.product;
+    close = launched.close;
+    const cdp = launched.cdp;
+    browser = launched.version.product;
     console.log(`prove: ${browser} against ${BASE}, ${paths.length} GET routes without parameters`);
 
     // Signed out: every page that answers; the ones that send you to sign in wait for the next tab.
-    const out = await Tab.open(cdp, "signed out");
+    const out = await Tab.open(cdp, "signed out", { ignore: IGNORE });
     await out.viewport(VIEWPORTS[0], "light");
     await out.goto(`${BASE}/`);
     const pages = [];
@@ -860,7 +663,7 @@ async function main() {
       if (!passwordSignIn) {
         for (const p of later) skipped.push({ path: p, why: "needs sign-in, and the app has no password sign-in to use" });
       } else {
-        const inn = await Tab.open(cdp, "signed in");
+        const inn = await Tab.open(cdp, "signed in", { ignore: IGNORE });
         signInProblem = await signIn(inn);
         if (signInProblem) {
           console.log(`FAIL sign in as ${EMAIL}: ${signInProblem}`);
@@ -894,16 +697,7 @@ async function main() {
     console.log(`FAIL ${e.message}`);
     code = 1;
   } finally {
-    await cdp.send("Browser.close", {}, undefined, 5000).catch(() => {});
-    if (proc.exitCode === null) {
-      await Promise.race([new Promise((r) => proc.once("exit", r)), sleep(3000)]);
-      if (proc.exitCode === null) proc.kill();
-    }
-    try {
-      fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-    } catch {
-      // Windows can hold the profile a moment longer; it is in the temp dir
-    }
+    await close?.();
   }
 
   const failedPages = results.filter((r) => r.failures.length);
