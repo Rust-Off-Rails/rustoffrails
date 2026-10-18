@@ -1,0 +1,46 @@
+# template/snippets/theme-toggle/snippet.toml (the format of a part's sample.toml).
+name = "theme-toggle"
+version = "0.7.3"
+summary = "A System/Light/Dark button in the nav: shared/_theme_toggle.html, a delegated handler in app.js, no-JS POST"
+depends_on = []
+
+[[wire]]
+file = "templates/shared/_nav.html"
+anchor = "nav links"
+text = '''
+{% include "shared/_theme_toggle.html" %}
+'''
+
+[[wire]]
+file = "static/app.js"
+anchor = "app js"
+text = '''
+// The theme toggle (theme-toggle snippet): switch in place, writing the cookie kernel/theme.rs
+// reads, and set the button to the next theme. Without JS the form posts to /theme.
+document.addEventListener("submit", (e) => {
+  const form = e.target.closest?.("[data-theme-toggle]");
+  const button = form?.querySelector('button[name="theme"]');
+  const order = ["system", "light", "dark"];
+  const labels = { system: "System", light: "Light", dark: "Dark" };
+  const theme = button?.value;
+  if (!order.includes(theme)) return;
+  e.preventDefault();
+  document.documentElement.dataset.theme = theme;
+  document
+    .querySelector('meta[name="color-scheme"]')
+    ?.setAttribute("content", theme === "system" ? "light dark" : theme);
+  const secure = location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `offrails_theme=${theme}; Path=/; SameSite=Lax; Max-Age=31536000${secure}`;
+  const next = order[(order.indexOf(theme) + 1) % order.length];
+  button.value = next;
+  button.textContent = labels[theme];
+  button.setAttribute("aria-label", `Theme: ${labels[theme]} (switch to ${labels[next]})`);
+});
+'''
+
+[[wire]]
+file = "tests/app/main.rs"
+anchor = "test mods"
+text = '''
+mod theme_toggle_test;
+'''

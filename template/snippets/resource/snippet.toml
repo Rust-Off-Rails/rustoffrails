@@ -1,0 +1,106 @@
+# template/snippets/resource/snippet.toml: the format of a part's sample.toml (samples/FORMAT.md),
+# plus `as` (the model the files are written for; `--as <model>` renames it) and `snippets`.
+name = "resource"
+version = "0.7.3"
+summary = "htmx CRUD for one model (notes: title, body): the files `g resource` writes, split per action, public"
+depends_on = []
+as = "note"
+
+[[wire]]
+file = "migration/src/lib.rs"
+anchor = "migration mods"
+text = '''
+mod m20261018_000100_create_notes;
+'''
+
+[[wire]]
+file = "migration/src/lib.rs"
+anchor = "migrations"
+text = '''
+Box::new(m20261018_000100_create_notes::Migration),
+'''
+
+[[wire]]
+file = "src/models/mod.rs"
+anchor = "model mods"
+text = '''
+pub mod note;
+'''
+
+[[wire]]
+file = "src/models/mod.rs"
+anchor = "model aliases"
+text = '''
+pub type Note = note::Model;
+'''
+
+[[wire]]
+file = "src/controllers/mod.rs"
+anchor = "controller mods"
+text = '''
+pub mod notes;
+'''
+
+[[wire]]
+file = "src/views/mod.rs"
+anchor = "view mods"
+text = '''
+pub mod notes;
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "route mods"
+text = '''
+pub mod notes;
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "routes"
+text = '''
+app = app.merge(notes::router());
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "paths"
+text = '''
+pub use super::notes::paths::*;
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "route tables"
+text = '''
+notes::ROUTES,
+'''
+
+[[wire]]
+file = "templates/shared/_nav.html"
+anchor = "nav links"
+text = '''
+<a href="{{ crate::routes::paths::notes() }}" class="text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100">Notes</a>
+'''
+
+[[wire]]
+file = "src/controllers/meta.rs"
+anchor = "sitemap paths"
+text = '''
+paths::notes(),
+'''
+
+[[wire]]
+file = "tests/app/factories.rs"
+anchor = "factories"
+text = '''
+mod note;
+pub use note::*;
+'''
+
+[[wire]]
+file = "tests/app/main.rs"
+anchor = "test mods"
+text = '''
+mod notes;
+'''

@@ -53,8 +53,12 @@ fn toml_list(v: &str) -> Vec<String> {
 /// Parse the strict TOML subset of samples/FORMAT.md: `key = "value"` lines, the `depends_on` and
 /// `crates` arrays, and `[[wire]]` tables whose `text` is a `'''` block.
 pub fn parse(name: &str, dir: &Path) -> Result<Part> {
-    let path = dir.join("sample.toml");
-    let text = util::read_text(&path)?;
+    parse_file(name, dir, &dir.join("sample.toml"))
+}
+
+/// `parse`, from another file of the same format (a snippet's `snippet.toml`).
+pub fn parse_file(name: &str, dir: &Path, path: &Path) -> Result<Part> {
+    let text = util::read_text(path)?;
     let mut part = Part {
         name: name.to_owned(),
         dir: dir.to_path_buf(),

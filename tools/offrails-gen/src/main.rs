@@ -35,6 +35,10 @@ const USAGE: &str = "usage:
                    migration | model | resource (scaffold) | controller | page | api | job | mailer | channel | test
                    `generate --help` lists each kind, the field types and the options
   offrails-gen destroy <kind> <name> [--dry-run] [--app <dir>]   (alias: d) undo a generate (unchanged files only)
+  offrails-gen snippets [--app <dir>]   small tested code to copy: every snippet, what it needs, whether it's in
+  offrails-gen snippet show <name>      its README, files and wiring (to read, or copy by hand)
+  offrails-gen snippet add <name> [--as <model>] [--dry-run] [--force]   copy and wire it, recorded
+  offrails-gen snippet remove <name> [--as <model>] [--dry-run]          take it back (unchanged files only)
   offrails-gen add <part>… [--app <dir>] [--dry-run] [--force] [--offline] [--no-fmt]   (alias: add-part)
   offrails-gen update-part <part>… --framework <newer> [--base <fw>] [--app <dir>] [--dry-run] [--no-fmt]
                    merge a newer framework's part into the app: 3-way against the vendored .offrails/ (the
@@ -51,7 +55,8 @@ struct Args {
     flags: Vec<(String, Option<String>)>,
 }
 
-const VALUE_FLAGS: [&str; 12] = [
+const VALUE_FLAGS: [&str; 13] = [
+    "--as",
     "--base",
     "--queue",
     "--every",
@@ -198,6 +203,51 @@ fn real_main() -> Result<()> {
                 generate::destroy(&app, &kind, rest, flags)
             } else {
                 generate::generate(&app, &kind, rest, flags)
+            }
+        }
+        "snippets" | "list-snippets" => {
+            args.reject_unknown(&["--app", "--framework"])?;
+            let app = args.app().ok().filter(|a| a.join("Cargo.toml").is_file());
+            let fw = framework_for(app.as_deref(), &args)?;
+            generate::snippet::list(&fw, app.as_deref())
+        }
+        "snippet" => {
+            let sub = args.positional.first().map(String::as_str).unwrap_or("");
+            let rest: Vec<String> = args.positional.iter().skip(1).cloned().collect();
+            let Some(name) = rest.first().cloned() else {
+                return Err(Fail::usage(format!(
+                    "snippet show|add|remove <name> (cargo offrails snippets lists them)\n\n{USAGE}"
+                )));
+            };
+            match sub {
+                "show" => {
+                    args.reject_unknown(&["--app", "--framework"])?;
+                    let app = args.app().ok().filter(|a| a.join("Cargo.toml").is_file());
+                    let fw = framework_for(app.as_deref(), &args)?;
+                    generate::snippet::show(&fw, &name)
+                }
+                "add" | "remove" => {
+                    args.reject_unknown(&["--app", "--as", "--dry-run", "--force", "--no-fmt"])?;
+                    let app = args.app()?;
+                    let mut gen_args = vec![name];
+                    if let Some(m) = args.value("--as") {
+                        gen_args.push(m);
+                    }
+                    let flags = generate::Flags {
+                        dry_run: args.flag("--dry-run"),
+                        force: args.flag("--force"),
+                        fmt: !args.flag("--no-fmt"),
+                        ..generate::Flags::default()
+                    };
+                    if sub == "add" {
+                        generate::generate(&app, "snippet", &gen_args, flags)
+                    } else {
+                        generate::destroy(&app, "snippet", &gen_args, flags)
+                    }
+                }
+                other => Err(Fail::usage(format!(
+                    "snippet {other}: show, add or remove\n\n{USAGE}"
+                ))),
             }
         }
         "new" => {

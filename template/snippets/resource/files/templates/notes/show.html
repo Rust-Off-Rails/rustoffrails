@@ -1,0 +1,23 @@
+{% extends "layouts/application.html" %}
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-4">
+  <h1 class="text-3xl font-semibold tracking-tight break-words">{{ note.label }}</h1>
+  <div class="flex items-center gap-2">
+    <a href="{{ paths::edit_note(*note.id) }}" class="btn-secondary">Edit</a>
+    <form method="post" action="{{ paths::delete_note(*note.id) }}" data-confirm="Delete this note? This can't be undone.">
+      <button class="btn-danger">Delete</button>
+    </form>
+  </div>
+</div>
+<dl class="mt-8 divide-y divide-gray-200 dark:divide-gray-800 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+  <div class="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-4">
+    <dt class="text-sm font-medium text-gray-600 dark:text-gray-400">Title</dt>
+    <dd class="text-sm text-gray-900 dark:text-gray-100 sm:col-span-2">{{ note.title }}</dd>
+  </div>
+  <div class="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-4">
+    <dt class="text-sm font-medium text-gray-600 dark:text-gray-400">Body</dt>
+    <dd class="text-sm text-gray-900 dark:text-gray-100 sm:col-span-2 whitespace-pre-line break-words">{{ note.body }}</dd>
+  </div>
+</dl>
+<p class="mt-6 text-sm"><a href="{{ paths::notes() }}" class="link">&larr; All notes</a></p>
+{% endblock %}

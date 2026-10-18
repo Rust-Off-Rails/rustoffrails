@@ -87,6 +87,9 @@ pub struct Plan {
     /// The marker a shared file's wiring carries (`// api` for every line the API kernel
     /// adds), by shared-file path; default: the file's name.
     pub shared_tags: BTreeMap<String, String>,
+    /// The marker this generation's wiring carries, when it isn't its name (a snippet added
+    /// `--as article` marks `// articles`).
+    pub tag: Option<String>,
 }
 
 impl Plan {
@@ -183,6 +186,13 @@ impl Plan {
         }
     }
     pub fn command(&self) -> String {
+        if self.kind == "snippet" {
+            return match self.args.as_slice() {
+                [name, model, ..] => format!("cargo offrails snippet add {name} --as {model}"),
+                [name] => format!("cargo offrails snippet add {name}"),
+                [] => "cargo offrails snippet add".to_owned(),
+            };
+        }
         format!(
             "cargo offrails generate {} {}",
             self.kind,
@@ -514,6 +524,11 @@ fn insert_text(file: &str, anchor: &Anchor, text: &str) -> std::result::Result<O
                 .iter()
                 .rposition(|l| l.trim_start().starts_with(prefix.as_str()))
                 .ok_or(())?;
+            // A declaration goes in sorted among the ones it follows (see `sorted_spot`).
+            let spot = sorted_spot(&lines, at + 1, text);
+            if spot <= at {
+                return Ok(Some(splice(file, &lines, spot, text)));
+            }
             let indent: String = lines[at].chars().take_while(|c| *c == ' ').collect();
             let nl = util::newline_of(file);
             let mut out = String::with_capacity(file.len() + text.len());
@@ -902,6 +917,17 @@ mod tests {
         assert_eq!(
             insert_text(f, &before, "B => c(),\n").unwrap().unwrap(),
             "fn dispatch() {\n    match w {\n        A => a(),\n        B => c(),\n        other => b(),\n    }\n}\n"
+        );
+        let sorted = insert_text(
+            "pub mod a;\npub mod c;\n\nuse x;\n",
+            &Anchor::AfterLast("pub mod ".into()),
+            "pub mod b; // b\n",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            sorted,
+            "pub mod a;\npub mod b; // b\npub mod c;\n\nuse x;\n"
         );
         let after = Anchor::AfterLast("pub mod ".into());
         assert_eq!(

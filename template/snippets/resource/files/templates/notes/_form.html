@@ -1,0 +1,17 @@
+<form method="post" action="{{ action }}" class="mt-8 space-y-6" novalidate>
+  {% include "shared/_errors.html" %}
+  <div>
+    <label for="note_title" class="label">Title</label>
+    <input type="text" id="note_title" name="title" value="{{ params.title }}" class="input" maxlength="255" required{% if !errors.on("title").is_empty() %} aria-invalid="true" aria-describedby="note_title_error"{% endif %}>
+    {% for msg in errors.on("title") %}<p id="note_title_error" class="field-error">Title {{ msg }}</p>{% endfor %}
+  </div>
+  <div>
+    <label for="note_body" class="label">Body</label>
+    <textarea id="note_body" name="body" rows="6" class="input" required{% if !errors.on("body").is_empty() %} aria-invalid="true" aria-describedby="note_body_error"{% endif %}>{{ params.body }}</textarea>
+    {% for msg in errors.on("body") %}<p id="note_body_error" class="field-error">Body {{ msg }}</p>{% endfor %}
+  </div>
+  <div class="flex flex-wrap items-center gap-3">
+    <button class="btn">Save note</button>
+    <a href="{{ paths::notes() }}" class="btn-secondary">Cancel</a>
+  </div>
+</form>

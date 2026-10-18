@@ -1,0 +1,35 @@
+{% extends "layouts/application.html" %}
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-4">
+  <h1 class="text-3xl font-semibold tracking-tight">Notes</h1>
+  <a href="{{ paths::new_note() }}" class="btn">New note</a>
+</div>
+{% if notes.is_empty() %}
+<p class="mt-10 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 p-10 text-center text-gray-600 dark:text-gray-400">No notes yet. <a href="{{ paths::new_note() }}" class="link">Create the first one</a>.</p>
+{% else %}
+<div class="mt-8 overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
+  <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-800 text-sm">
+    <thead class="bg-gray-50 dark:bg-gray-900">
+      <tr>
+        <th scope="col" class="px-4 py-3 text-left font-medium text-gray-700 dark:text-gray-300">Name</th>
+        <th scope="col" class="px-4 py-3"><span class="sr-only">Actions</span></th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-200 dark:divide-gray-800 bg-white dark:bg-gray-950">
+      {% for note in notes %}
+      <tr id="note_{{ note.id }}">
+        <td class="px-4 py-3"><a href="{{ paths::note(*note.id) }}" class="link">{{ note.label }}</a></td>
+        <td class="px-4 py-3 text-right whitespace-nowrap"><a href="{{ paths::edit_note(*note.id) }}" class="link">Edit</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% if newer().is_some() || older().is_some() %}
+<nav class="mt-6 flex justify-between text-sm" aria-label="Pages">
+  {% if let Some(href) = newer() %}<a href="{{ href }}" class="link">&larr; Newer</a>{% else %}<span></span>{% endif %}
+  {% if let Some(href) = older() %}<a href="{{ href }}" class="link">Older &rarr;</a>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

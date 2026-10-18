@@ -1,0 +1,22 @@
+# template/snippets/seed-backdated/snippet.toml (the format of a part's sample.toml).
+name = "seed-backdated"
+version = "0.7.3"
+summary = "Seeds with history: create through the model, then backdate::<E>(db, id, days_ago(30)) moves the timestamps"
+depends_on = []
+# Its test seeds a note: the resource snippet (or --as the model you added it as).
+snippets = ["resource"]
+as = "note"
+
+[[wire]]
+file = "src/tasks/mod.rs"
+anchor = "task mods"
+text = '''
+pub mod seed_support;
+'''
+
+[[wire]]
+file = "tests/app/main.rs"
+anchor = "test mods"
+text = '''
+mod seed_backdated_test;
+'''

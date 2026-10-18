@@ -1,0 +1,61 @@
+# template/snippets/atom-feed/snippet.toml (the format of a part's sample.toml).
+name = "atom-feed"
+version = "0.7.3"
+summary = "GET /feed.xml: an Atom feed (escaped, RFC 3339 dates, newest 20), linked from every page"
+depends_on = []
+
+[[wire]]
+file = "src/controllers/mod.rs"
+anchor = "controller mods"
+text = '''
+pub mod feed;
+'''
+
+[[wire]]
+file = "src/views/mod.rs"
+anchor = "view mods"
+text = '''
+pub mod feed;
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "route mods"
+text = '''
+pub mod feed;
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "routes"
+text = '''
+app = app.merge(feed::router());
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "paths"
+text = '''
+pub use super::feed::paths::*;
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "route tables"
+text = '''
+feed::ROUTES,
+'''
+
+[[wire]]
+file = "templates/layouts/application.html"
+anchor = "app head"
+text = '''
+<link rel="alternate" type="application/atom+xml" title="{{ crate::config::APP_NAME }}" href="{{ crate::routes::paths::feed() }}">
+'''
+
+[[wire]]
+file = "tests/app/main.rs"
+anchor = "test mods"
+text = '''
+mod feed_test;
+'''

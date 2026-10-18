@@ -29,3 +29,6 @@ document.addEventListener("submit", (e) => {
 window.addEventListener("pageshow", (event) => {
   if (event.persisted) window.location.reload();
 });
+
+// More behaviors (snippets, your own) go above this line, each one delegated listener.
+// samples: app js

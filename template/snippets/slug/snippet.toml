@@ -1,0 +1,12 @@
+# template/snippets/slug/snippet.toml (the format of a part's sample.toml).
+name = "slug"
+version = "0.7.3"
+summary = "slugify(title) (accents folded, 80 chars) and unique(base, query): -2, -3… unique per owner or global"
+depends_on = []
+
+[[wire]]
+file = "src/models/mod.rs"
+anchor = "model mods"
+text = '''
+pub mod slug;
+'''

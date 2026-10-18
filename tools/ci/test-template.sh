@@ -2,7 +2,7 @@
 # Prove the app template and its parts the way an app gets them: generate with offrails-gen, then
 # the Definition of Done on SQLite and Postgres.
 #
-#   tools/ci/test-template.sh                 gen, bare, all, incremental, generators, update-part
+#   tools/ci/test-template.sh                 gen, bare, all, incremental, generators, snippets, update-part
 #   tools/ci/test-template.sh bare all        just these
 #   tools/ci/test-template.sh --no-postgres   skip the Postgres runs (said so in the summary)
 #
@@ -18,6 +18,10 @@
 #                resource with every field type, page, controller, migrations) and into an app with
 #                every part (scoped resources, api, job, mailer, channel, model, test), the gates on
 #                both databases, re-running each generator (a no-op), then `destroy` of all of it in
+#                reverse: the app must be byte-for-byte what it was
+#   snippets     every snippet (template/snippets/) added into a bare app and into an app with every
+#                part, in dependency order (resource twice: as notes and --as article), the gates on
+#                both databases, re-adding each (a no-op), then `snippet remove` of all of it in
 #                reverse: the app must be byte-for-byte what it was
 #   update-part  a synthetic newer part (a changed file and a changed wire) merged into an app: a
 #                clean merge with an app edit elsewhere, then a conflict with an app edit on the
@@ -35,17 +39,22 @@ targets=""
 for arg in "$@"; do
   case "$arg" in
     --no-postgres) postgres=0 ;;
-    -h | --help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "test-template: unknown option $arg" >&2; exit 2 ;;
     *) targets="$targets $arg" ;;
   esac
 done
-[ -n "$targets" ] || targets="gen bare all incremental generators update-part"
+[ -n "$targets" ] || targets="gen bare all incremental generators snippets update-part"
 if [ "$postgres" = 1 ] && [ -z "${TEST_DATABASE_URL:-}" ]; then
   echo "test-template: TEST_DATABASE_URL is not set (--no-postgres skips the Postgres runs)" >&2
   exit 2
 fi
 pg_url="${TEST_DATABASE_URL:-}"
+# OFFRAILS_CI_TAG: a suffix for the apps' crate names, so runs sharing a Postgres server (another
+# checkout's CI on the same machine) never share test databases (they are named after the crate).
+tag="${OFFRAILS_CI_TAG:-}"
+# OFFRAILS_CI_PORT: the first of the two ports the browser smokes serve on (default 3911).
+smoke_port="${OFFRAILS_CI_PORT:-3911}"
 unset TEST_DATABASE_URL
 
 work=${OFFRAILS_CI_DIR:-$(mktemp -d)}
@@ -189,6 +198,47 @@ destroy_all() {
   step "destroy left the app as it was" sh -c 'test -z "$(git diff --name-only baseline)" && test -z "$(git ls-files --others --exclude-standard)" || { git diff --stat baseline; git ls-files --others --exclude-standard; exit 1; }'
 }
 
+# The snippets, dependencies first; one line per `snippet add` (its words after `add`).
+SNIPPETS="resource
+resource --as article
+slug
+public-show-by-slug
+atom-feed
+markdown
+pagination
+theme-toggle
+seed-backdated"
+
+# snippets_round <app dir name> <new options…>: add every snippet, the gates, re-add (no-op),
+# remove in reverse, and the app is the baseline again.
+snippets_round() {
+  fresh "$1"
+  dir=$1
+  shift
+  (cd "$work/$name" && gen new "$dir" "$dir$tag" "Snippet App" "$@") || return 1
+  # The crates snippets add stay when they're removed (like a generator's): add them first.
+  step "crates the snippets add" sh -c 'cargo add -q pulldown-cmark ammonia' || return 1
+  commit_all "baseline" && step "tag baseline" git tag baseline || return 1
+  printf '%s\n' "$SNIPPETS" > "$work/$name/$dir.snippets"
+  while IFS= read -r line; do
+    # shellcheck disable=SC2086 # one snippet's words
+    step "snippet add $line" cargo offrails snippet add $line || return 1
+  done < "$work/$name/$dir.snippets"
+  commit_all "snippets" || return 1
+  while IFS= read -r line; do
+    # shellcheck disable=SC2086
+    step "snippet add $line again (no-op)" sh -c 'cargo offrails snippet add "$@" | grep -q "nothing to do"' sh $line || return 1
+  done < "$work/$name/$dir.snippets"
+  gates none || return 1
+  lines=$(sed '1!G;h;$!d' "$work/$name/$dir.snippets")
+  printf '%s\n' "$lines" | while IFS= read -r line; do
+    # shellcheck disable=SC2086
+    step "snippet remove $line" cargo offrails snippet remove $line || exit 1
+  done || return 1
+  # shellcheck disable=SC2016 # expanded by the inner shell
+  step "removing left the app as it was" sh -c 'test -z "$(git diff --name-only baseline)" && test -z "$(git ls-files --others --exclude-standard)" || { git diff --stat baseline; git ls-files --others --exclude-standard; exit 1; }'
+}
+
 fresh() {
   app="$work/$name/$1"
   rm -rf "${work:?}/${name:?}"
@@ -206,17 +256,17 @@ run_one() {
       ;;
     bare)
       fresh bare_app
-      (cd "$work/$name" && gen new bare_app bare_app "Bare App") || return 1
-      gates 24 3911 || return 1
+      (cd "$work/$name" && gen new bare_app "bare_app$tag" "Bare App") || return 1
+      gates 24 "$smoke_port" || return 1
       ;;
     all)
       fresh all_app
-      (cd "$work/$name" && gen new all_app all_app "All Parts" --parts all) || return 1
-      gates 32 3912 || return 1
+      (cd "$work/$name" && gen new all_app "all_app$tag" "All Parts" --parts all) || return 1
+      gates 32 "$((smoke_port + 1))" || return 1
       ;;
     incremental)
       fresh inc_app
-      (cd "$work/$name" && gen new inc_app inc_app "Incremental App") || return 1
+      (cd "$work/$name" && gen new inc_app "inc_app$tag" "Incremental App") || return 1
       step "baseline commit" sh -c 'git add -A && git -c user.name=ci -c user.email=ci@example.invalid commit -qm baseline' || return 1
       parts=$(gen list-parts | awk 'NR > 1 && NF > 2 && $1 !~ /^Add|^Which/ { print $1 }')
       for p in $parts; do
@@ -235,7 +285,7 @@ run_one() {
       # Bare: no accounts, so every resource is --public. Crates the generators add are added
       # first, so the destroyed app matches the baseline byte for byte.
       fresh gen_bare
-      (cd "$work/$name" && gen new gen_bare gen_bare "Generated Bare") || return 1
+      (cd "$work/$name" && gen new gen_bare "gen_bare$tag" "Generated Bare") || return 1
       step "crates the generators add" sh -c 'cargo add -q rust_decimal && cargo add -q sea-orm --features with-rust_decimal' || return 1
       commit_all "baseline" && step "tag baseline" git tag baseline || return 1
       cat > "$work/$name/bare.gens" <<'GENS'
@@ -244,7 +294,9 @@ resource books title:string isbn:string:unique author:references --public
 resource chapters title:string number:integer book:references --public
 resource items name:string notes:text:optional count:integer big:bigint flag:boolean active:boolean:optional weight:decimal{8.3} price:money cost:money:optional at:datetime day:date:optional code:uuid:unique meta:json:optional book:references:optional --public
 page about --nav
+page profile --path /people/{handle}
 controller dashboard index summary
+controller blog index show:/blog/{slug}
 migration add_subtitle_to_books subtitle:string:optional:index
 migration backfill_isbns
 test unit isbn_checksum
@@ -254,7 +306,7 @@ GENS
       destroy_all "$work/$name/bare.gens" || return 1
       # Every part: accounts, so resources are scoped to their owner (and the tenancy suites).
       fresh gen_all
-      (cd "$work/$name" && gen new gen_all gen_all "Generated All" --parts all) || return 1
+      (cd "$work/$name" && gen new gen_all "gen_all$tag" "Generated All" --parts all) || return 1
       step "crates the generators add" sh -c 'cargo add -q rust_decimal && cargo add -q sea-orm --features with-rust_decimal && cargo add -q utoipa --features axum_extras,chrono' || return 1
       commit_all "baseline" && step "tag baseline" git tag baseline || return 1
       cat > "$work/$name/all.gens" <<'GENS'
@@ -269,6 +321,7 @@ mailer post_mailer published digest
 channel post
 page about
 controller reports index
+controller archive month:/archive/{year}/{month_id}
 migration add_pinned_to_posts pinned:boolean
 test request checkout
 GENS
@@ -276,9 +329,17 @@ GENS
       gates none || return 1
       destroy_all "$work/$name/all.gens" || return 1
       ;;
+    snippets)
+      shipped=$(ls "$root/template/snippets" | while IFS= read -r d; do [ -f "$root/template/snippets/$d/snippet.toml" ] && echo "$d"; done)
+      for sn in $shipped; do
+        printf '%s\n' "$SNIPPETS" | grep -q "^$sn\( \|$\)" || { echo "test-template: snippet $sn is not in SNIPPETS" >&2; return 1; }
+      done
+      snippets_round snip_bare || return 1
+      snippets_round snip_all --parts all || return 1
+      ;;
     update-part)
       fresh up_app
-      (cd "$work/$name" && gen new up_app up_app "Update App" --parts mailer) || return 1
+      (cd "$work/$name" && gen new up_app "up_app$tag" "Update App" --parts mailer) || return 1
       commit_all "baseline" || return 1
       # A newer framework whose mailer changed one line of a file and one wire.
       newer="$work/$name/newer-fw"
@@ -311,6 +372,7 @@ for t in $targets; do
   if [ "$postgres" = 1 ]; then dbs="SQLite + Postgres"; else dbs="SQLite only (Postgres skipped)"; fi
   [ "$t" = gen ] && dbs="no database"
   [ "$t" = update-part ] && dbs="no tests run"
+  [ "$t" = snippets ] && dbs="$dbs, bare and every part"
   if [ -f "$work/$t/browser-smoke-skipped" ]; then dbs="$dbs; browser smoke SKIPPED: $(cat "$work/$t/browser-smoke-skipped")"; fi
   summary="$summary
 $result $t ($dbs)"

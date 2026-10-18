@@ -20,6 +20,7 @@ pub mod page;
 pub mod plan;
 pub mod resource;
 pub mod routes_md;
+pub mod snippet;
 pub mod tenancy;
 pub mod testgen;
 
@@ -111,6 +112,7 @@ pub fn canonical(kind: &str) -> Option<&'static str> {
         "mailer" => "mailer",
         "channel" => "channel",
         "test" => "test",
+        "snippet" => "snippet",
         _ => return None,
     })
 }
@@ -151,19 +153,25 @@ fn plan_for(kind: &str, info: &AppInfo, args: &[String], flags: &Flags) -> Resul
     let mut plan = plan_kind(kind, info, args, flags)?;
     let marked = !flags.replan || flags.recorded("layout").as_deref() == Some(LAYOUT);
     if marked {
-        let tag = plan
-            .name
-            .rsplit(':')
-            .next()
-            .unwrap_or(&plan.name)
-            .to_owned();
+        let tag = plan.tag.clone().unwrap_or_else(|| {
+            plan.name
+                .rsplit(':')
+                .next()
+                .unwrap_or(&plan.name)
+                .to_owned()
+        });
         plan.mark_wiring(&tag);
         plan.option("layout", LAYOUT);
     }
     Ok(plan)
 }
 
-fn plan_kind(kind: &str, info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
+pub(crate) fn plan_kind(
+    kind: &str,
+    info: &AppInfo,
+    args: &[String],
+    flags: &Flags,
+) -> Result<Plan> {
     match kind {
         "migration" => migration::plan(info, args, flags),
         "model" => model::plan(info, args, flags),
@@ -175,6 +183,7 @@ fn plan_kind(kind: &str, info: &AppInfo, args: &[String], flags: &Flags) -> Resu
         "mailer" => mailer::plan(info, args, flags),
         "channel" => channel::plan(info, args, flags),
         "test" => testgen::plan(info, args, flags),
+        "snippet" => snippet::plan(info, args, flags),
         other => Err(Fail::usage(format!("unknown kind '{other}'\n\n{USAGE}"))),
     }
 }
@@ -191,6 +200,7 @@ fn entry_name(kind: &str, raw: &[String]) -> Result<String> {
             names::snake(raw.get(1).map(String::as_str).unwrap_or(""))
         ),
         "job" => job::job_name(first)?,
+        "snippet" => snippet::entry_name(raw),
         "mailer" => mailer::mailer_name(first)?,
         _ => names::snake(first),
     })

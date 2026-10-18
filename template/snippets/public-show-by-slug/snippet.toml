@@ -1,0 +1,86 @@
+# template/snippets/public-show-by-slug/snippet.toml (the format of a part's sample.toml).
+name = "public-show-by-slug"
+version = "0.7.3"
+summary = "GET /read/notes/{slug}: a public page per record, by slug (a path param), slugs unique and stable"
+depends_on = []
+# Notes from the resource snippet, slugs from the slug snippet (add all three with the same --as).
+snippets = ["resource", "slug"]
+as = "note"
+
+[[wire]]
+file = "migration/src/lib.rs"
+anchor = "migration mods"
+text = '''
+mod m20261018_000200_add_slug_to_notes;
+'''
+
+[[wire]]
+file = "migration/src/lib.rs"
+anchor = "migrations"
+text = '''
+Box::new(m20261018_000200_add_slug_to_notes::Migration),
+'''
+
+[[wire]]
+file = "src/models/note/mod.rs"
+anchor = "columns"
+text = '''
+#[sea_orm(unique)]
+pub slug: Option<String>,
+'''
+
+[[wire]]
+file = "src/models/mod.rs"
+anchor = "model mods"
+text = '''
+pub mod note_slugs;
+'''
+
+[[wire]]
+file = "src/controllers/mod.rs"
+anchor = "controller mods"
+text = '''
+pub mod note_pages;
+'''
+
+[[wire]]
+file = "src/views/mod.rs"
+anchor = "view mods"
+text = '''
+pub mod note_pages;
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "route mods"
+text = '''
+pub mod note_pages;
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "routes"
+text = '''
+app = app.merge(note_pages::router());
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "paths"
+text = '''
+pub use super::note_pages::paths::*;
+'''
+
+[[wire]]
+file = "src/routes.rs"
+anchor = "route tables"
+text = '''
+note_pages::ROUTES,
+'''
+
+[[wire]]
+file = "tests/app/main.rs"
+anchor = "test mods"
+text = '''
+mod note_pages_test;
+'''

@@ -1,0 +1,18 @@
+# template/snippets/markdown/snippet.toml (the format of a part's sample.toml).
+name = "markdown"
+version = "0.7.3"
+summary = "markdown::to_html: CommonMark (tables, strikethrough) rendered by pulldown-cmark, sanitized by ammonia"
+depends_on = []
+
+# Run in the app root, one per line, never with a version (cargo add picks it; read Cargo.lock).
+crates = [
+  "pulldown-cmark",
+  "ammonia",
+]
+
+[[wire]]
+file = "src/views/mod.rs"
+anchor = "view mods"
+text = '''
+pub mod markdown;
+'''
