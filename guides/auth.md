@@ -113,7 +113,7 @@ Build responses that set cookies with `AppendHeaders([(SET_COOKIE, …), (SET_CO
 
 ### Sign-up (`signup` only; `registrations.rs`: `new`, `create`)
 
-Validate `SignupParams { email, password }`. Then, in **one transaction**, create the user and the session, so there's never an account without a login or the reverse. A duplicate email is caught from the unique index (no pre-query), giving "Email has already been taken" with 422. On a failed submit, re-render the form without the password. Enqueue a welcome email only if `EMAIL` is configured. `invite` apps instead get `invitations` (token digest, email, inviter, expires_at), created by admins.
+Validate `SignupParams { email, password }`. Then, in **one transaction**, create the user and the session, so there's never an account without a login or the reverse. A duplicate email is caught from the unique index (no pre-query). When the app sends email, don't say "Email has already been taken" (that enumerates accounts): answer exactly as for a new sign-up ("Check your email to confirm") and send the existing owner a "someone tried to sign up with your address" note instead. Without email, the 422 is unavoidable; say so in `docs/decisions.md`. On a failed submit, re-render the form without the password. Enqueue a welcome email only if `EMAIL` is configured. `invite` apps instead get `invitations` (token digest, email, inviter, expires_at), created by admins.
 
 ### Password reset (`passwords.rs`: `new`, `create`, `edit`, `update`)
 
@@ -121,7 +121,7 @@ Validate `SignupParams { email, password }`. Then, in **one transaction**, creat
 2. **The job creates the token** (`password_reset::issue(db, user_id, now)`, 15-minute expiry), renders `mailers::passwords::reset` and calls `state.mailer.deliver` directly. `MAX_ATTEMPTS = 5`; if the user no longer exists, it returns `Outcome::Cancel`.
    - Why not `deliver_later_until(&txn, email, expires_at)`? That would put the rendered email, reset link included, into job args, where anyone who can open `/admin/jobs` could read it and take over the account ([security](security.md#checklist): "job args carry no secrets"). Issuing the token at send time also means the 15 minutes start when the email actually leaves.
 3. The link is `{APP_URL}/passwords/{token}/edit`. `edit` checks `password_reset::find_valid(db, token, now)` (unexpired, by digest). An invalid or used link redirects to `/passwords/new` with "That password reset link is invalid or has expired."
-4. `POST /passwords/{token}` (htmx) / `PATCH` (inertia): `password_reset::consume`. Validate the new password first (422 with the form; the link keeps working). Then, in one transaction: set the digest, delete **all** of that user's resets (single use) and sessions (log out everywhere). Finally start a fresh session and redirect to `/`.
+4. `POST /passwords/{token}` (htmx) / `PATCH` (inertia): `password_reset::consume`. Validate the new password first (422 with the form; the link keeps working). Then, in one transaction: set the digest, delete **all** of that user's resets (single use), sessions (log out everywhere) **and API tokens** (`api_tokens` when the app has an API: a bearer token minted by whoever took the account over must die with the password, [api](api.md#authentication-api-tokens)). Finally start a fresh session and redirect to `/`. The same three deletes run on a password **change** (`account.rs`).
 
 ## Magic-link variants (`magic-link`, `magic-link-invite`)
 

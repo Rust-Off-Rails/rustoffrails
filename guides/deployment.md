@@ -87,7 +87,8 @@ exec "$@"
 
 - Templates are compiled into the binary (Askama), and migrations are embedded. Only `static/` (served at `/static`) and `web/dist/` (Vite output; `web/dist/assets` is served at `/assets`, and the manifest must exist or boot fails in production) are copied as files. Paths are relative to `WORKDIR /app`, so keep it.
 - `.dockerignore`: `target/`, `web/node_modules/`, `web/dist/`, `storage/`, `.env`, `.git/`, `bin/tailwindcss` (the host binary may be macOS; the image fetches its own).
-- Set `SKIP_MIGRATIONS=true` on worker processes, so only web boots migrate. (Postgres advisory locks make concurrent migration safe anyway. This just keeps logs clean.)
+- **Exactly one process migrates.** `sea-orm-migration` takes **no lock**: two processes running `app db migrate` at once (web and worker booting together, or two web replicas) race on `seaql_migrations` and fail with "relation already exists" or a duplicate row on any deploy that adds a migration. So: a platform release command (`fly.toml` `[deploy] release_command`, Render's pre-deploy command, Kamal's `pre-deploy` hook) runs `app db migrate` once, and **every** process sets `SKIP_MIGRATIONS=true`. Without a release command (compose, a single Kamal web server), only the one web container migrates on boot and every other process (`worker`, extra replicas) sets `SKIP_MIGRATIONS=true`.
+- **Every proxy needs `APP_TRUSTED_PROXY=true`** (and `APP_TRUSTED_PROXY_HOPS` when more than one proxy appends to `X-Forwarded-For`): Fly, Render, Railway and compose-behind-Caddy all are proxies. Without it the rate limiter keys every user on the proxy's address, and ten failed logins by anyone lock out everyone ([security](security.md#rate-limiting-kernelrate_limitrs)).
 - Verify the image locally before the first deploy: `docker compose up --build` (below), or for SQLite apps `docker build -t myapp . && docker run --rm -p 3000:3000 -e APP_URL=http://localhost:3000 -e DATABASE_URL='sqlite:///data/p.sqlite3?mode=rwc' myapp`, then `curl localhost:3000/up`.
 
 ## Docker compose: the whole app, locally
@@ -415,7 +416,7 @@ Only for apps with channel rooms ([channels](channels.md)). SSE signals need non
 Verified with flyctl 0.4.115 and https://docs.fly.io/reference/configuration.
 
 1. `fly launch --no-deploy --copy-config` with the generated `fly.toml` (the human runs it, or you do if authorized). It creates the app and keeps our config.
-2. Postgres: `fly mpg create --name myapp-db --region <region> --pg-major-version 17` → `fly mpg attach <cluster-id> -a myapp` (sets the `DATABASE_URL` secret). Keep the pooler in its default **session** mode. Transaction mode breaks sqlx's prepared statements and the migrator's advisory lock.
+2. Postgres: `fly mpg create --name myapp-db --region <region> --pg-major-version 17` → `fly mpg attach <cluster-id> -a myapp` (sets the `DATABASE_URL` secret). Keep the pooler in its default **session** mode. Transaction mode breaks sqlx's prepared statements.
 3. Secrets: `fly secrets set APP_URL=https://myapp.fly.dev SMTP_URL=… APP_ADMIN_PASSWORD=…`
 4. `fly deploy`
 
@@ -430,6 +431,7 @@ kill_timeout = 30                # seconds, > APP_JOBS_SHUTDOWN_GRACE
 
 [env]
   SKIP_MIGRATIONS = "true"       # the release command migrates; the entrypoint doesn't need to
+  APP_TRUSTED_PROXY = "true"     # Fly's proxy appends the client to X-Forwarded-For (1 hop)
 
 [processes]
   web = "app serve"
@@ -478,7 +480,11 @@ registry: { username: <user>, password: [KAMAL_REGISTRY_PASSWORD] }
 builder:
   arch: amd64                           # the server's arch; building on Apple Silicon needs this (or `remote:`)
 env:
-  clear: { APP_ENV: production, APP_URL: https://myapp.example.com }
+  clear:
+    APP_ENV: production
+    APP_URL: https://myapp.example.com
+    APP_TRUSTED_PROXY: "true"           # the proxy in front appends the client IP; 2 hops when Cloudflare/Caddy sits in front too
+    SKIP_MIGRATIONS: "true"             # the pre-deploy hook migrates once (below)
   secret: [DATABASE_URL, SMTP_URL, APP_ADMIN_PASSWORD]
 volumes: ["myapp_data:/data"]           # SQLite and/or local storage
 accessories:                            # only if self-hosting Postgres
@@ -492,6 +498,7 @@ accessories:                            # only if self-hosting Postgres
     directories: ["data:/var/lib/postgresql/data"]   # postgres:18+ moved PGDATA: mount /var/lib/postgresql instead
 ```
 
+- Migrations run once per deploy. With **one** `web` host: let that container migrate on boot by overriding the role's env (`servers.web.env.clear.SKIP_MIGRATIONS: "false"`; roles take their own `env:`) and keep `SKIP_MIGRATIONS=true` on `job`, which boots at the same time and would otherwise race it. With several `web` hosts (deployed in parallel), none may migrate on boot: run `app db migrate` once from a `.kamal/hooks/pre-deploy` hook against the new image (Kamal's hooks docs), with every role on `SKIP_MIGRATIONS=true`.
 - `.kamal/secrets` pulls values from env or a password manager. Never commit literal secrets. With the accessory, `DATABASE_URL=postgres://postgres:$POSTGRES_PASSWORD@myapp-db:5432/myapp_production` (accessory containers are reachable by `<service>-<accessory>` on the kamal network).
 - First deploy: `kamal setup` (installs Docker, boots accessories, deploys). Accessories aren't redeployed by `kamal deploy`; use `kamal accessory boot db` / `reboot db`.
 - Remote commands: `kamal app exec "app db status"`, `kamal app exec -i "app db console"`. Rollback: `kamal rollback <version>`.
@@ -535,6 +542,7 @@ services:
     envVars:
       - { key: DATABASE_URL, fromDatabase: { name: myapp-db, property: connectionString } }
       - { key: SKIP_MIGRATIONS, value: "true" }
+      - { key: APP_TRUSTED_PROXY, value: "true" }
       - { key: APP_URL, sync: false }
       - { key: APP_ADMIN_PASSWORD, sync: false }
   - type: worker
@@ -544,6 +552,7 @@ services:
     envVars:
       - { key: DATABASE_URL, fromDatabase: { name: myapp-db, property: connectionString } }
       - { key: SKIP_MIGRATIONS, value: "true" }
+      - { key: APP_TRUSTED_PROXY, value: "true" }
 databases:
   - name: myapp-db
     postgresMajorVersion: "17"
@@ -588,7 +597,9 @@ Redeploy the previous image (`fly deploy --image <prev>`, `kamal rollback <versi
 - [ ] **CI is green on the exact commit you deploy** (`gh run list -L 1 --json headSha,conclusion`). A local DoD doesn't replace it: CI builds from a clean checkout and catches what your machine hides (e.g. a CSS file that only exists locally).
 - [ ] `docker build` succeeds locally, and `/up` returns 200 from the container.
 - [ ] Every new env var is in `.env.example`, `Config`, and the target's config, and you've told the human exactly which secrets to set.
-- [ ] `APP_ENV=production` is set on every process the target runs (web and worker). Unset means development: `/dev` mounted with no login, and the boot log says `APP_ENV is not set`. Check the first boot's log for that line.
+- [ ] `APP_ENV=production` is set on every process the target runs (web and worker). An unset `APP_ENV` refuses to boot (`APP_ENV is not set`), so a missing setting shows up as a failed deploy, not as `/dev` open to the internet.
+- [ ] `APP_TRUSTED_PROXY=true` is set (every platform here is a proxy), with `APP_TRUSTED_PROXY_HOPS` matching the number of proxies in front. Check: two failed logins from two different networks don't share one lockout.
+- [ ] Exactly one process runs `app db migrate` per deploy (a release command, or one web container); every other process has `SKIP_MIGRATIONS=true`.
 - [ ] Migrations follow expand/contract, and `down` was tested.
 - [ ] SQLite prod: still a single machine, volume mounted, backups configured.
 - [ ] You haven't run any deploy command without the human's go-ahead. Deploys are outward-facing.

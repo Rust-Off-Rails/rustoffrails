@@ -74,7 +74,7 @@ api_tokens:
   token_digest  string UNIQUE
   scopes        json                   // ["read","write"]
   last_used_at  timestamptz NULL       // written at most once a minute per token
-  expires_at    timestamptz NULL       // NULL = no expiry
+  expires_at    timestamptz NOT NULL   // default now() + 90 days at mint; `--expires never` is an operator-only flag, logged in decisions
   created_at    timestamptz
 ```
 
@@ -84,6 +84,8 @@ api_tokens:
 | `POST /api/v1/tokens` | Email + password (+ optional `name`, `scopes`, `expires_in_days` 1..=365) → a new token. Same 422 (`base: "Invalid email or password"`) for an unknown email and a wrong password; one argon2 verify either way |
 | `GET /api/v1/tokens` | The caller's tokens, metadata only |
 | `DELETE /api/v1/tokens/current` | Log out: revoke the token making the request |
+
+A password reset or change deletes the user's tokens along with their sessions ([auth](auth.md#password-reset)); `app task tokens revoke-all <email>` does it from the terminal.
 | `GET /api/v1/me` | The caller |
 | `app task tokens create <email> [name] \| list <email> \| revoke <id>` | The same from the terminal, for operators and CI |
 
