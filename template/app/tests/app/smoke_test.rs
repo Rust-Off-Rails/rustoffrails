@@ -308,7 +308,12 @@ fn page_scripts_never_bind_only_on_dom_content_loaded() {
     files_with_extension(std::path::Path::new("static"), "js", &mut files);
     let mut found = Vec::new();
     for path in files {
-        if path.components().any(|c| c.as_os_str() == "vendor") {
+        // vendor/: third-party files. kernel/: kernel pages aren't boosted, and the dev
+        // dashboard's load lab plants exactly this bug on purpose (`lab-widget.js`).
+        if path
+            .components()
+            .any(|c| c.as_os_str() == "vendor" || c.as_os_str() == "kernel")
+        {
             continue;
         }
         let source = std::fs::read_to_string(&path).expect("a readable script");
