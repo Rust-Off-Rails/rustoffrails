@@ -2,12 +2,13 @@
 //! filled in at boot so every range has full charts in a demo or a screenshot. The shape is
 //! believable: traffic that rises and falls, a deploy that restarts memory, a traffic spike, and an
 //! incident with errors and slow requests. Charts over it carry a "demo data" badge, and the real
-//! collector takes over from the first second.
+//! collector takes over from the first second. Its minutes and markers also go to the history file,
+//! flagged as demo there too (a real minute already on disk is never overwritten by demo data).
 
 use std::f64::consts::PI;
 
 use super::hist::Hist;
-use super::series::{Annotation, LATENCY_BUCKETS, Sample, Series};
+use super::series::{Annotation, LATENCY_BUCKETS, Minute, Sample, Series};
 
 /// Seconds of history.
 pub const SPAN: i64 = 3_600;
@@ -22,8 +23,10 @@ fn noise(t: i64, salt: u64) -> f64 {
     (x % 2_001) as f64 / 1_000.0 - 1.0
 }
 
-/// Fills the rings with the hour before `now`, and marks it as demo data.
-pub fn backfill(series: &mut Series, now: i64) {
+/// Fills the rings with the hour before `now`, and marks it as demo data. Returns the minutes it
+/// closed and the markers it made, for the history file.
+pub fn backfill(series: &mut Series, now: i64) -> Vec<(Option<Minute>, Option<Annotation>)> {
+    let mut out = Vec::new();
     let start = now - SPAN;
     let deploy = start + 1_150;
     let spike = (start + 2_050, start + 2_140);
@@ -98,7 +101,9 @@ pub fn backfill(series: &mut Series, now: i64) {
             sql_p95: sql_hist.quantile(0.95) as u32,
             lat: hist.bucket_counts(&LATENCY_BUCKETS),
         };
-        series.push(s, &hist, &sql_hist);
+        if let Some(m) = series.push(s, &hist, &sql_hist) {
+            out.push((Some(m), None));
+        }
     }
     for (t, kind, label) in [
         (deploy, "deploy", "deploy v1.4.0 (demo data)"),
@@ -113,14 +118,17 @@ pub fn backfill(series: &mut Series, now: i64) {
             "incident: payment provider timeouts (demo data)",
         ),
     ] {
-        series.annotate(Annotation {
+        let a = Annotation {
             t,
             kind,
             label: label.to_owned(),
             demo: true,
-        });
+        };
+        out.push((None, Some(a.clone())));
+        series.annotate(a);
     }
     series.demo_until = Some(now);
+    out
 }
 
 #[cfg(test)]
@@ -131,7 +139,8 @@ mod tests {
     #[test]
     fn the_demo_history_fills_every_range_and_is_marked() {
         let mut s = Series::default();
-        backfill(&mut s, 10_000_000);
+        let made = backfill(&mut s, 10_000_000);
+        assert!(made.iter().filter(|(m, _)| m.is_some()).count() >= 59);
         assert_eq!(s.window(Range::M5, 10_000_000).len(), 299);
         assert!(s.window(Range::H1, 10_000_000).len() >= 59);
         assert_eq!(s.demo_until, Some(10_000_000));

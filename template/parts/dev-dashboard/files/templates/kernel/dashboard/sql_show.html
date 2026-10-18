@@ -21,7 +21,7 @@
 </section>
 {% endif %}
 <section class="panel" aria-labelledby="qt-title">
-  <header><h2 id="qt-title">Recent requests that ran it</h2></header>
-  {% include "kernel/dashboard/_traces.html" %}
+  <header><h2 id="qt-title">Traces where this ran</h2></header>
+  <div class="pad">{{ list|safe }}</div>
 </section>
 {% endblock %}

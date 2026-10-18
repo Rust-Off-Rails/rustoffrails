@@ -23,6 +23,10 @@ use super::{HUB, lock};
 /// Traces kept: the most recent, plus the notable ones (errors, N+1, slow) for longer.
 pub const RECENT: usize = 300; // APP: more history, more memory (each trace is a few KB)
 pub const NOTABLE: usize = 100;
+/// The rings' byte budget: past it the oldest recent traces go first, whatever their count (a
+/// trace with 2,000 method spans weighs as much as a hundred small ones). Notable traces older
+/// than memory's are still on disk (`history.rs`). APP.
+pub const TRACE_BYTES: usize = 8 * 1024 * 1024;
 /// A request slower than this is notable.
 pub const SLOW_US: u64 = 500_000; // APP: what "slow" means for your app
 /// Log lines kept for the live tail's backlog.
@@ -30,10 +34,14 @@ pub const LOG_LINES: usize = 1_000;
 /// A log message or field list longer than this is cut.
 const MAX_TEXT: usize = 2_000;
 
-/// One request, as recorded.
+/// One request (or job, or mail delivery), as recorded.
 pub struct Trace {
     pub id: u64,
     pub at: DateTime<Utc>,
+    /// `request`, `job`, `mail` or `cron` (`TRACE_KINDS`).
+    pub kind: &'static str,
+    /// Read back from the history file (an earlier run of the app), not recorded by this process.
+    pub from_disk: bool,
     pub method: &'static str,
     pub route: &'static str,
     pub path: String,
@@ -66,6 +74,12 @@ impl Trace {
                 .map(|s| std::mem::size_of::<SpanRec>() + s.fields.len())
                 .sum::<usize>()
             + self.sql.len() * std::mem::size_of::<SqlRec>()
+            // Read back from disk, a trace's SQL strings are its own (live, they're shared).
+            + if self.from_disk {
+                self.sql.iter().map(|q| q.sql.len()).sum::<usize>() / self.sql.len().max(1)
+            } else {
+                0
+            }
             + self
                 .events
                 .iter()
@@ -78,11 +92,18 @@ pub struct SpanRec {
     pub id: u64,
     pub parent: Option<u64>,
     pub name: &'static str,
+    /// The module that opened it (`offrails_host::controllers::orders`).
     pub target: &'static str,
+    /// Where in the source (`src/controllers/orders.rs`, line), from the span's metadata.
+    pub file: Option<&'static str>,
+    pub line: Option<u32>,
     pub start_us: u64,
     pub dur_us: u64,
     pub fields: String,
 }
+
+/// What a trace is of: a request, a background job, a mail delivery, a scheduled task.
+pub const TRACE_KINDS: [&str; 4] = ["request", "job", "mail", "cron"];
 
 pub struct SqlRec {
     pub fp: u64,
@@ -105,21 +126,47 @@ pub struct EventRec {
 pub struct Traces {
     recent: VecDeque<Arc<Trace>>,
     notable: VecDeque<Arc<Trace>>,
+    /// `approx_bytes` of every trace held (shared ones once per ring).
+    bytes: usize,
 }
 
 impl Traces {
     pub fn push(&mut self, t: Arc<Trace>) {
-        // INVARIANT: both rings are bounded (test: the_dashboard_stays_within_its_memory_bound).
+        // INVARIANT: both rings are bounded, by count and by bytes (test:
+        // the_dashboard_stays_within_its_memory_bound).
+        let size = t.approx_bytes();
         if t.notable() {
-            if self.notable.len() == NOTABLE {
-                self.notable.pop_front();
+            if self.notable.len() == NOTABLE
+                && let Some(old) = self.notable.pop_front()
+            {
+                self.bytes = self.bytes.saturating_sub(old.approx_bytes());
             }
+            self.bytes += size;
             self.notable.push_back(t.clone());
         }
-        if self.recent.len() == RECENT {
-            self.recent.pop_front();
+        // A trace read back from disk (an earlier run's) only fills the notable ring.
+        if !t.from_disk {
+            if self.recent.len() == RECENT
+                && let Some(old) = self.recent.pop_front()
+            {
+                self.bytes = self.bytes.saturating_sub(old.approx_bytes());
+            }
+            self.bytes += size;
+            self.recent.push_back(t);
         }
-        self.recent.push_back(t);
+        while self.bytes > TRACE_BYTES {
+            let old = if self.recent.len() > 1 {
+                self.recent.pop_front()
+            } else if self.notable.len() > 1 {
+                self.notable.pop_front()
+            } else {
+                None
+            };
+            let Some(old) = old else {
+                break;
+            };
+            self.bytes = self.bytes.saturating_sub(old.approx_bytes());
+        }
     }
 
     pub fn find(&self, id: u64) -> Option<Arc<Trace>> {
@@ -152,12 +199,16 @@ impl Traces {
     }
 
     pub fn approx_bytes(&self) -> usize {
-        self.recent
-            .iter()
-            .chain(self.notable.iter())
-            .map(|t| t.approx_bytes())
-            .sum()
+        self.bytes
     }
+}
+
+/// A trace by id, wherever it is kept: the rings, a route's slowest examples, or the history file
+/// (a notable trace from an earlier run).
+pub fn find(id: u64) -> Option<Arc<Trace>> {
+    let mem = lock(&HUB.traces).find(id);
+    mem.or_else(|| lock(&HUB.http).example(id))
+        .or_else(|| super::history::trace(id))
 }
 
 /// One line of the live tail: a log event, or a finished request.
@@ -369,11 +420,50 @@ impl Visit for Text {
     }
 }
 
-/// A span's start and the request it belongs to.
+/// A span's start and the trace it belongs to.
 struct SpanData {
     start: Instant,
     req: Arc<RequestCtx>,
     fields: String,
+    /// It opened a background trace (a job, a mail delivery): closing it finishes the trace.
+    root: bool,
+}
+
+/// Root spans (outside any request) that become a trace of their own: the jobs sample's `job`
+/// span, a mailer's `mail` span, a scheduler's `cron` span. APP: name your own background work's
+/// outermost span one of these and it shows in Traces with its methods and SQL.
+pub fn background_kind(name: &str) -> Option<&'static str> {
+    match name {
+        "job" | "perform" => Some("job"),
+        "mail" | "deliver" | "deliver_mail" => Some("mail"),
+        "cron" | "cron_tick" | "recurring" => Some("cron"),
+        _ => None,
+    }
+}
+
+/// `worker=Foo job_id=5 …` → `Foo`.
+fn field<'a>(fields: &'a str, name: &str) -> Option<&'a str> {
+    fields.split(' ').find_map(|kv| {
+        let (k, v) = kv.split_once('=')?;
+        (k == name).then(|| v.trim_matches('"'))
+    })
+}
+
+/// The trace the current span belongs to, outside a request (a job's SQL): the nearest span with
+/// one, looked up in the subscriber's registry.
+pub fn background_current() -> Option<Arc<RequestCtx>> {
+    tracing::dispatcher::get_default(|d| {
+        let id = d.current_span().id()?.clone();
+        let reg = d.downcast_ref::<tracing_subscriber::Registry>()?;
+        let span = reg.span(&id)?;
+        span.scope()
+            .find_map(|s| s.extensions().get::<SpanData>().map(|x| x.req.clone()))
+    })
+}
+
+/// The trace for code running now: the request's, else a background trace's.
+pub fn current_ctx() -> Option<Arc<RequestCtx>> {
+    http::current().or_else(background_current)
 }
 
 /// The layer. Cheap when the dashboard is off: one atomic load per span and event.
@@ -387,19 +477,51 @@ where
         if !HUB.enabled() {
             return;
         }
-        let Some(req) = http::current() else {
+        let Some(span) = ctx.span(id) else {
             return;
         };
+        let inherited = http::current().or_else(|| {
+            span.parent().and_then(|p| {
+                p.scope()
+                    .find_map(|s| s.extensions().get::<SpanData>().map(|d| d.req.clone()))
+            })
+        });
         let mut text = Text::default();
         attrs.record(&mut text);
         let (_, fields) = text.finish();
-        if let Some(span) = ctx.span(id) {
-            span.extensions_mut().insert(SpanData {
-                start: Instant::now(),
-                req,
-                fields,
-            });
-        }
+        let (req, root) = match inherited {
+            Some(req) => (req, false),
+            None => {
+                let Some(kind) = background_kind(attrs.metadata().name()) else {
+                    return;
+                };
+                if http::quiet() {
+                    return;
+                }
+                let name = field(&fields, "worker")
+                    .or_else(|| field(&fields, "mailer"))
+                    .or_else(|| field(&fields, "name"))
+                    .unwrap_or(attrs.metadata().name());
+                let id = field(&fields, "job_id")
+                    .map(|j| format!("job-{j}"))
+                    .unwrap_or_default();
+                (
+                    Arc::new(RequestCtx::background(
+                        kind,
+                        super::history::intern(name),
+                        &fields,
+                        id,
+                    )),
+                    true,
+                )
+            }
+        };
+        span.extensions_mut().insert(SpanData {
+            start: Instant::now(),
+            req,
+            fields,
+            root,
+        });
     }
 
     fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
@@ -428,11 +550,16 @@ where
         let Some(data) = ext.get::<SpanData>() else {
             return;
         };
-        // The nearest ancestor that belongs to the same request.
+        if data.root {
+            // The trace's own row is the root: its spans hang under it.
+            super::http::finish_background(&data.req);
+            return;
+        }
+        // The nearest ancestor that belongs to the same trace (and isn't its root).
         let parent = span.scope().skip(1).find_map(|p| {
             p.extensions()
                 .get::<SpanData>()
-                .filter(|d| d.req.id == data.req.id)
+                .filter(|d| d.req.id == data.req.id && !d.root)
                 .map(|_| p.id().into_u64())
         });
         let meta = span.metadata();
@@ -441,6 +568,8 @@ where
             parent,
             name: meta.name(),
             target: meta.target(),
+            file: meta.file(),
+            line: meta.line(),
             start_us: data.req.offset_us(data.start),
             dur_us: data.start.elapsed().as_micros() as u64,
             fields: data.fields.clone(),
@@ -461,9 +590,21 @@ where
         event.record(&mut text);
         let (message, fields) = text.finish();
         let level = level_str(meta.level());
-        let req = http::current();
+        let span = ctx.event_span(event);
+        let req = http::current().or_else(|| {
+            span.as_ref().and_then(|s| {
+                s.scope()
+                    .find_map(|p| p.extensions().get::<SpanData>().map(|d| d.req.clone()))
+            })
+        });
         if let Some(req) = &req {
-            let parent = ctx.event_span(event).map(|s| s.id().into_u64());
+            let parent = span
+                .as_ref()
+                .filter(|s| s.extensions().get::<SpanData>().is_none_or(|d| !d.root))
+                .map(|s| s.id().into_u64());
+            if req.kind != "request" && (level == "ERROR" || message.contains("exception")) {
+                req.failed.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
             req.push_event(EventRec {
                 at_us: req.offset_us(Instant::now()),
                 level,
@@ -486,151 +627,6 @@ where
             request: None,
         });
     }
-}
-
-/// One row of the waterfall.
-pub struct WaterRow {
-    pub kind: &'static str,
-    pub label: String,
-    pub detail: String,
-    pub depth: usize,
-    pub start_us: u64,
-    pub dur_us: u64,
-    /// Bar position on a 0..1000 scale (the SVG's viewBox).
-    pub x: u64,
-    pub w: u64,
-    pub fp: Option<u64>,
-    pub flagged: bool,
-    /// Preformatted for the page.
-    pub start: String,
-    pub dur: String,
-    pub fp_hex: String,
-}
-
-/// The trace as a waterfall: the request, then each span with its SQL and events, in start order,
-/// indented under its parent. `details: false` (the read-only production view) leaves out log
-/// events and span fields: they carry whatever the app logged (emails, ids, amounts).
-pub fn waterfall(t: &Trace, details: bool) -> Vec<WaterRow> {
-    let total = t.dur_us.max(1);
-    let scale = |start: u64, dur: u64| {
-        let x = (start.min(total) * 1000) / total;
-        let w = ((dur * 1000) / total).max(2).min(1000 - x.min(998));
-        (x, w)
-    };
-    let flagged: Vec<u64> = t.n_plus_one.iter().map(|(fp, _, _)| *fp).collect();
-    // (start, order, parent, row)
-    let mut items: Vec<(u64, Option<u64>, Option<u64>, WaterRow)> = Vec::new();
-    for s in &t.spans {
-        let (x, w) = scale(s.start_us, s.dur_us);
-        items.push((
-            s.start_us,
-            Some(s.id),
-            s.parent,
-            WaterRow {
-                kind: "span",
-                label: s.name.to_owned(),
-                detail: if s.fields.is_empty() || !details {
-                    s.target.to_owned()
-                } else {
-                    format!("{} {}", s.target, s.fields)
-                },
-                depth: 0,
-                start_us: s.start_us,
-                dur_us: s.dur_us,
-                x,
-                w,
-                fp: None,
-                flagged: false,
-                start: String::new(),
-                dur: String::new(),
-                fp_hex: String::new(),
-            },
-        ));
-    }
-    for q in &t.sql {
-        let (x, w) = scale(q.start_us, q.dur_us);
-        items.push((
-            q.start_us,
-            None,
-            q.parent,
-            WaterRow {
-                kind: if q.failed { "sql-failed" } else { "sql" },
-                label: "sql".to_owned(),
-                detail: crate::kernel::ui::truncate(&q.sql, 160),
-                depth: 0,
-                start_us: q.start_us,
-                dur_us: q.dur_us,
-                x,
-                w,
-                fp: Some(q.fp),
-                flagged: flagged.contains(&q.fp),
-                start: String::new(),
-                dur: String::new(),
-                fp_hex: String::new(),
-            },
-        ));
-    }
-    for e in t.events.iter().filter(|_| details) {
-        let (x, _) = scale(e.at_us, 0);
-        items.push((
-            e.at_us,
-            None,
-            e.parent,
-            WaterRow {
-                kind: if e.message.contains("enqueued") {
-                    "job"
-                } else {
-                    "event"
-                },
-                label: e.level.to_lowercase(),
-                detail: e.message.clone(),
-                depth: 0,
-                start_us: e.at_us,
-                dur_us: 0,
-                x,
-                w: 2,
-                fp: None,
-                flagged: false,
-                start: String::new(),
-                dur: String::new(),
-                fp_hex: String::new(),
-            },
-        ));
-    }
-    items.sort_by_key(|i| i.0);
-    // Depth: 1 + the parent span's depth (parents start before their children).
-    let mut depth_of: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
-    let mut rows = vec![WaterRow {
-        start: "0µs".to_owned(),
-        dur: super::web::micros(t.dur_us),
-        fp_hex: String::new(),
-        kind: "request",
-        label: format!("{} {}", t.method, t.route),
-        detail: format!("{} → {}", t.path, t.status),
-        depth: 0,
-        start_us: 0,
-        dur_us: t.dur_us,
-        x: 0,
-        w: 1000,
-        fp: None,
-        flagged: false,
-    }];
-    for (_, own, parent, mut row) in items {
-        row.start = super::web::micros(row.start_us);
-        row.dur = if row.dur_us > 0 {
-            super::web::micros(row.dur_us)
-        } else {
-            "·".to_owned()
-        };
-        row.fp_hex = row.fp.map(super::sql::hex).unwrap_or_default();
-        let depth = parent.and_then(|p| depth_of.get(&p).copied()).unwrap_or(0) + 1;
-        row.depth = depth.min(8);
-        if let Some(own) = own {
-            depth_of.insert(own, depth);
-        }
-        rows.push(row);
-    }
-    rows
 }
 
 #[cfg(test)]

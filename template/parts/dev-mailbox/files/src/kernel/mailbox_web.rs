@@ -135,6 +135,8 @@ pub struct Link {
 
 /// What the message pane shows, for a stored message or a preview alike.
 pub struct MessageView {
+    /// The stored message's id (`None` for a preview).
+    pub id: Option<i64>,
     pub subject: String,
     pub from: String,
     pub to: String,
@@ -591,6 +593,7 @@ fn message_view(m: &Model, q: &ViewQuery) -> MessageView {
         views,
         view,
         eml_href: Some(format!("{path}/message.eml")),
+        id: Some(m.id),
         delete_action: Some(format!("{path}/delete")),
         preview: false,
         problems: 0,
@@ -648,6 +651,7 @@ fn preview_view(name: &str, email: &Email, from: &str, q: &ViewQuery) -> Message
         problems: 0,
         checks: preview_checks,
         eml_href: None,
+        id: None,
         delete_action: None,
         preview: true,
     }

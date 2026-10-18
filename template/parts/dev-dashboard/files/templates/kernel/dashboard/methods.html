@@ -1,0 +1,45 @@
+{% extends "kernel/dashboard/_layout.html" %}
+{% block dash %}
+<header class="dash-head">
+  <h1>Methods <span class="muted">wall clock, from spans</span></h1>
+  <nav class="segmented" aria-label="Sort">{% for s in sorts %}<a href="{{ s.href }}"{% if s.current %} aria-current="true"{% endif %}>{{ s.label }}</a>{% endfor %}</nav>
+</header>
+<form class="tx-filters" method="get" action="{{ base }}/methods" data-tx-filters aria-label="Window">
+  <label><span>Traces</span><select name="range">{% for o in ranges %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select></label>
+  <input type="hidden" name="route" value="{{ route }}">
+  <span class="tx-actions"><button type="submit" class="btn" data-tx-apply>Apply</button></span>
+</form>
+<p class="hint">Every span in the {{ crate::kernel::dashboard::web::count(traces, "trace", "traces") }} in memory, aggregated: <code>#[tracing::instrument]</code> functions, <code>info_span!</code> blocks, handlers and renders. Self time is a span minus what it called; a span with lots of self time and no children is where to add one (or where the CPU went: <a href="{{ base }}/profile">hot functions</a>). Click a method for the traces that ran it.</p>
+{% if rows.is_empty() %}
+<p class="empty">No spans yet. Instrument a function with <code>#[tracing::instrument(skip_all)]</code> (README "Instrumenting your own methods"), then use the app.</p>
+{% else %}
+<div class="scroll" tabindex="0" role="region" aria-label="Table"><table class="data-table methods">
+  <caption class="visually-hidden">Methods by {{ sorts.len() }} sort orders: calls, total, self, percentiles, share of request time, routes, callers and callees</caption>
+  <thead><tr><th scope="col">Method</th><th scope="col" class="num">Calls</th><th scope="col" class="num">Per trace</th><th scope="col">Total</th><th scope="col" class="num">Self</th><th scope="col" class="num">p50</th><th scope="col" class="num">p95</th><th scope="col" class="num">Max</th><th scope="col" class="num">Of request time</th><th scope="col">Routes</th><th scope="col">Callers → callees</th></tr></thead>
+  <tbody>
+  {% for m in rows %}
+    <tr{% if m.slow %} class="flagged"{% endif %}>
+      <th scope="row"><span class="sw k-{{ m.kind }}" aria-hidden="true"></span> <a class="mono" href="{{ m.href }}">{{ m.name }}</a><span class="sub mono">{{ m.module }}{% if !m.loc.is_empty() %} · {{ m.loc }}{% endif %}</span></th>
+      <td class="num">{{ m.calls }}</td>
+      <td class="num">{{ m.per_trace }}</td>
+      <td class="barcell"><span class="num">{{ m.total }}</span><svg class="dbar" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect width="{{ m.bar }}" height="6" rx="2"/></svg></td>
+      <td class="num">{{ m.selft }}</td>
+      <td class="num">{{ m.p50 }}</td>
+      <td class="num">{% if m.slow %}<span class="badge tone-warn">{{ m.p95 }}</span>{% else %}{{ m.p95 }}{% endif %}</td>
+      <td class="num">{{ m.max }}</td>
+      <td class="num">{{ m.share }}</td>
+      <td class="small">{% for (r, n) in m.routes %}<a class="mono" href="{{ base }}/methods?route={{ r|urlencode }}">{{ r }}</a> <span class="muted">×{{ n }}</span>{% if !loop.last %}<br>{% endif %}{% endfor %}</td>
+      <td class="small mono">{% for (c, n) in m.callers %}{{ c }} <span class="muted">×{{ n }}</span>{% if !loop.last %}, {% endif %}{% endfor %}{% if !m.callees.is_empty() %} → {% for (c, n) in m.callees %}{{ c }} <span class="muted">×{{ n }}</span>{% if !loop.last %}, {% endif %}{% endfor %}{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
+<section class="panel" aria-labelledby="ic-title">
+  <header><h2 id="ic-title">Icicle</h2>
+    <form method="get" action="{{ base }}/methods" data-tx-filters class="inline"><label><span class="visually-hidden">Route</span><select name="route">{% for o in routes %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select></label> <button type="submit" class="btn quiet" data-tx-apply>Show</button></form>
+  </header>
+  <p class="hint pad">{{ icicle.label }}: each bar is a span (or a statement) by name, as wide as the time spent in it, its callees below it. Click one to zoom in.</p>
+  <div class="pad">{% include "kernel/dashboard/_icicle.html" %}</div>
+</section>
+{% endblock %}

@@ -4,19 +4,25 @@ Action Mailer for a Rust off Rails app: an `Email` rendered from two Askama temp
 
 Extracted from Rust off Rails apps and improved: links follow the address actually served in development (a stale `APP_URL` in `.env` sent sign-in links to another port), Message-IDs never carry this machine's hostname, line breaks in any header value are refused, and `SMTP_URL` is parsed with lettre's own URL parser (credentials percent-decoded, `smtp://` plain for a local catcher, `?tls=required` for STARTTLS).
 
-Guide: [`.offrails/guides/mailers.md`](https://rustoffrails.org/docs/mailers). Depends on: nothing.
+Guide: [`.offrails/guides/mailers.md`](https://rustoffrails.org/docs/guides/mailers). Depends on: nothing.
 
-## Screenshots
+## Screens
 
 The test email, rendered in the dev mailbox's preview (with the dev-mailbox sample):
 
-![The test email preview, light, desktop](../../docs/screenshots/mailer/test-email-preview-light-desktop.png)
+<a href="../../docs/screenshots/mailer/test-email-preview-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/mailer/test-email-preview-dark-desktop.png"><img src="../../docs/screenshots/mailer/test-email-preview-light-desktop.png" alt="The test email in the dev mailbox's HTML preview" width="860"></picture></a>
+
+<table>
+<tr><td valign="top"><a href="../../docs/screenshots/mailer/test-email-text-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/mailer/test-email-text-dark-desktop.png"><img src="../../docs/screenshots/mailer/test-email-text-light-desktop.png" alt="The test email's text part" width="420"></picture></a><br><sub>The text part</sub></td></tr>
+</table>
+
+<sub>Light or dark follows your GitHub theme; click an image for full size.</sub>
 
 More: [dark](../../docs/screenshots/mailer/test-email-preview-dark-desktop.png) · [mobile](../../docs/screenshots/mailer/test-email-preview-light-mobile.png) · [text part](../../docs/screenshots/mailer/test-email-text-light-desktop.png)
 
 ## Install
 
-Through the samples MCP server: `get_sample mailer`. Or by hand, in the app root:
+By hand, in the app root:
 
 1. `cargo add lettre --no-default-features --features builder,smtp-transport,pool,hostname,tokio1-rustls-tls` (never with a version; read the resolved one in `Cargo.lock`).
 2. Copy `files/` into the app, keeping the paths. In the test file, replace `offrails_host` with your crate name.

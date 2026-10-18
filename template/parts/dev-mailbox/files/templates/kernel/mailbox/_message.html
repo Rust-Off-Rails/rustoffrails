@@ -58,6 +58,7 @@
   </section>
   {% endif %}
 
+  {# samples: message panels #}
   {% if !m.checks.is_empty() %}
   <details class="mbx-checks"{% if m.problems > 0 %} open{% endif %}>
     <summary>Checks <span class="mbx-count{% if m.problems == 0 %} mbx-count-quiet{% endif %}">{% if m.problems == 0 %}no problems{% else %}{{ m.problems }} to look at{% endif %}</span></summary>

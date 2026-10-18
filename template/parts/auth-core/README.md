@@ -15,11 +15,17 @@ What you get (the Rails 8 generator, `phx.gen.auth` and Devise each cover part o
 
 Extracted from Rust off Rails apps and improved: the originals had sessions and return-to, but no rotation on re-auth, no absolute expiry, no device list, no audit trail, no security emails and no shared throttle.
 
-Guides: [`.offrails/guides/auth.md`](https://rustoffrails.org/docs/auth), [`.offrails/guides/security.md`](https://rustoffrails.org/docs/security). Depends on: [mailer](../mailer/) (the security emails) and [dev-mailbox](../dev-mailbox/) (the "check your mailbox" hint in development).
+Guides: [`.offrails/guides/auth.md`](https://rustoffrails.org/docs/guides/auth), [`.offrails/guides/security.md`](https://rustoffrails.org/docs/guides/security). Depends on: [mailer](../mailer/) (the security emails) and [dev-mailbox](../dev-mailbox/) (the "check your mailbox" hint in development).
 
-## Screenshots
+## Screens
 
-![The account security page, light, desktop](../../docs/screenshots/auth-core/account-light-desktop.png)
+<a href="../../docs/screenshots/auth-core/account-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/auth-core/account-dark-desktop.png"><img src="../../docs/screenshots/auth-core/account-light-desktop.png" alt="The account security page: email, methods, devices, recent activity" width="860"></picture></a>
+
+<table>
+<tr><td valign="top"><a href="../../docs/screenshots/auth-core/sign-in-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/auth-core/sign-in-dark-desktop.png"><img src="../../docs/screenshots/auth-core/sign-in-light-desktop.png" alt="Sign in with every method installed" width="420"></picture></a><br><sub>Sign in (every method installed)</sub></td><td valign="top"><a href="../../docs/screenshots/auth-core/confirm-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/auth-core/confirm-dark-desktop.png"><img src="../../docs/screenshots/auth-core/confirm-light-desktop.png" alt="Confirm it's you before a sensitive action" width="420"></picture></a><br><sub>Confirm it's you (re-auth)</sub></td></tr>
+</table>
+
+<sub>Light or dark follows your GitHub theme; click an image for full size.</sub>
 
 | Screen | Light | Dark |
 |--------|-------|------|
@@ -34,7 +40,7 @@ Regenerate with `node samples/auth-core/screenshots.mjs` against the demo (see t
 
 ## Install
 
-Through the samples MCP server: `get_sample auth-password` (or `auth-magic-link`), which brings this one. By hand, in the app root, after [dev-mailbox](../dev-mailbox/):
+By hand, in the app root, after [dev-mailbox](../dev-mailbox/):
 
 1. `cargo add hmac` (never with a version; read the resolved one in `Cargo.lock`).
 2. Copy `files/` into the app, keeping the paths. Replace `offrails_host` with your crate name in the test file.
@@ -42,7 +48,8 @@ Through the samples MCP server: `get_sample auth-password` (or `auth-magic-link`
    - `src/kernel/mod.rs`: `auth_token`, `background`, `return_to`, `session`, `user_agent` modules.
    - `src/models/mod.rs`: `auth_event`, `auth_throttle`, `session`, `user`, `user_token`, and `pub type User = user::Model;`.
    - `src/controllers/mod.rs`: `account`, `auth`, `security`, `sessions`.
-   - `src/views/mod.rs`: `pub mod auth;` and two `Ctx` fields, `current_user` and `dev_mailbox`; `src/controllers/application.rs` fills them in `Ctx`'s extractor.
+   - `src/views/mod.rs`: `pub mod auth;` and three `Ctx` fields, `current_user`, `dev_mailbox` and `auth_js` (the digested URL of `static/auth.js`); `src/controllers/application.rs` fills them in `Ctx`'s extractor.
+   - `templates/layouts/application.html`: `<script src="{{ ctx.auth_js }}" defer></script>` at `samples: app head`, so every app page loads it. Never in a page's `{% block head %}`: links and forms are boosted, and a boosted click runs nothing in the next page's `<head>` (the Show button, Caps Lock hint and code auto-submit would be dead until a reload).
    - `src/mailers/mod.rs`: `pub mod auth_mailer;`; `src/mailers/previews.rs`: two previews.
    - `src/state.rs`: a `background: Background` field, built with `Background::default()`.
    - `src/config.rs`: an `auth: AuthConfig` field (`APP_SECRET_KEY`) with its section, parse, test and `Debug` lines.
@@ -78,6 +85,7 @@ Through the samples MCP server: `get_sample auth-password` (or `auth-magic-link`
 
 ## Do not change
 
+- `static/auth.js` loads from the app layout on every page, once, and only listens on `document`, so it works after boosted links and htmx swaps (`auth_js_loads_from_the_layout_on_every_page`, `app_pages_load_no_scripts_or_stylesheets_in_their_head_block`, and in a browser `tools/e2e.sh`).
 - Tokens are stored as digests only and compared by digest or in constant time (`only_token_digests_are_stored`, `constant_time_eq_compares_content`).
 - Every sign-in goes through `auth::sign_in` → `finish_sign_in`, which rotates the session (`sign_in_rotates_the_session_and_kills_the_old_token`, `a_session_planted_before_sign_in_is_worthless_after_it`).
 - Production reads only `__Host-` cookies (`production_ignores_a_planted_unprefixed_session_cookie`, `production_auth_cookies_are_host_prefixed_and_secure`).
@@ -99,7 +107,7 @@ any sign-in method ──► auth::sign_in ──[samples: before sign in]──
                                                                            └ cookies + redirect to return-to (local paths only)
 ```
 
-Sign-in methods plug in through anchors in this sample's own files: `{# samples: sign in methods #}` / `sign in alternatives` in `templates/sessions/new.html`, `confirm second factor` / `confirm methods` / `confirm alternatives` in `templates/account/confirm.html`, `account fields` / `account load` / `account init` and `account sections` for the account page, `before sign in`, `step-up second factor`, `revoke everything`, `revoke other access` and `claim unverified account` (delete the method's credential when the address's owner claims an unverified account: pre-hijacking) in `controllers/auth.rs`. That is how the samples combine without editing each other.
+Sign-in methods plug in through anchors in this sample's own files: `{# samples: sign in methods #}` / `sign in alternatives` in `templates/sessions/new.html`, `confirm second factor` / `confirm methods` / `confirm alternatives` in `templates/account/confirm.html`, `account fields` / `account load` / `account init` and `account sections` for the account page, `before sign in`, `step-up second factor`, `revoke everything`, `revoke other access` and `claim unverified account` (delete the method's credential when the address's owner claims an unverified account: pre-hijacking) in `controllers/auth.rs`, and `auth events` in `models/auth_event.rs` (`record`: every audit event, where dev-dashboard's optional wire feeds its brute-force and credential-stuffing detectors). That is how the samples combine without editing each other.
 
 Emails go out through `state.background` (no job queue needed): the request returns immediately, the task mints its token and sends. `app.settle()` waits for them in tests.
 
@@ -137,7 +145,7 @@ Emails go out through `state.background` (no job queue needed): the request retu
 | `src/mailers/auth_mailer.rs` | one template pair for every auth email; security notices |
 | `src/tasks/auth_cleanup.rs`, `src/tasks/auth_demo.rs` | cleanup; development demo accounts |
 | `templates/…` | sign-in, account, confirm, email change, not-me, check-email, invalid-link, nav, dev hint, mail |
-| `static/auth.js` | show/hide password, Caps Lock hint, one-time-code auto-submit, copy, print |
+| `static/auth.js` | show/hide password, Caps Lock hint, one-time-code auto-submit, copy, print: delegated `document` listeners, loaded once by the layout |
 | `migration/src/m20261016_0010…_0013…` | users, sessions, user_tokens, auth_events + auth_throttles |
 | `tests/app/auth_core_test.rs` | the tests named in CHECKS.md, plus `LogCapture` |
 | `screenshots.mjs` (not installed) | the screenshots for all four auth samples |

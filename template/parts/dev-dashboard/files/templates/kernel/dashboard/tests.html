@@ -26,7 +26,7 @@
 </dl>
 <div class="grid two">
   <section class="panel" aria-labelledby="t-trend">
-    <header><h2 id="t-trend">Duration, last {{ trend.len() }} runs</h2><span class="muted">red: a failure</span></header>
+    <header><h2 id="t-trend">Duration, last {{ crate::kernel::dashboard::web::count(trend.len(), "run", "runs") }}</h2><span class="muted">red: a failure</span></header>
     <svg class="bars" viewBox="0 0 600 120" role="img" aria-label="Run durations, oldest to newest" focusable="false">{% for b in trend %}<rect class="b-{{ b.class }}" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="2"><title>{{ b.label }}</title></rect>{% endfor %}</svg>
     <details class="data pad"><summary>Data table</summary><div class="scroll" tabindex="0" role="region" aria-label="Table"><table><thead><tr><th scope="col">Run</th><th scope="col">Duration</th><th scope="col">Result</th></tr></thead><tbody>{% for (id, dur, res) in trend_table %}<tr><td class="mono">{{ id }}</td><td>{{ dur }}</td><td>{{ res }}</td></tr>{% endfor %}</tbody></table></div></details>
   </section>

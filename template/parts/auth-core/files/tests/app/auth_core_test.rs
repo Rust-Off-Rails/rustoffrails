@@ -103,6 +103,25 @@ async fn the_account_page_needs_a_session_and_remembers_where_you_were_going() {
         .assert_contains("Where you're signed in");
 }
 
+/// Links are boosted: a page reached by a boosted click runs nothing in its own `<head>`, so the
+/// layout loads `static/auth.js` on every app page (the home page has no auth markup at all), by
+/// digest, and the script binds once however often it loads.
+#[tokio::test]
+async fn auth_js_loads_from_the_layout_on_every_page() {
+    let app = TestApp::new().await;
+    for path in ["/", "/session/new"] {
+        let page = app.get(path).await;
+        page.assert_ok();
+        let tags = page
+            .body
+            .matches(r#"<script src="/static/auth.js?v="#)
+            .count();
+        assert_eq!(tags, 1, "{path}: one digested auth.js tag");
+    }
+    let source = std::fs::read_to_string("static/auth.js").unwrap();
+    assert!(source.contains("if (window.offrailsAuth) return;"));
+}
+
 #[tokio::test]
 async fn htmx_requests_without_a_session_get_hx_redirect() {
     let app = TestApp::new().await;
@@ -1157,9 +1176,21 @@ fn every_session_ending_path_calls_sessions_ended() {
         "sessions_ended(s,",
         "sessions_ended(state,",
     ];
+    // Every controller file, subfolders included (an app may group them: controllers/admin/…).
+    fn rust_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                rust_files(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    rust_files(std::path::Path::new("src/controllers"), &mut files);
     let mut checked = 0;
-    for entry in std::fs::read_dir("src/controllers").unwrap() {
-        let path = entry.unwrap().path();
+    for path in files {
         let src = std::fs::read_to_string(&path).unwrap();
         for f in src
             .split("\nasync fn ")

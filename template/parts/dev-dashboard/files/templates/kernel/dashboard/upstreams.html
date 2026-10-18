@@ -1,0 +1,54 @@
+{% extends "kernel/dashboard/_layout.html" %}
+{% block dash %}
+<header class="dash-head">
+  <h1>Upstreams <span class="muted">the APIs this app calls</span></h1>
+  {% if !services.is_empty() %}<nav class="segmented" aria-label="Service"><a href="{{ base }}/upstreams"{% if service.is_empty() %} aria-current="true"{% endif %}>All</a>{% for (s, href, cur) in services %}<a href="{{ href }}"{% if *cur %} aria-current="true"{% endif %}>{{ s }}</a>{% endfor %}</nav>{% endif %}
+</header>
+<p class="hint">Every call made through <code>kernel::outbound</code> (THE way this app calls an API: a timeout, safe retries, <code>traceparent</code>, a span), per service, method and route template: latency against its SLO, failures, timeouts and retries, and the app routes that wait for it. Click a service for the traces that called it.</p>
+{% if rows.is_empty() %}
+<div class="welcome"><p><strong>No outbound calls yet.</strong> Call your APIs through <code>Outbound::new("payments", &amp;config.payments_url)</code> (README "Calling other APIs"), or run the load lab's <a href="{{ base }}/lab#lab-upstreams">Checkout fan-out</a>: a page that calls four simulated APIs.</p></div>
+{% else %}
+<section class="panel" aria-labelledby="up-map-title">
+  <header><h2 id="up-map-title">Dependency map</h2><span class="muted">app routes → upstreams · thicker: more calls · color: health</span></header>
+  <div class="pad up-map-wrap">
+    <svg class="up-map" viewBox="0 0 {{ map_w }} {{ map.height }}" role="group" aria-label="Dependency map: app routes on the left, the APIs they call on the right (the same as text below)">
+      {% for e in map.edges %}<path class="up-edge h-{{ e.class }}" d="{{ e.d }}" stroke-width="{{ e.width }}"><title>{{ e.title }}</title></path>{% endfor %}
+      {% for n in map.routes %}<a href="{{ n.href }}"><rect class="up-node route" x="{{ n.x }}" y="{{ n.y }}" width="{{ n.w }}" height="36" rx="7"/><text class="up-label" x="{{ n.tx }}" y="{{ n.ty }}">{{ n.label }}</text><text class="up-sub" x="{{ n.tx }}" y="{{ n.ty }}" dy="13">{{ n.sub }}</text></a>{% endfor %}
+      {% for n in map.ups %}<a href="{{ n.href }}"><rect class="up-node h-{{ n.class }}" x="{{ n.x }}" y="{{ n.y }}" width="{{ n.w }}" height="36" rx="7"/><text class="up-label" x="{{ n.tx }}" y="{{ n.ty }}">{{ n.label }}</text><text class="up-sub" x="{{ n.tx }}" y="{{ n.ty }}" dy="13">{{ n.sub }}</text></a>{% endfor %}
+    </svg>
+    <ul class="up-legend"><li><span class="sw h-ok" aria-hidden="true"></span>healthy</li><li><span class="sw h-warn" aria-hidden="true"></span>past its SLO, flaky, or no timeout</li><li><span class="sw h-err" aria-hidden="true"></span>failing or very slow</li></ul>
+    <details class="up-text"><summary>The map as text</summary><ul class="plain">{% for l in map.lines %}<li>{{ l }}</li>{% endfor %}</ul></details>
+  </div>
+</section>
+{% if !seq.is_empty() %}
+<section class="panel" aria-labelledby="up-seq-title">
+  <header><h2 id="up-seq-title">Calls that could run concurrently</h2><span class="muted">one after another, each starting as the previous one ended</span></header>
+  <ul class="plain pad">{% for (route, text, href) in seq %}<li><strong class="mono">{{ route }}</strong>: {{ text }}. <a href="{{ href }}">Its waterfall</a></li>{% endfor %}</ul>
+</section>
+{% endif %}
+<section class="panel" aria-labelledby="up-table-title">
+  <header><h2 id="up-table-title">Upstreams</h2>{% if dropped > 0 %}<span class="muted">{{ crate::kernel::dashboard::web::count(dropped, "call", "calls") }} to further upstreams counted, not kept</span>{% endif %}</header>
+  <div class="scroll" tabindex="0" role="region" aria-label="Upstreams table"><table class="data-table up-table">
+    <caption class="visually-hidden">Each upstream with its calls, latency percentiles against its SLO, error and timeout rates, retries, timeout, callers and trend</caption>
+    <thead><tr><th scope="col">Upstream</th><th scope="col" class="num">Calls</th><th scope="col" class="num">p50</th><th scope="col" class="num">p95</th><th scope="col" class="num">p99</th><th scope="col" class="num">Errors</th><th scope="col" class="num">Timeouts</th><th scope="col" class="num">Retries</th><th scope="col" class="num">Timeout</th><th scope="col">Called by</th><th scope="col">Last 30 min</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr class="h-row-{{ r.health }}">
+        <th scope="row"><span class="badge tone-{{ r.health }}">{% if r.health == "ok" %}healthy{% else if r.health == "warn" %}watch{% else %}failing{% endif %}</span> <a class="mono" href="{{ r.traces }}">{{ r.service }} <span class="method m-{{ r.method }}">{{ r.method }}</span> {{ r.route }}</a><span class="sub mono">{{ r.host }} · last {{ r.last }}</span></th>
+        <td class="num">{{ r.calls }}</td>
+        <td class="num">{{ r.p50 }}</td>
+        <td class="num">{% if r.over_slo %}<span class="badge tone-warn" title="SLO {{ r.slo }}">{{ r.p95 }}</span>{% else %}{{ r.p95 }}{% endif %}<span class="sub">SLO {{ r.slo }}</span></td>
+        <td class="num">{{ r.p99 }}</td>
+        <td class="num">{{ r.errors }}</td>
+        <td class="num">{{ r.timeouts }}</td>
+        <td class="num">{{ r.retries }}</td>
+        <td class="num">{% if r.timeout == "none" %}<span class="badge tone-warn">none</span>{% else %}{{ r.timeout }}{% endif %}</td>
+        <td class="small">{% for (label, href, note) in r.callers %}<a class="mono" href="{{ href }}">{{ label }}</a> <span class="muted">{{ note }}</span>{% if !loop.last %}<br>{% endif %}{% endfor %}</td>
+        <td><svg class="spark small" viewBox="0 0 120 32" preserveAspectRatio="none" role="img" aria-label="Calls per minute, last 30 minutes"><path class="spark-area" d="{{ r.spark.area }}"/><path class="spark-line" d="{{ r.spark.d }}"/></svg></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% endif %}
+{% endblock %}

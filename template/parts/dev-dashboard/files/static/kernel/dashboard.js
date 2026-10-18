@@ -29,6 +29,9 @@
     const apply = (key, html) => {
       const el = document.querySelector(`[data-live="${key}"]`);
       if (!el) return;
+      // The traces explorer holds its list while a row is open or being scrolled
+      // (dashboard-trace.js sets data-live-hold); the next update after that applies.
+      if (el.hasAttribute("data-live-hold")) return;
       // Keep open <details> (a chart's data table) open across updates.
       const open = [...el.querySelectorAll("details[open]")].map((d) => d.closest("[id]")?.id);
       el.innerHTML = html;
@@ -343,6 +346,38 @@
     if (cursorT !== null) sync(cursorT, null);
   }
   bindCharts(document);
+
+  // ---- the AI command center (overview): open unless this browser collapsed it ----
+  const cc = document.querySelector("[data-cc]");
+  if (cc) {
+    const KEY = "dashboard-cc-collapsed";
+    try {
+      if (localStorage.getItem(KEY) === "1") cc.open = false;
+    } catch {
+      // Storage blocked: it stays open.
+    }
+    cc.addEventListener("toggle", () => {
+      try {
+        if (cc.open) localStorage.removeItem(KEY);
+        else localStorage.setItem(KEY, "1");
+      } catch {
+        // Not remembered; nothing else changes.
+      }
+    });
+    // The prompt box's placeholder cycles through the suggestions (not while typing, not with
+    // reduced motion, not when hidden).
+    const q = cc.querySelector("[data-cc-question]");
+    const prompts = [...cc.querySelectorAll("[data-ai-prompt]")].map((b) => b.textContent.trim()).filter(Boolean);
+    if (q && prompts.length && !reduced.matches) {
+      const base = q.getAttribute("placeholder") || "";
+      let i = -1;
+      setInterval(() => {
+        if (document.hidden || document.activeElement === q || q.value || !cc.open) return;
+        i = (i + 1) % (prompts.length + 1);
+        q.setAttribute("placeholder", i === prompts.length ? base : `Try: ${prompts[i]}`);
+      }, 4000);
+    }
+  }
 
   // Ask AI lives in dashboard-ai.js (also loaded on other kernel pages for the Ask AI bar).
 })();

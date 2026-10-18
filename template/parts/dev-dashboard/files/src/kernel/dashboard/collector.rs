@@ -177,15 +177,20 @@ impl Collector {
         let mut series = lock(&HUB.series);
         let burst = sample.e5 >= ERROR_BURST;
         if burst && !self.burst {
-            series.annotate(Annotation {
+            let a = Annotation {
                 t: sample.t,
                 kind: "errors",
                 label: format!("error burst ({:.0} server errors/s)", sample.e5),
                 demo: false,
-            });
+            };
+            super::history::record_mark(&a);
+            series.annotate(a);
         }
         self.burst = burst;
-        series.push(sample, &tick.latency, &tick.sql_latency);
+        if let Some(minute) = series.push(sample, &tick.latency, &tick.sql_latency) {
+            // Off the lock's critical path: a channel send, the history thread writes it.
+            super::history::record_minute(minute, false);
+        }
     }
 }
 

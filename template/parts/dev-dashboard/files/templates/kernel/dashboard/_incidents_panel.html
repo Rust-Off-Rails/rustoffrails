@@ -1,0 +1,7 @@
+{# The overview's latest incident cards (a live fragment), or nothing. #}
+{% if !incidents.is_empty() %}
+<section class="panel" aria-labelledby="ov-incidents">
+  <header><h2 id="ov-incidents">Incidents</h2><a href="{{ base }}/insights#incidents">All incidents</a></header>
+  <div class="pad">{% include "kernel/dashboard/_incidents.html" %}</div>
+</section>
+{% endif %}

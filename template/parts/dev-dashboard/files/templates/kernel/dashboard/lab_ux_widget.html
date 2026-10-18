@@ -1,0 +1,17 @@
+{% extends "layouts/application.html" %}
+{% block content %}
+<section class="py-6" data-rum-lab{% if simulate %} data-lab-simulate{% endif %}>
+  <h1 class="text-2xl font-semibold tracking-tight">Lab: a widget</h1>
+  <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">The recovery code is hidden until you press Show. After a boosted link here, Show does nothing (dead clicks); after a reload it works. <a href="/dev/lab/ux" class="underline">Back to UX trouble</a></p>
+  <div class="mt-4 rounded-md border border-gray-200 p-4 dark:border-gray-800">
+    <p class="font-mono" id="lab-code" hidden>LAB-CODE-0000</p>
+    <button type="button" id="show-code" data-lab-show class="rounded-md border border-gray-400 px-3 py-1.5 text-sm">Show</button>
+  </div>
+</section>
+{# The planted mistake: this script waits for DOMContentLoaded to bind the button. On a full load
+   that event is still to come; after an hx-boost link htmx runs the script in the swapped body,
+   long after the event fired, so the button stays dead (the same class as a script in a page's
+   head block, which a boosted link never runs at all). #}
+<script src="{{ widget }}" defer></script>
+<script src="{{ script }}" defer></script>
+{% endblock %}

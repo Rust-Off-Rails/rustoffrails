@@ -1,6 +1,6 @@
 {% extends "kernel/dashboard/_layout.html" %}
 {% block dash %}
-<header class="dash-head"><h1><span class="mono">{{ t.name }}</span> <span class="muted">{{ t.rows }} rows{% if !t.size.is_empty() %} · {{ t.size }}{% endif %}</span></h1><a href="/dev/dashboard/schema#table-{{ t.name }}">← Schema</a></header>
+<header class="dash-head"><h1><span class="mono">{{ t.name }}</span> <span class="muted">{{ crate::kernel::dashboard::web::count(t.rows, "row", "rows") }}{% if !t.size.is_empty() %} · {{ t.size }}{% endif %}</span></h1><a href="/dev/dashboard/schema#table-{{ t.name }}">← Schema</a></header>
 {# The block the diagram shows beside itself when this table is clicked (dashboard-erd.js). #}
 <div class="table-detail" data-table-detail>
   <p class="detail-meta"><span class="badge tone-muted">{{ t.area }}</span> {{ t.columns.len() }} column{% if t.columns.len() != 1 %}s{% endif %} · {{ t.indexes.len() }} index{% if t.indexes.len() != 1 %}es{% endif %} · {{ parents.len() }} parent{% if parents.len() != 1 %}s{% endif %} · {{ children.len() }} child table{% if children.len() != 1 %}s{% endif %}{% if d.ai_on %} · <a href="{{ d.ask_href("schema", &t.name) }}">Ask AI about this table</a>{% endif %} · <a href="/dev/dashboard/schema/tables/{{ t.name }}">Open its page</a></p>

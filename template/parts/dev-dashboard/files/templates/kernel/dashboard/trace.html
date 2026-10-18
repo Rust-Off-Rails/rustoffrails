@@ -2,35 +2,10 @@
 {% block dash %}
 <header class="dash-head trace-head">
   <h1><span class="method m-{{ t.method }}">{{ t.method }}</span> <span class="mono">{{ t.path }}</span></h1>
-  <p class="trace-facts"><span class="badge tone-{{ tone }}">{{ t.status }}</span> <strong>{{ dur }}</strong> · route <a class="mono" href="{{ base }}/traces?route={{ t.route|urlencode }}">{{ t.route }}</a> · {{ t.statements }} SQL in {{ sql_total }} · {{ when }}{% if !t.request_id.is_empty() %} · request <span class="mono">{{ t.request_id }}</span>{% endif %}{% if d.ai_on %} · <a href="{{ d.ask_href("traces", &t.id.to_string()) }}">Ask AI why it took {{ dur }}</a>{% endif %}</p>
+  <p class="trace-facts"><span class="badge tone-{{ tone }}">{{ t.status }}</span>{% if t.kind != "request" %} <span class="badge tone-info">{{ t.kind }}</span>{% endif %} {% if t.kind == "request" %}route{% else %}worker{% endif %} <a class="mono" href="{{ similar }}">{{ t.route }}</a> · {{ when }}{% if !t.request_id.is_empty() %} · {% if t.kind == "request" %}request{% else %}run{% endif %} <span class="mono">{{ t.request_id }}</span>{% endif %}{% if d.ai_on %} · <a href="{{ d.ask_href("traces", &t.id.to_string()) }}">Ask AI why it took {{ w.total }}</a>{% endif %}</p>
 </header>
-{% if !n_plus_one.is_empty() %}
-<div class="callout warn" role="note">
-  <h2>N+1</h2>
-  {% for (fp, n, s) in n_plus_one %}<p>This request ran <strong>{{ n }}×</strong> <a href="{{ base }}/sql/{{ fp }}"><code>{{ s }}</code></a>. Load the rows in one query (<code>load_many</code>, or <code>is_in(ids)</code>).</p>{% endfor %}
-</div>
-{% endif %}
 <section class="panel" aria-labelledby="wf-title">
-  <header><h2 id="wf-title">Waterfall</h2><span class="muted">request → spans → SQL → events{% if t.dropped > 0 %} · {{ t.dropped }} more not kept{% endif %}</span></header>
-  <div class="scroll" tabindex="0" role="region" aria-label="Table"><table class="waterfall">
-    <caption class="visually-hidden">Spans, SQL statements and events of this request, in start order, with start offset and duration</caption>
-    <thead><tr><th scope="col">Step</th><th scope="col" class="num">Start</th><th scope="col" class="num">Duration</th><th scope="col" class="wf-axis"><span class="visually-hidden">Timeline</span><span class="ticks" aria-hidden="true">{% for (_, l) in ticks %}<span>{{ l }}</span>{% endfor %}</span></th></tr></thead>
-    <tbody>
-    {% for r in rows %}
-      <tr class="wf-{{ r.kind }}{% if r.flagged %} flagged{% endif %}">
-        <th scope="row" class="wf-name depth-{{ r.depth }}"><span class="kind">{{ r.label }}</span> <span class="detail">{% if !r.fp_hex.is_empty() %}<a href="{{ base }}/sql/{{ r.fp_hex }}">{{ r.detail }}</a>{% else %}{{ r.detail }}{% endif %}</span></th>
-        <td class="num">{{ r.start }}</td>
-        <td class="num">{{ r.dur }}</td>
-        <td class="wf-bar"><svg viewBox="0 0 1000 12" preserveAspectRatio="none" aria-hidden="true" focusable="false">{% for (x, _) in ticks %}<line class="tick" x1="{{ x }}" x2="{{ x }}" y1="0" y2="12"/>{% endfor %}<rect x="{{ r.x }}" y="2" width="{{ r.w }}" height="8" rx="2"/></svg></td>
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table></div>
+  <header><h2 id="wf-title">Waterfall</h2><span class="muted">request → handler → methods → SQL, events on their span</span></header>
+  {% include "kernel/dashboard/_waterfall.html" %}
 </section>
-{% if !sql.is_empty() %}
-<section class="panel" aria-labelledby="tsql">
-  <header><h2 id="tsql">SQL in this request</h2><span class="muted">{{ sql.len() }} kept of {{ t.statements }}</span></header>
-  <ol class="sql-list numbered">{% for q in sql %}<li{% if q.flagged %} class="flagged"{% endif %}><a href="{{ base }}/sql/{{ q.fp }}"><code>{{ q.sql }}</code></a><span class="muted">{{ q.dur }} at {{ q.at }}</span></li>{% endfor %}</ol>
-</section>
-{% endif %}
 {% endblock %}

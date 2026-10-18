@@ -70,8 +70,6 @@ pub struct LiveShow {
     pub since: i64,
     pub topic: String,
     pub user_topic: String,
-    pub channels_js: String,
-    pub live_room_js: String,
     pub template_message: MessageView,
     /// The eight avatar colors, for the script.
     pub palette: Vec<u8>,

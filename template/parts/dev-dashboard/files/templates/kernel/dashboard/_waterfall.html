@@ -1,0 +1,103 @@
+{# One trace's waterfall (waterfall.rs `View`): the same component on every page that shows a trace.
+   Without JavaScript every row is listed (folded rows stay hidden; "Every row" lists them all);
+   dashboard-trace.js folds and unfolds, opens the side panel, and moves the keyboard. #}
+<div class="wfc{% if w.compact %} compact{% endif %}" id="wf{{ w.id }}" data-waterfall="{{ w.id }}" data-base="{{ w.base }}">
+  <svg class="defs" aria-hidden="true" focusable="false"><defs><pattern id="wf-hatch-{{ w.id }}" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect class="hatch-bg" width="6" height="6"/><line class="hatch" x1="0" y1="0" x2="0" y2="6"/></pattern></defs></svg>
+  {% if !w.compact %}
+  <section class="wf-summary" aria-label="Where the time went">
+    <p class="wf-facts"><strong class="wf-total">{{ w.total }}</strong>
+      <span>{{ w.queries }} {% if w.queries == 1 %}query{% else %}queries{% endif %}</span>
+      {% if !w.n_plus_one.is_empty() %}<span class="badge tone-warn">{{ w.n_plus_one.len() }} N+1</span>{% endif %}
+      {% if !w.slowest.is_empty() %}<span class="muted">slowest: <span class="mono">{{ w.slowest }}</span></span>{% endif %}
+      {% if w.from_disk %}<span class="badge tone-info" title="Read back from the history file: recorded by an earlier run">from disk</span>{% endif %}
+    </p>
+    {% if !w.split.is_empty() %}
+    <svg class="wf-split" width="100%" height="14" role="img" aria-label="Time by kind: {% for (_, label, share, _, _) in w.split %}{{ label }} {{ share }}{% if !loop.last %}, {% endif %}{% endfor %}">{% for (k, label, share, x, width) in w.split %}<rect class="k-{{ k }}" x="{{ x }}" y="0" width="{{ width }}" height="14"><title>{{ label }}: {{ share }}</title></rect>{% endfor %}</svg>
+    <ul class="wf-legend">{% for (k, label, share, _, _) in w.split %}<li><span class="sw k-{{ k }}" aria-hidden="true"></span>{{ label }} <strong>{{ share }}</strong></li>{% endfor %}</ul>
+    {% endif %}
+  </section>
+  {% for n in w.n_plus_one %}
+  <div class="callout warn wf-n1" role="note">
+    <p><strong>N+1:</strong> <code class="mono">{{ n.summary }}</code> ran <strong>{{ n.count }}×</strong> in this {% if w.kind == "request" %}request{% else %}{{ w.kind }}{% endif %}. {% if !n.row.is_empty() %}<a href="#{{ n.row }}" data-wf-reveal="{{ n.row }}">Show the {{ crate::kernel::dashboard::web::count(n.count, "query", "queries") }}</a> · {% endif %}<a href="{{ w.base }}/sql/{{ n.fp }}">its SQL page</a></p>
+    <details class="wf-fix"><summary>Suggested fix</summary>
+<pre class="code"><code>// One query for every parent instead of one per parent:
+let ids: Vec&lt;i64&gt; = parents.iter().map(|p| p.id).collect();
+let rows = {{ n.table }}::Entity::find()
+    .filter({{ n.table }}::Column::{{ n.variant }}.is_in(ids))
+    .all(&amp;db)
+    .await?;
+// then group `rows` by {{ n.column }} in memory (or use SeaORM's load_many).</code></pre>
+    </details>
+  </div>
+  {% endfor %}
+  {% if let Some(q) = w.seq %}
+  <div class="callout warn wf-seq" role="note">
+    <p><strong>Sequential calls:</strong> these {{ q.count }} outbound calls in <span class="mono">{{ q.parent }}</span> run one after another; running them concurrently would save <strong>~{{ q.saving }}</strong> ({{ q.longest }} instead of {{ q.total }}).</p>
+    <p class="small">Critical path: <span class="mono">{{ q.path }}</span></p>
+    <details class="wf-fix"><summary>Suggested fix</summary>
+<pre class="code"><code>// Independent calls start together; the slowest one sets the time:
+let (stock, price, rates) = tokio::join!(
+    inventory.get("/items/42").send(),
+    pricing.get("/quote").send(),
+    shipping.post("/rates").json(&amp;parcel).send(),
+);</code></pre>
+    </details>
+  </div>
+  {% else if w.concurrent >= 2 %}
+  <p class="hint wf-par" role="note">{{ w.concurrent }} outbound calls ran concurrently: the slowest one sets the time.</p>
+  {% endif %}
+  {% endif %}
+  <div class="wf-toolbar" role="toolbar" aria-label="Waterfall">
+    <button type="button" class="btn quiet" data-wf-act="expand" hidden>Expand all</button>
+    <button type="button" class="btn quiet" data-wf-act="collapse" hidden>Collapse all</button>
+    <button type="button" class="btn quiet" data-wf-act="sql" aria-pressed="true" hidden>Collapse repeated SQL</button>
+    {% if !w.all %}<a class="btn quiet" data-wf-nojs href="{{ w.base }}/traces/{{ w.id }}?all=1">Every row</a>{% endif %}
+    <button type="button" class="btn quiet" data-wf-copy="{{ w.base }}/traces/{{ w.id }}/json" hidden>Copy as JSON</button>
+    <a class="btn quiet" href="{{ w.base }}/traces/{{ w.id }}/json">JSON</a>
+    {% if w.compact %}<a class="btn quiet" href="{{ w.base }}/traces/{{ w.id }}">Permalink</a>{% endif %}
+    <ul class="wf-keys" aria-label="Colors">{% for (k, label) in w.keys %}{% if k != &"request" %}<li><span class="sw k-{{ k }}" aria-hidden="true"></span>{{ label }}</li>{% endif %}{% endfor %}<li><span class="sw gap" aria-hidden="true"></span>uninstrumented</li></ul>
+  </div>
+  <div class="wf-body">
+    <div class="scroll wf-scroll" tabindex="0" role="region" aria-label="Waterfall of trace {{ w.id }}">
+      <table class="wf-table">
+        <caption class="visually-hidden">Spans, SQL statements and events of this {{ w.kind }}, nested, with start offset and duration. Folded rows open with their button.</caption>
+        <thead><tr><th scope="col" class="wf-h-name">Step</th><th scope="col" class="num wf-h-dur">Duration</th><th scope="col" class="wf-h-axis"><span class="visually-hidden">Timeline</span><svg class="wf-ticks" width="100%" height="14" aria-hidden="true" focusable="false">{% for (x, l) in w.ticks %}<text x="{{ x }}" y="11" class="{% if loop.first %}first{% else if loop.last %}last{% endif %}">{{ l }}</text>{% endfor %}</svg></th></tr></thead>
+        <tbody>
+        {% for r in w.rows %}
+          <tr id="{{ r.id }}" class="wf-row k-{{ r.kind }}{% if r.flagged %} flagged{% endif %}{% if r.failed %} failed{% endif %}{% if r.timeout %} timeout{% endif %}{% if r.critical %} crit{% endif %}{% if r.group %} grp{% endif %}" data-parent="{{ r.parent }}" data-kind="{{ r.kind }}"{% if r.group %} data-group{% endif %}{% if r.hidden %} data-folded hidden{% endif %}>
+            <th scope="row" class="wf-name d{{ r.depth }}">
+              {% if r.has_children %}<button type="button" class="wf-caret" aria-expanded="{% if r.collapsed %}false{% else %}true{% endif %}" aria-label="{% if r.collapsed %}Show{% else %}Hide{% endif %} what {{ r.label }} ran" data-wf-toggle="{{ r.id }}"><span aria-hidden="true">▸</span></button>{% else %}<span class="wf-caret-sp" aria-hidden="true"></span>{% endif %}<span class="sw k-{{ r.kind }}" aria-hidden="true"></span><a class="wf-label" href="#{{ r.id }}" data-wf-detail="{{ r.id }}" title="{% if r.full.is_empty() %}{{ r.label }}{% else %}{{ r.full }}{% endif %}">{{ r.label }}</a>{% if !r.host.is_empty() %}<span class="wf-host mono">{{ r.host }}</span>{% endif %}{% if r.timeout %}<span class="badge tone-err wf-to">timeout</span>{% endif %}{% if r.group %}<span class="wf-sub"> · {{ r.total }} total</span>{% endif %}{% if !r.loc.is_empty() %}<span class="wf-loc">{{ r.loc }}</span>{% endif %}
+            </th>
+            <td class="num wf-dur">{{ r.dur }}</td>
+            <td class="wf-track"><svg width="100%" height="18" aria-hidden="true" focusable="false"><line class="tick" x1="25%" x2="25%" y1="0" y2="18"/><line class="tick" x1="50%" x2="50%" y1="0" y2="18"/><line class="tick" x1="75%" x2="75%" y1="0" y2="18"/>{% for (x, wd) in r.bars %}<rect class="bar" x="{{ x }}" y="4" width="{{ wd }}" height="10" rx="2"><title>{{ r.tip }}</title></rect>{% endfor %}{% for (x, wd) in r.gaps %}<rect class="gap" x="{{ x }}" y="4" width="{{ wd }}" height="10" fill="url(#wf-hatch-{{ w.id }})"><title>uninstrumented: no span covers this time inside {{ r.label }}</title></rect>{% endfor %}{% for (x, cls, msg) in r.marks %}<rect class="ev ev-{{ cls }}" x="{{ x }}" y="1" width="3" height="16"><title>{{ msg }}</title></rect>{% endfor %}<text class="dl" x="{{ r.label_x }}" dx="{% if r.label_left %}-4{% else %}4{% endif %}" y="13"{% if r.label_left %} text-anchor="end"{% endif %}>{{ r.dur }}</text></svg></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <aside class="wf-panel" data-wf-panel hidden aria-label="Details" tabindex="-1"></aside>
+  </div>
+  {% if w.cut > 0 || w.dropped > 0 %}<p class="hint wf-trunc" role="note">Truncated: {% if w.dropped > 0 %}{{ w.dropped }} spans, statements or events past the per-trace caps weren't kept{% if w.cut > 0 %}; {% endif %}{% endif %}{% if w.cut > 0 %}{{ crate::kernel::dashboard::web::count(w.cut, "row", "rows") }} not drawn{% endif %}.</p>{% endif %}
+  {% for r in w.rows %}
+  <template id="{{ r.id }}-d">
+    <header><span class="sw k-{{ r.kind }}" aria-hidden="true"></span><h3>{{ r.label }}</h3><button type="button" class="btn quiet wf-close" data-wf-close aria-label="Close details">×</button></header>
+    <dl class="kv">
+      <dt>Kind</dt><dd>{{ r.kind }}{% if r.critical %} · on the critical path{% endif %}</dd>
+      <dt>Starts</dt><dd>{{ r.start }}</dd>
+      <dt>Duration</dt><dd>{{ r.dur }}{% if r.group %} span · {{ r.total }} total in {{ crate::kernel::dashboard::web::count(r.count, "run", "runs") }}{% else if r.has_children %} · self {{ r.selft }}{% endif %}</dd>
+      {% if !r.host.is_empty() %}<dt>Host</dt><dd class="mono">{{ r.host }}</dd>{% endif %}
+      {% if !r.module.is_empty() %}<dt>Module</dt><dd class="mono">{{ r.module }}</dd>{% endif %}
+      {% if !r.loc.is_empty() %}<dt>Source</dt><dd class="mono">{{ r.loc }}</dd>{% endif %}
+    </dl>
+    {% if !r.sql.is_empty() %}
+    <pre class="sql-hl"><code>{% for (k, t) in r.sql %}{% if k == &"nl" %}
+{% else if k.is_empty() %}{{ t }}{% else %}<span class="t-{{ k }}">{{ t }}</span>{% endif %}{% endfor %}</code></pre>
+    <p class="wf-actions"><a class="btn quiet" href="{{ w.base }}/sql/{{ r.fp }}">SQL page{% if !w.details %}{% else %} and EXPLAIN{% endif %}</a><button type="button" class="btn quiet" data-wf-copy-text="{{ r.full }}" hidden>Copy SQL</button></p>
+    {% else if !r.full.is_empty() && w.details %}
+    <p class="wf-fields mono">{{ r.full }}</p>
+    {% endif %}
+    {% if !r.events.is_empty() %}<ul class="wf-events">{% for (at, level, msg) in r.events %}<li><span class="muted">{{ at }}</span> <span class="lvl lvl-{{ level }}">{{ level }}</span> {{ msg }}</li>{% endfor %}</ul>{% endif %}
+    <p class="wf-actions">{% if w.ai %}<a class="btn quiet" href="{{ w.ask }}">Ask about this</a>{% endif %}<button type="button" class="btn quiet" data-wf-copy="{{ w.base }}/traces/{{ w.id }}/json" hidden>Copy trace as JSON</button></p>
+  </template>
+  {% endfor %}
+</div>

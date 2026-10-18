@@ -468,7 +468,7 @@ pub fn findings(report: &Report) -> Vec<Finding> {
                 "Make the schema come from migrations only: a new migration for the change, or recreate the development database (`app db reset`).".into()
             },
             guide: ".offrails/guides/migrations.md#rules",
-            guide_url: "https://rustoffrails.org/docs/migrations#rules",
+            guide_url: "https://rustoffrails.org/docs/guides/migrations#rules",
             href: "/dev/dashboard/schema/migrations".into(),
         })
         .collect();
@@ -491,7 +491,7 @@ pub fn findings(report: &Report) -> Vec<Finding> {
                 .join(", "),
             fix: "Another branch's migration ran against this database. Switch back and roll it back, or recreate the development database.".into(),
             guide: ".offrails/guides/migrations.md#rules",
-            guide_url: "https://rustoffrails.org/docs/migrations#rules",
+            guide_url: "https://rustoffrails.org/docs/guides/migrations#rules",
             href: "/dev/dashboard/schema/migrations".into(),
         });
     }

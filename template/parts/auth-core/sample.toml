@@ -65,6 +65,8 @@ text = '''
 pub current_user: Option<crate::models::user::Model>,
 /// Development with the local mailer: auth screens link to the dev mailbox.
 pub dev_mailbox: bool,
+/// `static/auth.js`, digested: the app layout loads it on every page (`samples: app head`).
+pub auth_js: String,
 '''
 
 [[wire]]
@@ -73,6 +75,15 @@ anchor = "ctx init"
 text = '''
 current_user: crate::controllers::auth::current_user(parts, state).await?,
 dev_mailbox: development && state.mailer.is_local(),
+auth_js: state.assets.path("auth.js"),
+'''
+
+[[wire]]
+file = "templates/layouts/application.html"
+anchor = "app head"
+text = '''
+{# auth-core: password reveal, Caps Lock hint, code auto-submit, copy, print (static/auth.js). Every page: links are boosted. #}
+<script src="{{ ctx.auth_js }}" defer></script>
 '''
 
 [[wire]]

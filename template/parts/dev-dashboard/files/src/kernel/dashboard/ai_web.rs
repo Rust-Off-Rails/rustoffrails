@@ -58,6 +58,7 @@ pub fn routes(base: &'static str) -> Router<AppState> {
         .route(&p("/ai/runs"), post(ai_runs))
         .route(&p("/ai/runs/{id}"), get(run_page))
         .route(&p("/ai/runs/{id}/stream"), get(run_stream))
+        .route(&p("/ai/runs/{id}/continue"), post(run_continue))
         .route(&p("/ai/history"), get(history_page))
 }
 
@@ -101,7 +102,7 @@ pub fn bar(path_and_query: &str) -> Option<Bar> {
 }
 
 /// `/static/<key>?v=<digest>` (development only, so hashing the one small file is fine).
-fn asset(key: &str) -> String {
+pub fn asset(key: &str) -> String {
     use sha2::{Digest, Sha256};
     match std::fs::read(std::path::Path::new("static").join(key)) {
         Ok(bytes) => {
@@ -124,6 +125,8 @@ pub struct AiQuery {
     /// A kernel page's path (the Ask AI bar): resolved with `Tab::for_page`.
     page: Option<String>,
     wait: Option<String>,
+    /// The run stream's first step to send (the ones before are on the page).
+    from: Option<usize>,
 }
 
 /// The panel: how to enable it, or the prepared first request's preview, the prompts, the form.
@@ -133,6 +136,8 @@ pub struct AiPanel {
     pub tab: &'static str,
     pub tab_label: &'static str,
     pub item: String,
+    /// The item in words ("N+1 on /orders", "the lab_orders table"), never a raw id alone.
+    pub item_title: String,
     pub provider: &'static str,
     pub model: String,
     pub endpoint: String,
@@ -175,7 +180,7 @@ pub struct RunView {
     pub question: String,
     pub status: &'static str,
     pub status_text: String,
-    pub steps: Vec<Step>,
+    pub steps: Vec<StepView>,
     pub blocks: Vec<ai::Block>,
     pub note: String,
     pub error: Option<String>,
@@ -184,6 +189,8 @@ pub struct RunView {
     pub fix_prompt: String,
     pub sent: String,
     pub when: String,
+    /// The answer was cut and the run is in memory: the Continue button shows.
+    pub can_continue: bool,
 }
 
 impl RunView {
@@ -208,7 +215,37 @@ impl RunView {
             fix_prompt: String::new(),
             sent: String::new(),
             when: String::new(),
+            can_continue: false,
         }
+    }
+}
+
+/// A step as the page shows it: what the model said before the call goes through the same
+/// renderer as the answer (escaped Markdown, citations as chips), never as raw text.
+pub struct StepView {
+    pub n: usize,
+    pub title: String,
+    pub call: String,
+    pub note: Vec<ai::Block>,
+    pub result: String,
+    pub is_error: bool,
+    pub ms: u64,
+}
+
+pub fn step_view(s: &Step, base: &str) -> StepView {
+    let base = if base.is_empty() {
+        "/dev/dashboard"
+    } else {
+        base
+    };
+    StepView {
+        n: s.n,
+        title: s.title.clone(),
+        call: s.call.clone(),
+        note: ai::render_in(&s.note, base, chrono::Utc::now().timestamp()),
+        result: s.result.clone(),
+        is_error: s.is_error,
+        ms: s.ms,
     }
 }
 
@@ -276,8 +313,9 @@ pub fn run_view(rec: &Record, live: bool) -> RunView {
     RunView {
         id: rec.id.clone(),
         live,
+        // `from`: the steps the page already shows, so the stream doesn't repeat them.
         stream: if live {
-            format!("{base}/ai/runs/{}/stream", rec.id)
+            format!("{base}/ai/runs/{}/stream?from={}", rec.id, rec.steps.len())
         } else {
             String::new()
         },
@@ -291,7 +329,7 @@ pub fn run_view(rec: &Record, live: bool) -> RunView {
         },
         status: rec.status.key(),
         status_text,
-        steps: rec.steps.clone(),
+        steps: rec.steps.iter().map(|s| step_view(s, &base)).collect(),
         blocks: answer_blocks(&rec.answer, &base),
         note: rec.note.clone(),
         error,
@@ -316,6 +354,7 @@ pub fn run_view(rec: &Record, live: bool) -> RunView {
         fix_prompt: ai_agent::fix_prompt(rec).unwrap_or_default(),
         sent: rec.sent.clone(),
         when: ui::ago(rec.started, chrono::Utc::now()),
+        can_continue: !live && rec.cut && ai_agent::get(&rec.id).is_some_and(|r| r.can_continue()),
         base,
     }
 }
@@ -335,7 +374,7 @@ struct RunFragment {
 #[derive(Template)]
 #[template(path = "kernel/dashboard/_ai_step.html")]
 struct StepFragment {
-    s: Step,
+    s: StepView,
 }
 
 #[derive(Template)]
@@ -449,16 +488,51 @@ fn resolve(q: &AiQuery, default_tab: Option<&str>) -> Result<(Tab, Option<String
 }
 
 /// The first request's body for a prepared context (the preview, and the first call).
-fn first_body(state: &AppState, mode: Mode, p: &ai::Prepared, question: &str) -> serde_json::Value {
+pub fn first_body(
+    state: &AppState,
+    mode: Mode,
+    p: &ai::Prepared,
+    question: &str,
+) -> serde_json::Value {
     let cfg = &state.config.dashboard.ai;
     let tools = super::ai_tools::enabled(mode.ro, cfg.tools_core);
-    ai::request(
+    ai::cached(
         cfg,
-        &p.system,
-        &[ai::user_turn(&ai::user_message(p, question))],
-        &super::ai_tools::definitions(cfg.provider, &tools),
-        ai::ToolChoice::Auto,
+        ai::request(
+            cfg,
+            &p.system,
+            &[ai::user_turn(&ai::user_message(p, question))],
+            &super::ai_tools::definitions(cfg.provider, &tools),
+            ai::ToolChoice::Auto,
+        ),
+        false,
     )
+}
+
+/// What a page's item is, in words, for the panel's and the page's heading.
+pub async fn item_title(state: &AppState, tab: Tab, item: &str) -> String {
+    let t = match tab {
+        Tab::Insights => super::web::all_findings(state, &Default::default())
+            .await
+            .into_iter()
+            .find(|f| f.id == item)
+            .map_or_else(|| "a finding".to_owned(), |f| f.title),
+        Tab::Sql => lock(&super::HUB.sql)
+            .rows(super::sql::Sort::Count)
+            .into_iter()
+            .find(|r| r.id == item)
+            .map_or_else(
+                || "a query".to_owned(),
+                |r| format!("the query {}", ui::truncate(&r.sql, 60)),
+            ),
+        Tab::Traces => format!("trace {item}"),
+        Tab::Schema => format!("the {item} table"),
+        Tab::Mailbox => format!("email {item}"),
+        Tab::Jobs if item == "errors" => "the job errors".to_owned(),
+        Tab::Jobs => format!("job {item}"),
+        _ => item.to_owned(),
+    };
+    ui::truncate(&t, 90)
 }
 
 /// Builds the context for `tab`, stores it for the Ask button; the panel shows its preview.
@@ -478,6 +552,10 @@ pub async fn panel_for(
         tab: tab.key(),
         tab_label: tab.label(),
         item: item.clone().unwrap_or_default(),
+        item_title: match item.as_deref() {
+            Some(i) => item_title(state, tab, i).await,
+            None => String::new(),
+        },
         provider: provider_label(cfg),
         model: cfg.model.clone(),
         endpoint: ai::endpoint(cfg),
@@ -489,7 +567,7 @@ pub async fn panel_for(
         truncated: false,
         suggestions: tab.suggestions(item.is_some()),
         question,
-        left: lock(&ai::BUDGET).left(ai::today()),
+        left: ai::budget(cfg).left(ai::today()),
         error,
         tools: tools.iter().map(|t| (t.name, t.title)).collect(),
         max_steps: ai::MAX_STEPS,
@@ -755,10 +833,14 @@ async fn run_page(
         return Err(AppError::NotFound);
     }
     let rec = if let Some(run) = ai_agent::get(&id) {
-        if !run.owned_by(cookie::get(&headers, ai_agent::OWNER_COOKIE).as_deref()) {
+        let owns = run.owned_by(cookie::get(&headers, ai_agent::OWNER_COOKIE).as_deref());
+        // SECURITY: a live run is its browser's only; once finished it is in the history every
+        // dashboard viewer sees, so its permalink opens in any browser, as a run read back from
+        // disk does (test: a_run_stream_is_bound_to_its_browser)
+        if !owns && !run.record().status.finished() {
             return Err(AppError::NotFound);
         }
-        if q.wait.is_some() {
+        if owns && q.wait.is_some() {
             ai_agent::wait(&run, NO_JS_WAIT).await;
         }
         run.record()
@@ -782,6 +864,7 @@ async fn run_stream(
     State(state): State<AppState>,
     Extension(mode): Extension<Mode>,
     Path(id): Path<String>,
+    Query(q): Query<AiQuery>,
     headers: HeaderMap,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, AppError> {
     if !ai::allowed(&state.config, mode.ro) || !ai_agent::valid_id(&id) {
@@ -792,6 +875,7 @@ async fn run_stream(
         .get("last-event-id")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse().ok())
+        .or(q.from)
         .unwrap_or(0);
     let rx = run.subscribe();
     let s = futures::stream::unfold(
@@ -804,7 +888,7 @@ async fn run_stream(
                 let rec = run.record();
                 if rec.steps.len() > sent {
                     let html = StepFragment {
-                        s: rec.steps[sent].clone(),
+                        s: step_view(&rec.steps[sent], &rec.base),
                     }
                     .render()
                     .unwrap_or_default();
@@ -834,6 +918,36 @@ async fn run_stream(
         },
     );
     Ok(Sse::new(s).keep_alive(KeepAlive::new().interval(Duration::from_secs(15))))
+}
+
+/// `POST {base}/ai/runs/{id}/continue`: one more call for a cut answer, in the same run (its
+/// browser only, like the stream). With the script it answers the run's live fragment; without,
+/// it redirects to the run's page, which waits for the end.
+async fn run_continue(
+    State(state): State<AppState>,
+    Extension(mode): Extension<Mode>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Response, AppError> {
+    if !ai::allowed(&state.config, mode.ro) || !ai_agent::valid_id(&id) {
+        return Err(AppError::NotFound);
+    }
+    let run = owned_run(&headers, &id).ok_or(AppError::NotFound)?;
+    if run.record().base != mode.base {
+        return Err(AppError::NotFound);
+    }
+    let view = match ai_agent::continue_run(&state, &run) {
+        Ok(()) => run_view(&run.record(), true),
+        Err(e) => {
+            let mut v = run_view(&run.record(), false);
+            v.error = Some(e.message());
+            v
+        }
+    };
+    if headers.contains_key("x-dashboard-fragment") {
+        return Ok(ui::page(RunFragment { r: view }));
+    }
+    Ok(Redirect::to(&format!("{}/ai/runs/{id}?wait=1", mode.base)).into_response())
 }
 
 /// `GET {base}/ai/history`: past runs, newest first (live ones included).
@@ -901,84 +1015,7 @@ pub async fn explain_page(
     })
 }
 
-// ---- the overview's health, digest and incidents ------------------------------------------------
-
-/// The overview's Health panel: a deterministic verdict, and the summary form when a provider
-/// is set (its preview is the overview's prepared context).
-pub struct HealthView {
-    pub verdict: &'static str,
-    pub tone: &'static str,
-    pub reasons: Vec<String>,
-    pub ai: bool,
-    pub configured: bool,
-    pub prepared: String,
-    pub preview: String,
-    pub base: &'static str,
-}
-
-pub async fn health_view(
-    state: &AppState,
-    mode: Mode,
-    cards: &[super::web::Card],
-    high: usize,
-    medium: usize,
-) -> HealthView {
-    let red: Vec<&str> = cards
-        .iter()
-        .filter(|c| c.tone == "err")
-        .map(|c| c.label)
-        .collect();
-    let amber: Vec<&str> = cards
-        .iter()
-        .filter(|c| c.tone == "warn")
-        .map(|c| c.label)
-        .collect();
-    let idle = cards.iter().all(|c| c.tone == "idle" || c.key == "uptime");
-    let (verdict, tone) = if idle {
-        ("No traffic yet", "idle")
-    } else if !red.is_empty() || high > 0 {
-        ("Unhealthy", "err")
-    } else if !amber.is_empty() || medium > 0 {
-        ("Needs attention", "warn")
-    } else {
-        ("Healthy", "ok")
-    };
-    let mut reasons = Vec::new();
-    if !red.is_empty() {
-        reasons.push(format!("Red: {}", red.join(", ")));
-    }
-    if !amber.is_empty() {
-        reasons.push(format!("Amber: {}", amber.join(", ")));
-    }
-    if high + medium > 0 {
-        reasons.push(format!("{high} high and {medium} medium findings"));
-    }
-    if reasons.is_empty() && !idle {
-        reasons.push("Every card is green and nothing important is flagged.".into());
-    }
-    let ai_on = ai::allowed(&state.config, mode.ro);
-    let configured = state.config.dashboard.ai.provider.is_some();
-    let mut v = HealthView {
-        verdict,
-        tone,
-        reasons,
-        ai: ai_on,
-        configured,
-        prepared: String::new(),
-        preview: String::new(),
-        base: mode.base,
-    };
-    if ai_on && configured {
-        let ctx = http::quietly(ai_context::build(state, mode.ro, Tab::Overview, None))
-            .await
-            .unwrap_or_default();
-        let p = ai::store(Tab::Overview, None, ctx);
-        v.preview = serde_json::to_string_pretty(&first_body(state, mode, &p, ai::HEALTH_QUESTION))
-            .unwrap_or_default();
-        v.prepared = p.id;
-    }
-    v
-}
+// ---- the overview's incidents and digest (the command center is ai_home.rs) ------------------------------------------------
 
 pub struct IncidentView {
     pub id: String,

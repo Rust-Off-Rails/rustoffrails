@@ -110,7 +110,11 @@ pub struct SeriesSpec {
 pub struct Window {
     pub from: i64,
     pub to: i64,
+    /// What the chart draws: at most 300 points.
     pub samples: Vec<Sample>,
+    /// Every sample read (the legends' average and peak are over these, so a week drawn as 300
+    /// peaks still reads its true average). Empty: the legends use `samples`.
+    pub full: Vec<Sample>,
     pub marks: Vec<Annotation>,
     pub demo: bool,
 }
@@ -293,7 +297,11 @@ pub fn line_chart(
                 class: classes[i % classes.len()],
                 d,
                 area,
-                summary: legend(unit, samples, spec.value),
+                summary: legend(
+                    unit,
+                    if w.full.is_empty() { samples } else { &w.full },
+                    spec.value,
+                ),
                 values: samples
                     .iter()
                     .map(|s| format!("{:.2}", (spec.value)(s)))
@@ -565,6 +573,7 @@ mod tests {
             from: 1_000,
             to: 1_060,
             samples: samples.clone(),
+            full: Vec::new(),
             marks: vec![Annotation {
                 t: 1_030,
                 kind: "boot",
@@ -636,6 +645,7 @@ mod tests {
             from: 0,
             to: 20,
             samples: vec![s],
+            full: Vec::new(),
             marks: Vec::new(),
             demo: true,
         };

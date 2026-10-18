@@ -1,15 +1,7 @@
 {# The "Ask AI" panel: how to turn it on, or the exact first request, suggested prompts and the form. With the script the form starts a run (POST ai/runs) and streams it; without, it posts to ai/ask and the page shows the finished run. #}
 <div class="ai-body" data-ai-root data-ai-scope>
 {% if !p.configured %}
-  <div class="ai-setup" role="note">
-    <h3>Turn on the assistant</h3>
-    <p>Bring your own provider and key. Set these in <code>.env</code> and restart the server:</p>
-    <pre class="code" tabindex="0">DASHBOARD_AI_PROVIDER=anthropic
-DASHBOARD_AI_API_KEY=…
-# DASHBOARD_AI_MODEL=claude-sonnet-5-5   (or claude-opus-5-5, claude-haiku-5-5)</pre>
-    <p>Any OpenAI-compatible endpoint works too: <code>DASHBOARD_AI_PROVIDER=openai-compatible</code> with <code>DASHBOARD_AI_BASE_URL=https://openrouter.ai/api/v1</code> (OpenRouter) or <code>http://localhost:11434/v1</code> (Ollama), and <code>DASHBOARD_AI_MODEL</code>.</p>
-    <p class="hint">It investigates with read-only tools over what the dashboard already redacted (SQL fingerprints, route patterns, names and types, allowlisted source files), shows every step, and never changes anything. You see the first request before anything is sent. The key is never shown, logged or stored.</p>
-  </div>
+  {% include "kernel/dashboard/_ai_setup.html" %}
 {% else %}
   {% if let Some(e) = p.error %}<p class="notice-inline" role="alert">{{ e }}</p>{% endif %}
   <form class="ai-form" method="post" action="{{ p.base }}/ai/ask" data-ai-form data-runs="{{ p.base }}/ai/runs">
@@ -18,10 +10,10 @@ DASHBOARD_AI_API_KEY=…
     <input type="hidden" name="item" value="{{ p.item }}">
     <input type="hidden" name="kind" value="ask">
     <div class="ai-prompts" role="group" aria-label="Suggested questions">{% for s in p.suggestions %}<button type="button" class="chip" data-ai-prompt>{{ s }}</button>{% endfor %}</div>
-    <label class="ai-label" for="ai-q-{{ p.tab }}">Your question <span class="muted">({{ p.tab_label }}{% if !p.item.is_empty() %}: {{ p.item }}{% endif %})</span></label>
+    <label class="ai-label" for="ai-q-{{ p.tab }}">Your question <span class="muted">({{ p.tab_label }}{% if !p.item_title.is_empty() %}: {{ p.item_title }}{% endif %})</span></label>
     <textarea id="ai-q-{{ p.tab }}" name="question" rows="3" maxlength="2000" required data-ai-question>{{ p.question }}</textarea>
-    <details class="ai-preview"><summary>Preview what will be sent first <span class="muted">({{ p.chars }} characters, about {{ p.tokens }} tokens, to {{ p.provider }} · {{ p.model }})</span></summary>
-      <p class="hint">POST <code>{{ p.endpoint }}</code>. The agent may then call these read-only tools, up to {{ p.max_steps }} calls; each call and its result shows as it happens and stays in the history.</p>
+    <details class="ai-preview"><summary>Preview what will be sent first <span class="muted">({{ crate::kernel::dashboard::web::count(p.chars, "character", "characters") }}, about {{ crate::kernel::dashboard::web::count(p.tokens, "token", "tokens") }}, to {{ p.provider }} · {{ p.model }})</span></summary>
+      <p class="hint">POST <code>{{ p.endpoint }}</code>. The agent may then call these read-only tools, up to {{ crate::kernel::dashboard::web::count(p.max_steps, "call", "calls") }}; each call and its result shows as it happens and stays in the history.</p>
       <p class="ai-toolnames">{% for t in p.tools %}<code title="{{ t.1 }}">{{ t.0 }}</code> {% endfor %}</p>
       <pre class="code" tabindex="0" aria-label="Headers">{% for h in p.headers %}{{ h }}
 {% endfor %}</pre>

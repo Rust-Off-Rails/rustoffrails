@@ -29,7 +29,18 @@
 .ai-panel .pad { padding: .75rem 1rem; margin: 0; }
 .ai-icon { width: 1rem; height: 1rem; fill: var(--accent); flex: none; }
 .ai-body { padding: .75rem 1rem; display: grid; gap: .6rem; min-width: 0; }
-.ai-setup h3 { margin: 0 0 .25rem; font-size: .95rem; }
+.ai-setup h3 { margin: 0 0 .25rem; font-size: .95rem; display: flex; align-items: center; gap: .4rem; }
+.ai-providers { display: grid; gap: .4rem; margin: .5rem 0; }
+.ai-provider { padding: .35rem .65rem; border: 1px solid var(--border); border-radius: 8px; background: var(--ai-sunk); min-width: 0; }
+.ai-provider > summary { cursor: pointer; font-weight: 600; font-size: .88rem; display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; min-height: 28px; }
+.ai-provider[open] > summary { margin-bottom: .3rem; }
+.ai-provider pre { margin: 0; font-size: .76rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ai-provider .hint { margin: .35rem 0 0; font-size: .8rem; }
+.ai-guide { margin: 0; padding: .55rem 1rem 0; font-size: .86rem; color: var(--muted); }
+.ai-guide strong { color: var(--fg); font-weight: 600; }
+ul.ai-prompts { list-style: none; margin: 0 0 .4rem; padding: 0; }
+ul.ai-prompts a.chip { text-decoration: none; }
+.ai-continue { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin: 0; }
 .ai-setup p { margin: .35rem 0; font-size: .88rem; }
 .ai-setup pre, .ai-preview pre { font-size: .76rem; max-height: 18rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ai-form { display: grid; gap: .5rem; min-width: 0; }
@@ -70,7 +81,9 @@
 .ai-call { font-size: .76rem; color: var(--muted); overflow-wrap: anywhere; }
 .ai-call::before { content: "→ "; }
 .ai-step-meta { font-size: .75rem; color: var(--muted); }
-.ai-thought { margin: 0 0 .15rem; font-size: .84rem; color: var(--muted); font-style: italic; overflow-wrap: anywhere; }
+.ai-thought { margin: 0 0 .15rem; font-size: .84rem; color: var(--muted); overflow-wrap: anywhere; }
+.ai-thought.ai-text h3 { font-size: .86rem; margin: .3rem 0 .1rem; }
+.ai-thought.ai-text p, .ai-thought.ai-text ul, .ai-thought.ai-text ol { margin: .15rem 0; }
 .ai-result-text { font-size: .74rem; max-height: 16rem; overflow: auto; margin-top: .3rem; }
 .ai-end { display: grid; gap: .55rem; min-width: 0; }
 .ai-stopped { margin: 0; padding: .45rem .7rem; border-radius: 6px; border: 1px solid var(--ai-warn); color: var(--fg); background: color-mix(in srgb, var(--ai-warn) 10%, var(--panel)); font-size: .88rem; }

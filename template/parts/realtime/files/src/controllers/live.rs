@@ -102,8 +102,6 @@ pub async fn show(
         rooms,
         messages,
         since,
-        channels_js: s.assets.path("channels.js"),
-        live_room_js: s.assets.path("live_room.js"),
         template_message: MessageView::blank(),
         palette: (0..8).collect(),
         dev_guest: s.config.is_development() && identity::DEV_GUESTS,
@@ -268,7 +266,7 @@ pub async fn sign_out(
 
 /// Deletes the session, then wakes the person's connections (each re-checks its own session).
 pub async fn end_session(s: &AppState, signed: &Signed) -> Result<(), AppError> {
-    guest_session::destroy(&s.db, signed.session_id).await?;
+    guest_session::destroy(&s.db, signed.session_id).await?; // unscoped: the actor's own session
     crate::channels::session_ended(s, signed.person.id);
     Ok(())
 }

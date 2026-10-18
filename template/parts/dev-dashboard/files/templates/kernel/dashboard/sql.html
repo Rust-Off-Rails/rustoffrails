@@ -23,7 +23,7 @@
 {% endif %}
 
 <section class="panel" aria-labelledby="fp-title">
-  <header><h2 id="fp-title">Statements</h2><span class="muted">{{ rows.len() }} fingerprints</span></header>
+  <header><h2 id="fp-title">Statements</h2><span class="muted">{{ crate::kernel::dashboard::web::count(rows.len(), "fingerprint", "fingerprints") }}</span></header>
   {% if rows.is_empty() %}<p class="empty">No SQL recorded yet.</p>{% else %}
   <div class="scroll" tabindex="0" role="region" aria-label="Table"><table class="data-table sql-table">
     <thead><tr><th scope="col">Statement</th><th scope="col" class="num">Count</th><th scope="col">Total</th><th scope="col" class="num">Mean</th><th scope="col" class="num">p95</th><th scope="col" class="num">Max</th><th scope="col">Last</th></tr></thead>

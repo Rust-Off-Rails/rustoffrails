@@ -67,8 +67,10 @@ use crate::config::{AiProvider, Config, DashboardAi};
 pub const MAX_CONTEXT_CHARS: usize = 24_000;
 /// APP: the question's size cap, in characters.
 pub const MAX_QUESTION_CHARS: usize = 2_000;
-/// APP: each answer's length cap, in tokens (`max_tokens`): explanations, not essays.
-pub const MAX_ANSWER_TOKENS: u32 = 2_000;
+/// APP: each answer's length cap, in tokens (`max_tokens`): the default of
+/// `DASHBOARD_AI_MAX_ANSWER_TOKENS`. A health summary with its evidence runs past 2,000; an answer
+/// cut anyway gets a Continue button.
+pub const MAX_ANSWER_TOKENS: u32 = 8_000;
 /// Each answer's size cap on the wire, in bytes; more is refused, not truncated.
 pub const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 /// APP: how long one provider call may take (a long answer from a large model takes a while).
@@ -76,15 +78,22 @@ pub const TIMEOUT: Duration = Duration::from_secs(90);
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// APP: questions (runs) a minute, per process.
 pub const PER_MINUTE: usize = 6;
-/// APP: questions, provider calls and tokens (in + out) a day, per process. The page shows what's
-/// left.
+/// APP: questions, provider calls and tokens (in + out) a day, per process: the defaults of
+/// `DASHBOARD_AI_DAILY_QUESTIONS` and `DASHBOARD_AI_DAILY_TOKENS`. The page shows what's left.
 pub const DAILY_REQUESTS: u32 = 200;
-pub const DAILY_CALLS: u32 = 1_000;
-pub const DAILY_TOKENS: u64 = 400_000;
+pub const DAILY_CALLS: u32 = 2_000;
+// WHY 10 million: an agent run re-sends its growing context on every step, so one investigation
+// is 40–50k tokens; 400k ran out after about eight during a demo, at a cost of cents on a cheap
+// model. The runaway guards are the per-run caps and PER_MINUTE, not this; a dollar cap is
+// DASHBOARD_AI_DAILY_USD.
+pub const DAILY_TOKENS: u64 = 10_000_000;
 /// APP: one run's bounds: provider calls (the last one may not call tools), tokens (in + out,
-/// summed over its calls) and wall time. A run that hits one says so ("stopped: budget").
+/// summed over its calls; the default of `DASHBOARD_AI_RUN_MAX_TOKENS`) and wall time. A run
+/// that hits one says so ("stopped: budget").
 pub const MAX_STEPS: usize = 8;
-pub const RUN_TOKENS: u64 = 80_000;
+// WHY 300k: each step re-sends the conversation (older tool results cut, the prefix cached), so
+// an 8-step run with long answers needs room; the day's caps still bound the total.
+pub const RUN_TOKENS: u64 = 300_000;
 pub const RUN_TIMEOUT: Duration = Duration::from_secs(180);
 /// How long a prepared context waits for its question.
 pub const PREPARED_TTL: Duration = Duration::from_secs(15 * 60);
@@ -133,10 +142,13 @@ pub enum Tab {
     Mailbox,
     Jobs,
     Sockets,
+    Upstreams,
+    Security,
+    Frontend,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 14] = [
+    pub const ALL: [Tab; 17] = [
         Tab::Overview,
         Tab::Insights,
         Tab::Requests,
@@ -151,6 +163,9 @@ impl Tab {
         Tab::Mailbox,
         Tab::Jobs,
         Tab::Sockets,
+        Tab::Upstreams,
+        Tab::Security,
+        Tab::Frontend,
     ];
 
     pub fn key(self) -> &'static str {
@@ -169,6 +184,9 @@ impl Tab {
             Tab::Mailbox => "mailbox",
             Tab::Jobs => "jobs",
             Tab::Sockets => "sockets",
+            Tab::Upstreams => "upstreams",
+            Tab::Security => "security",
+            Tab::Frontend => "frontend",
         }
     }
 
@@ -192,12 +210,24 @@ impl Tab {
             Tab::Mailbox => "Mailbox",
             Tab::Jobs => "Jobs",
             Tab::Sockets => "Sockets",
+            Tab::Upstreams => "Upstreams",
+            Tab::Security => "Security",
+            Tab::Frontend => "Frontend",
         }
     }
 
     /// Tabs whose context exists in the read-only production view (no logs, schema, tests…).
     pub fn in_read_only(self) -> bool {
-        matches!(self, Tab::Overview | Tab::Requests | Tab::Traces | Tab::Sql)
+        matches!(
+            self,
+            Tab::Overview
+                | Tab::Requests
+                | Tab::Traces
+                | Tab::Sql
+                | Tab::Upstreams
+                | Tab::Security
+                | Tab::Frontend
+        )
     }
 
     /// An item id is well-formed for this tab (a trace id, a fingerprint, a table, a finding, a
@@ -303,6 +333,63 @@ impl Tab {
                 "Is realtime healthy: connections, topics, rates?",
                 "What would I check if clients keep reconnecting?",
             ],
+            (Tab::Upstreams, _) => &[
+                "Which API is making checkout slow?",
+                "Which calls could run concurrently, and what would it save?",
+            ],
+            (Tab::Security, _) => &[
+                "Is anyone attacking this app right now?",
+                "Which of these findings need a fix in the code?",
+            ],
+            (Tab::Frontend, _) => &[
+                "Why are people rage-clicking, and where?",
+                "Which JavaScript errors should I fix first?",
+            ],
+        }
+    }
+
+    /// APP: "what this tab tells you", one line, at the top of its Ask AI panel.
+    pub fn guide_line(self) -> &'static str {
+        match self {
+            Tab::Overview => {
+                "The app's health at a glance: the cards, the briefing and what changed."
+            }
+            Tab::Insights => {
+                "Findings ranked by impact, each with its evidence, a fix and the guide that explains it."
+            }
+            Tab::Requests => {
+                "Every route with its hits, status classes and latency percentiles: where time and errors go."
+            }
+            Tab::Traces => {
+                "Single requests as waterfalls: which span, query or render took the time."
+            }
+            Tab::Sql => "Every statement by shape: the slow ones, the N+1s, and their query plans.",
+            Tab::Logs => {
+                "Requests and log lines as they happen, filtered by level, target or text."
+            }
+            Tab::Schema => "The live database: tables, keys, indexes and how they relate.",
+            Tab::Migrations => {
+                "Every migration, applied or pending, what it did, and drift from the database."
+            }
+            Tab::Routes => {
+                "The route table with live numbers and problems: missing gates, CSRF, never-hit routes."
+            }
+            Tab::Tests => {
+                "Your test runs on SQLite and Postgres: failures, flaky and slow tests, coverage."
+            }
+            Tab::Dev => "The development tools and what this app is made of.",
+            Tab::Mailbox => "The mail the app sent in development, as shapes and checks.",
+            Tab::Jobs => "The job queue: what runs, what fails, and why.",
+            Tab::Sockets => "Realtime: connections, topics and message rates.",
+            Tab::Upstreams => {
+                "The APIs the app calls: latency against their SLO, failures, retries, and who calls them."
+            }
+            Tab::Security => {
+                "Attack patterns in the traffic: probes, brute force, credential stuffing, odd clients, and what to do."
+            }
+            Tab::Frontend => {
+                "What people hit in the browser: rage and dead clicks, JavaScript and htmx errors, Web Vitals."
+            }
         }
     }
 
@@ -324,6 +411,9 @@ impl Tab {
             Tab::Mailbox => &["mailers.md", "testing.md"],
             Tab::Jobs => &["jobs.md", "errors-and-logging.md"],
             Tab::Sockets => &["channels.md", "realtime.md"],
+            Tab::Upstreams => &["errors-and-logging.md", "jobs.md", "caching.md"],
+            Tab::Security => &["security.md", "auth.md", "deployment.md"],
+            Tab::Frontend => &["frontend-htmx.md", "views.md", "dev-tools.md"],
         }
     }
 
@@ -367,6 +457,7 @@ pub const GUIDES: &[&str] = &[
     "deployment.md",
     "dev-tools.md",
     "errors-and-logging.md",
+    "frontend-htmx.md",
     "jobs.md",
     "mailers.md",
     "migrations.md",
@@ -404,6 +495,10 @@ pub fn system_prompt(tab: Tab) -> String {
          sqlp95, pool, tasks), [table:<name>], [finding:<id>], [file:<path>:<line>], [job:<id>], \
          [mail:<id>]. Each tag becomes a link, and a chart tag draws that chart under the \
          paragraph. Cite only ids you have seen.\n\n\
+         Start with the bottom line: one or two sentences that answer the question. Then the \
+         evidence, each claim with its citation tag. Never describe the dashboard's interface \
+         (buttons, panels, what you proposed or are about to call): proposals show up by \
+         themselves; write about the app.\n\n\
          Answer in plain Markdown (headings, lists, `code`, fenced code blocks; no HTML, no \
          images, no links other than the tags). Be concrete: name the route, query, table, file \
          or test, and say why. When you propose a code change, end with a `## Fix` section (the \
@@ -422,12 +517,14 @@ pub fn system_prompt(tab: Tab) -> String {
     )
 }
 
-/// APP: the question behind "Generate health summary".
+/// APP: the question behind the command center's AI briefing.
 pub const HEALTH_QUESTION: &str = "Write a health summary of this app right now. Start with a \
      one-line verdict: Healthy, Needs attention, or Unhealthy. Then a short 'Healthy' list, a \
      'Needs attention' list ranked by impact, and 'Fix first': the one thing to do next and why. \
-     Back every claim with a citation tag. Call get_overview and list_insights first; look deeper \
-     only where something is off.";
+     Every claim carries a citation tag ([trace:…], [sql:…], [route:…], [finding:…], \
+     [chart:…]). The page data starts with the dashboard's own briefing and its top findings with \
+     their evidence ids: build on them, and call a tool only to check what they don't settle \
+     (three calls at most). Be complete but tight: a paragraph is fine, an essay is not.";
 
 // ---- prepared contexts -------------------------------------------------------------------------
 
@@ -561,7 +658,7 @@ pub fn request(
         Some(AiProvider::Anthropic) => {
             let mut b = json!({
                 "model": ai.model,
-                "max_tokens": MAX_ANSWER_TOKENS,
+                "max_tokens": ai.max_answer_tokens,
                 "system": system,
                 "messages": messages,
             });
@@ -581,7 +678,7 @@ pub fn request(
             all.extend(messages.iter().cloned());
             let mut b = json!({
                 "model": ai.model,
-                "max_tokens": MAX_ANSWER_TOKENS,
+                "max_tokens": ai.max_answer_tokens,
                 "messages": all,
             });
             if with_tools {
@@ -593,6 +690,61 @@ pub fn request(
             b
         }
     }
+}
+
+/// Marks a body's stable prefix for the provider's prompt cache: the system prompt (with the
+/// tools before it) always, and with `upto_last` the conversation so far, so the next step reads
+/// it back at the cached price instead of paying for it again. Anthropic: `cache_control` blocks.
+/// OpenRouter with an `anthropic/` model: the same marks in the message parts, which OpenRouter
+/// passes on. Others (OpenAI, DeepSeek, most gateways) cache a repeated prefix by themselves, so
+/// their body is left alone.
+// WHY: an agent run re-sends its whole conversation every step; the cache turns that from the
+// biggest cost of a run into a small one. The first call has nothing to read back, so it marks
+// only the system prompt (and the preview shows exactly that body).
+pub fn cached(ai: &DashboardAi, mut body: Value, upto_last: bool) -> Value {
+    let mark = json!({ "type": "ephemeral" });
+    let text_block =
+        |text: &Value| json!([{ "type": "text", "text": text, "cache_control": mark }]);
+    let mark_last = |m: &mut Value| match &m["content"] {
+        Value::String(_) => {
+            let t = m["content"].clone();
+            m["content"] = text_block(&t);
+        }
+        Value::Array(a) if !a.is_empty() => {
+            if let Some(b) = m["content"].as_array_mut().and_then(|a| a.last_mut()) {
+                b["cache_control"] = mark.clone();
+            }
+        }
+        _ => {}
+    };
+    match ai.provider {
+        Some(AiProvider::Anthropic) => {
+            if body["system"].is_string() {
+                let t = body["system"].clone();
+                body["system"] = text_block(&t);
+            }
+            if upto_last
+                && let Some(last) = body["messages"].as_array_mut().and_then(|m| m.last_mut())
+            {
+                mark_last(last);
+            }
+        }
+        Some(AiProvider::OpenAiCompatible)
+            if ai.base_url.contains("openrouter.ai") && ai.model.starts_with("anthropic/") =>
+        {
+            if let Some(msgs) = body["messages"].as_array_mut() {
+                let n = msgs.len();
+                for (i, m) in msgs.iter_mut().enumerate() {
+                    // A tool message's content stays a string (not every route takes parts there).
+                    if (i == 0 || (upto_last && i + 1 == n && n > 1)) && m["role"] != "tool" {
+                        mark_last(m);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    body
 }
 
 /// A one-message body without tools (`request` with one user turn).
@@ -711,7 +863,7 @@ impl AiError {
             AiError::TooLarge => format!("The answer was over {} KB and was refused.", MAX_RESPONSE_BYTES / 1024),
             AiError::Provider(401 | 403, _) => "The provider refused the key: check DASHBOARD_AI_API_KEY.".into(),
             AiError::Provider(429, m) => format!("The provider is rate limiting this key (429). {m}"),
-            AiError::Provider(s, m) => format!("The provider answered {s}. {m}"),
+            AiError::Provider(s, m) => format!("The provider answered {s}. {m}{}", provider_hint(*s, m)),
             AiError::BadAnswer => "The provider's answer had no text in it.".into(),
         }
     }
@@ -785,16 +937,82 @@ pub async fn send_raw(ai: &DashboardAi, body: &Value, timeout: Duration) -> Resu
     }
     let v: Value = serde_json::from_slice(&raw).unwrap_or(Value::Null);
     if !status.is_success() {
-        let msg = v["error"]["message"]
-            .as_str()
-            .or_else(|| v["error"].as_str())
-            .unwrap_or("");
+        let msg = if v.is_null() {
+            String::from_utf8_lossy(&raw[..raw.len().min(300)]).into_owned()
+        } else {
+            provider_message(&v)
+        };
         return Err(AiError::Provider(
             status.as_u16(),
-            crate::kernel::ui::truncate(&crate::kernel::redact::text(msg), 300),
+            crate::kernel::ui::truncate(&crate::kernel::redact::text(&msg), 400),
         ));
     }
     Ok(v)
+}
+
+/// What a provider's error says, as fully as it says it: the message, its type or code, and a
+/// gateway's upstream error (OpenRouter puts the real one in `error.metadata.raw`, with the
+/// upstream provider's name). The caller redacts it.
+pub fn provider_message(v: &Value) -> String {
+    let e = &v["error"];
+    let mut parts: Vec<String> = Vec::new();
+    let mut push = |s: &str| {
+        let s = s.trim();
+        if !s.is_empty() && !parts.iter().any(|p| p.contains(s)) {
+            parts.push(s.to_owned());
+        }
+    };
+    push(e["message"].as_str().or_else(|| e.as_str()).unwrap_or(""));
+    for k in ["type", "code", "param"] {
+        match &e[k] {
+            Value::String(t) => push(&format!("({k}: {t})")),
+            Value::Number(n) => push(&format!("({k}: {n})")),
+            _ => {}
+        }
+    }
+    let meta = &e["metadata"];
+    if let Some(name) = meta["provider_name"].as_str() {
+        push(&format!("upstream: {name}"));
+    }
+    if let Some(raw) = meta["raw"].as_str() {
+        match serde_json::from_str::<Value>(raw) {
+            Ok(inner) => {
+                let m = inner["error"]["message"]
+                    .as_str()
+                    .or_else(|| inner["message"].as_str())
+                    .or_else(|| inner["error"].as_str())
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| inner.to_string());
+                push(&m);
+            }
+            Err(_) => push(raw),
+        }
+    }
+    parts.join(" ")
+}
+
+/// A hint for a provider's error, from what it says.
+fn provider_hint(status: u16, msg: &str) -> &'static str {
+    let m = msg.to_ascii_lowercase();
+    if m.contains("context")
+        && (m.contains("length") || m.contains("too long") || m.contains("maximum"))
+    {
+        " Hint: the conversation is over the model's context window: lower MAX_CONTEXT_CHARS, or pick a model with a larger one."
+    } else if m.contains("tool") && (m.contains("support") || m.contains("choice")) {
+        " Hint: this model may not support tool calling: pick one whose supported_parameters include tools and tool_choice, or set DASHBOARD_AI_TOOLS=core."
+    } else if m.contains("unsupported")
+        || m.contains("unknown parameter")
+        || m.contains("not supported")
+    {
+        " Hint: the model refused a request parameter; another model (or provider route) may accept it."
+    } else if status == 404 || (m.contains("model") && (m.contains("not") || m.contains("invalid")))
+    {
+        " Hint: check DASHBOARD_AI_MODEL against the provider's model list."
+    } else if status == 402 || m.contains("credit") || m.contains("balance") {
+        " Hint: the provider account is out of credit."
+    } else {
+        ""
+    }
 }
 
 /// Sends `body` and reads the text answer (no tools).
@@ -822,7 +1040,8 @@ pub fn parse_answer(ai: &DashboardAi, v: &Value) -> Result<Answer, AiError> {
             let note = match v["stop_reason"].as_str() {
                 Some("refusal") => Some("The model declined to answer this one.".to_owned()),
                 Some("max_tokens") => Some(format!(
-                    "The answer was cut at {MAX_ANSWER_TOKENS} tokens (MAX_ANSWER_TOKENS)."
+                    "The answer was cut at {} tokens (DASHBOARD_AI_MAX_ANSWER_TOKENS).",
+                    ai.max_answer_tokens
                 )),
                 _ => None,
             };
@@ -843,7 +1062,10 @@ pub fn parse_answer(ai: &DashboardAi, v: &Value) -> Result<Answer, AiError> {
                 .unwrap_or_default()
                 .to_owned();
             let note = (choice["finish_reason"] == "length").then(|| {
-                format!("The answer was cut at {MAX_ANSWER_TOKENS} tokens (MAX_ANSWER_TOKENS).")
+                format!(
+                    "The answer was cut at {} tokens (DASHBOARD_AI_MAX_ANSWER_TOKENS).",
+                    ai.max_answer_tokens
+                )
             });
             if text.trim().is_empty() && note.is_none() {
                 return Err(AiError::BadAnswer);
@@ -860,6 +1082,43 @@ pub fn parse_answer(ai: &DashboardAi, v: &Value) -> Result<Answer, AiError> {
 
 // ---- rate and budget ---------------------------------------------------------------------------
 
+/// The daily caps a budget enforces: the constants by default, the `DASHBOARD_AI_*` env values
+/// once `budget(cfg)` has applied them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Caps {
+    pub questions: u32,
+    pub calls: u32,
+    pub tokens: u64,
+    /// USD per million input and output tokens (`DASHBOARD_AI_PRICE_IN` / `_OUT`), for the estimate.
+    pub price: Option<(f64, f64)>,
+    /// `DASHBOARD_AI_DAILY_USD`.
+    pub usd: Option<f64>,
+}
+
+impl Default for Caps {
+    fn default() -> Self {
+        Caps {
+            questions: DAILY_REQUESTS,
+            calls: DAILY_CALLS,
+            tokens: DAILY_TOKENS,
+            price: None,
+            usd: None,
+        }
+    }
+}
+
+impl Caps {
+    pub fn from_config(ai: &DashboardAi) -> Self {
+        Caps {
+            questions: ai.daily_questions,
+            calls: DAILY_CALLS.max(ai.daily_questions.saturating_mul(MAX_STEPS as u32)),
+            tokens: ai.daily_tokens,
+            price: ai.price_in.zip(ai.price_out),
+            usd: ai.daily_usd,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct Budget {
     day: i64,
@@ -868,24 +1127,84 @@ pub struct Budget {
     /// Provider calls today (a run makes up to `MAX_STEPS`).
     pub calls: u32,
     pub tokens: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    /// What the watcher's own investigations spent today (part of `tokens`).
+    pub watcher_tokens: u64,
+    pub caps: Caps,
     recent: VecDeque<Instant>,
 }
 
 pub static BUDGET: LazyLock<Mutex<Budget>> = LazyLock::new(|| Mutex::new(Budget::default()));
 
+/// The process's budget with this config's caps applied (they come from the environment, so
+/// every caller passes the same ones).
+pub fn budget(ai: &DashboardAi) -> std::sync::MutexGuard<'static, Budget> {
+    let mut b = lock(&BUDGET);
+    b.caps = Caps::from_config(ai);
+    b
+}
+
+/// "$0.0123", "$1.20".
+pub fn usd(v: f64) -> String {
+    if v < 0.1 {
+        format!("${v:.4}")
+    } else {
+        format!("${v:.2}")
+    }
+}
+
 impl Budget {
+    /// A budget with these caps (the process's own is `BUDGET`, through `budget`).
+    pub fn with_caps(caps: Caps) -> Self {
+        Budget {
+            caps,
+            ..Budget::default()
+        }
+    }
+
     fn roll(&mut self, today: i64) {
         if self.day != today {
             self.day = today;
             self.requests = 0;
             self.calls = 0;
             self.tokens = 0;
+            self.input_tokens = 0;
+            self.output_tokens = 0;
+            self.watcher_tokens = 0;
         }
+    }
+
+    /// Today's estimated spend in USD, when the prices are known.
+    pub fn spent_usd(&self) -> Option<f64> {
+        self.caps.price.map(|(pin, pout)| {
+            (self.input_tokens as f64 * pin + self.output_tokens as f64 * pout) / 1_000_000.0
+        })
+    }
+
+    /// Why today's money or tokens are used up, naming the limit and how to raise it.
+    fn spent_out(&self) -> Option<AiError> {
+        if self.tokens >= self.caps.tokens {
+            return Some(AiError::Budget(format!(
+                "Today's budget of {} tokens is used up (DAILY_TOKENS). Raise DASHBOARD_AI_DAILY_TOKENS in .env and restart, or wait for midnight UTC.",
+                crate::kernel::ui::thousands(self.caps.tokens)
+            )));
+        }
+        if let (Some(cap), Some(spent)) = (self.caps.usd, self.spent_usd())
+            && spent >= cap
+        {
+            return Some(AiError::Budget(format!(
+                "Today's budget of {} is used up (about {} spent, DASHBOARD_AI_DAILY_USD). Raise DASHBOARD_AI_DAILY_USD in .env and restart, or wait for midnight UTC.",
+                usd(cap),
+                usd(spent)
+            )));
+        }
+        None
     }
 
     /// Counts one question (a run), or says why not. `today` is the UTC day number.
     // SECURITY: a runaway script or a stuck button can't spend without bound: PER_MINUTE a minute
-    // and DAILY_REQUESTS / DAILY_TOKENS a day per process (test: ai_requests_are_rate_limited_and_budgeted)
+    // and the daily questions / tokens / dollars per process (test: ai_requests_are_rate_limited_and_budgeted)
     pub fn reserve(&mut self, today: i64, now: Instant) -> Result<(), AiError> {
         self.roll(today);
         while self
@@ -898,15 +1217,14 @@ impl Budget {
         if self.recent.len() >= PER_MINUTE {
             return Err(AiError::RateLimited);
         }
-        if self.requests >= DAILY_REQUESTS {
+        if self.requests >= self.caps.questions {
             return Err(AiError::Budget(format!(
-                "Today's budget of {DAILY_REQUESTS} questions is used up (DAILY_REQUESTS)."
+                "Today's budget of {} questions is used up (DAILY_REQUESTS). Raise DASHBOARD_AI_DAILY_QUESTIONS in .env and restart, or wait for midnight UTC.",
+                self.caps.questions
             )));
         }
-        if self.tokens >= DAILY_TOKENS {
-            return Err(AiError::Budget(format!(
-                "Today's budget of {DAILY_TOKENS} tokens is used up (DAILY_TOKENS)."
-            )));
+        if let Some(e) = self.spent_out() {
+            return Err(e);
         }
         self.recent.push_back(now);
         self.requests += 1;
@@ -914,37 +1232,66 @@ impl Budget {
     }
 
     /// Counts one provider call of a run that was reserved, or says why not.
-    // SECURITY: a run's calls count against DAILY_CALLS and DAILY_TOKENS too, so a model that
-    // keeps calling tools can't outspend the day (test: an_agent_run_stops_at_its_budget_and_says_so)
+    // SECURITY: a run's calls count against the daily calls, tokens and dollars too, so a model
+    // that keeps calling tools can't outspend the day (test: an_agent_run_stops_at_its_budget_and_says_so)
     pub fn reserve_call(&mut self, today: i64) -> Result<(), AiError> {
         self.roll(today);
-        if self.calls >= DAILY_CALLS {
+        if self.calls >= self.caps.calls {
             return Err(AiError::Budget(format!(
-                "Today's budget of {DAILY_CALLS} provider calls is used up (DAILY_CALLS)."
+                "Today's budget of {} provider calls is used up (DAILY_CALLS, at least DASHBOARD_AI_DAILY_QUESTIONS × MAX_STEPS). Raise DASHBOARD_AI_DAILY_QUESTIONS in .env and restart, or wait for midnight UTC.",
+                self.caps.calls
             )));
         }
-        if self.tokens >= DAILY_TOKENS {
-            return Err(AiError::Budget(format!(
-                "Today's budget of {DAILY_TOKENS} tokens is used up (DAILY_TOKENS)."
-            )));
+        if let Some(e) = self.spent_out() {
+            return Err(e);
         }
         self.calls += 1;
         Ok(())
     }
 
+    /// Counts tokens whose split isn't known (as input).
     pub fn spend(&mut self, today: i64, tokens: u64) {
-        self.roll(today);
-        self.tokens = self.tokens.saturating_add(tokens);
+        self.spend_io(today, tokens, 0);
     }
 
-    /// "193 questions and 391,200 tokens left today".
+    /// Counts one call's input and output tokens.
+    pub fn spend_io(&mut self, today: i64, input: u64, output: u64) {
+        self.roll(today);
+        self.tokens = self.tokens.saturating_add(input).saturating_add(output);
+        self.input_tokens = self.input_tokens.saturating_add(input);
+        self.output_tokens = self.output_tokens.saturating_add(output);
+    }
+
+    /// Counts one call of the watcher's (after `spend_io`): its share shows in `left`.
+    pub fn spent_by_watcher(&mut self, today: i64, tokens: u64) {
+        self.roll(today);
+        self.watcher_tokens = self.watcher_tokens.saturating_add(tokens);
+    }
+
+    /// "193 questions and 9,391,200 tokens left today · about $0.0123 spent today (cap $1.00)".
     pub fn left(&mut self, today: i64) -> String {
         self.roll(today);
-        format!(
+        let mut s = format!(
             "{} questions and {} tokens left today",
-            DAILY_REQUESTS.saturating_sub(self.requests),
-            crate::kernel::ui::thousands(DAILY_TOKENS.saturating_sub(self.tokens))
-        )
+            self.caps.questions.saturating_sub(self.requests),
+            crate::kernel::ui::thousands(self.caps.tokens.saturating_sub(self.tokens))
+        );
+        if let Some(spent) = self.spent_usd() {
+            s.push_str(&format!(" · about {} spent today", usd(spent)));
+            if let Some(cap) = self.caps.usd {
+                s.push_str(&format!(" (cap {})", usd(cap)));
+            }
+        }
+        if self.watcher_tokens > 0 && self.tokens > 0 {
+            s.push_str(&format!(
+                " · the watcher used {} of today's tokens",
+                format_args!(
+                    "{:.0}%",
+                    self.watcher_tokens as f64 * 100.0 / self.tokens as f64
+                )
+            ));
+        }
+        s
     }
 }
 
@@ -960,6 +1307,8 @@ pub enum Inline {
     Text(String),
     Code(String),
     Strong(String),
+    /// `*emphasis*` (or `_emphasis_`), shown in italics, never with its markers.
+    Em(String),
     /// A framework guide the answer cites: (the text, its public docs URL).
     Guide(String, String),
     /// Evidence the answer cites (`[trace:42]`): its label, the dashboard page that shows it
@@ -1164,13 +1513,35 @@ fn inlines(s: &str, cx: &Cx, charts: &mut Vec<ChartAt>) -> Vec<Inline> {
     while !rest.is_empty() {
         let next_code = rest.find('`');
         let next_strong = rest.find("**");
+        // Single-marker emphasis, when it comes before any code or bold run.
+        if let Some((a, b, m)) = find_em(rest)
+            && next_code.is_none_or(|c| a < c)
+            && next_strong.is_none_or(|s2| a < s2)
+        {
+            text(&rest[..a], cx, charts, &mut out);
+            out.push(Inline::Em(rest[a + 1..b].to_owned()));
+            rest = &rest[b + m.len_utf8()..];
+            continue;
+        }
         match (next_code, next_strong) {
             (Some(c), s2) if s2.is_none_or(|b| c < b) => {
                 text(&rest[..c], cx, charts, &mut out);
                 let after = &rest[c + 1..];
                 match after.find('`') {
                     Some(end) => {
-                        out.push(code_or_guide(&after[..end]));
+                        // A citation the model put in backticks is still a citation.
+                        let inner = after[..end].trim();
+                        match inner
+                            .strip_prefix('[')
+                            .and_then(|i| i.strip_suffix(']'))
+                            .and_then(|i| cite(i, cx))
+                        {
+                            Some((inline, chart)) => {
+                                out.push(inline);
+                                charts.extend(chart);
+                            }
+                            None => out.push(code_or_guide(&after[..end])),
+                        }
                         rest = &after[end + 1..];
                     }
                     None => {
@@ -1184,7 +1555,7 @@ fn inlines(s: &str, cx: &Cx, charts: &mut Vec<ChartAt>) -> Vec<Inline> {
                 let after = &rest[b + 2..];
                 match after.find("**") {
                     Some(end) => {
-                        out.push(Inline::Strong(after[..end].to_owned()));
+                        strong(&after[..end], &mut out);
                         rest = &after[end + 2..];
                     }
                     None => {
@@ -1202,6 +1573,86 @@ fn inlines(s: &str, cx: &Cx, charts: &mut Vec<ChartAt>) -> Vec<Inline> {
     out
 }
 
+/// The first `*word*` or `_word_` emphasis in `s`: (opening marker, closing marker, the marker).
+/// Not a `**`, not inside a word (`snake_case`, `2*3*4`), and closed on the same line.
+fn find_em(s: &str) -> Option<(usize, usize, char)> {
+    let b = s.as_bytes();
+    for (i, &c) in b.iter().enumerate() {
+        if c != b'*' && c != b'_' {
+            continue;
+        }
+        let m = c;
+        let before_ok = i == 0 || !(b[i - 1].is_ascii_alphanumeric() || b[i - 1] == m);
+        let next = b.get(i + 1).copied();
+        if !before_ok || next.is_none_or(|n| n == m || n.is_ascii_whitespace()) {
+            continue;
+        }
+        let tail = &s[i + 1..];
+        let line_end = tail.find('\n').unwrap_or(tail.len());
+        let close = tail[..line_end].char_indices().find(|(j, ch)| {
+            *ch == m as char
+                && !tail.as_bytes()[j - 1].is_ascii_whitespace()
+                && tail
+                    .as_bytes()
+                    .get(j + 1)
+                    .is_none_or(|a| !(a.is_ascii_alphanumeric() || *a == m))
+        });
+        if let Some((j, _)) = close.filter(|(j, _)| *j > 0) {
+            return Some((i, i + 1 + j, m as char));
+        }
+    }
+    None
+}
+
+/// `s` cut to `max` characters without leaving a code span or a citation open: a cut inside one
+/// ends before it.
+pub fn truncate_md(s: &str, max: usize) -> String {
+    let cut = crate::kernel::ui::truncate(s, max);
+    if cut == s {
+        return cut;
+    }
+    let body = cut.trim_end_matches('…');
+    let ticks = body.matches('`').count();
+    let open_bracket = body.rfind('[').is_some_and(|o| !body[o..].contains(']'));
+    let end = if ticks % 2 == 1 {
+        body.rfind('`').unwrap_or(body.len())
+    } else if open_bracket {
+        body.rfind('[').unwrap_or(body.len())
+    } else {
+        body.len()
+    };
+    format!("{}…", body[..end].trim_end())
+}
+
+/// **bold** text, with any `code` inside it as code (never raw backticks): the bold runs around
+/// the code stay bold.
+fn strong(inner: &str, out: &mut Vec<Inline>) {
+    if !inner.contains('`') {
+        out.push(Inline::Strong(inner.to_owned()));
+        return;
+    }
+    for (i, part) in inner.split('`').enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        if i % 2 == 1 {
+            out.push(code_or_guide(part));
+        } else {
+            out.push(Inline::Strong(part.to_owned()));
+        }
+    }
+}
+
+/// A bracket that names a citation kind but isn't a valid citation (a model's
+/// `[finding:no id in view]`): its words, without the tag syntax.
+fn broken_citation(inner: &str) -> Option<String> {
+    let (kind, value) = inner.split_once(':')?;
+    if !CITE_KINDS.contains(&kind.trim().to_ascii_lowercase().as_str()) {
+        return None;
+    }
+    Some(value.trim().to_owned())
+}
+
 /// Plain text: citation tags become `Cite`s, the rest goes on to `guides`.
 fn text(s: &str, cx: &Cx, charts: &mut Vec<ChartAt>, out: &mut Vec<Inline>) {
     let mut rest = s;
@@ -1209,15 +1660,32 @@ fn text(s: &str, cx: &Cx, charts: &mut Vec<ChartAt>, out: &mut Vec<Inline>) {
         let tail = &rest[open + 1..];
         let Some(close) = tail.find(']') else { break };
         let inner = &tail[..close];
-        match cite(inner, cx) {
-            Some((inline, chart)) => {
+        // One tag, or several in one bracket ("[trace:1, trace:2]").
+        let several: Option<Vec<_>> = if inner.contains([',', ';']) {
+            inner.split([',', ';']).map(|p| cite(p, cx)).collect()
+        } else {
+            None
+        };
+        match cite(inner, cx).map(|c| vec![c]).or(several) {
+            Some(found) => {
                 guides(&rest[..open], out);
-                out.push(inline);
-                if let Some(c) = chart {
-                    charts.push(c);
+                for (i, (inline, chart)) in found.into_iter().enumerate() {
+                    if i > 0 {
+                        push_text(out, " ");
+                    }
+                    out.push(inline);
+                    charts.extend(chart);
                 }
             }
-            None => guides(&rest[..open + 1 + close + 1], out),
+            None => match broken_citation(inner) {
+                Some(words) => {
+                    guides(&rest[..open], out);
+                    if !words.is_empty() {
+                        push_text(out, &words);
+                    }
+                }
+                None => guides(&rest[..open + 1 + close + 1], out),
+            },
         }
         rest = &tail[close + 1..];
     }
@@ -1261,28 +1729,47 @@ fn push_text(out: &mut Vec<Inline>, s: &str) {
     }
 }
 
+/// The kinds a citation tag may name.
+const CITE_KINDS: &[&str] = &[
+    "trace", "sql", "route", "chart", "table", "finding", "file", "job", "mail",
+];
+
 /// A citation tag (`kind:value`, without the brackets) as an inline, and the chart it asks for.
 /// `None`: not a citation (or a malformed one), shown as the text it was.
 fn cite(inner: &str, cx: &Cx) -> Option<(Inline, Option<ChartAt>)> {
     if inner.len() > 160 || inner.chars().any(char::is_control) {
         return None;
     }
-    let (kind, value) = inner.split_once(':')?;
-    let value = value.trim();
+    // Tolerant of how models write them: `kind:value`, `Kind: value`, `kind value`, `#580`, a
+    // trailing comma, backticks.
+    const KINDS: &[&str] = CITE_KINDS;
+    let inner = inner.trim().trim_matches('`').trim();
+    let (kind, value) = match inner.split_once(':') {
+        Some((k, v)) if KINDS.contains(&k.trim().to_ascii_lowercase().as_str()) => (k, v),
+        _ => inner
+            .split_once(' ')
+            .filter(|(k, _)| KINDS.contains(&k.trim().to_ascii_lowercase().as_str()))?,
+    };
+    let kind = kind.trim().to_ascii_lowercase();
+    let value = value
+        .trim()
+        .trim_start_matches('#')
+        .trim_end_matches([',', ';', '.'])
+        .trim();
     let dev = cx.base == "/dev/dashboard";
     let link = |href: String| Some(href);
     let digits = |s: &str| !s.is_empty() && s.len() <= 20 && s.bytes().all(|b| b.is_ascii_digit());
     let c = |label: String, href: Option<String>, k: &'static str| {
         Some((Inline::Cite(label, href, k), None))
     };
-    match kind.trim() {
+    match kind.as_str() {
         "trace" if digits(value) => c(
             format!("trace {value}"),
             link(format!("{}/traces/{value}", cx.base)),
             "trace",
         ),
         "sql" => {
-            let id = super::sql::parse_hex(value)?;
+            let id = super::sql::parse_hex(value.trim_start_matches("0x"))?;
             c(
                 format!("SQL {}", super::sql::hex(id)),
                 link(format!("{}/sql/{}", cx.base, super::sql::hex(id))),
@@ -1290,12 +1777,27 @@ fn cite(inner: &str, cx: &Cx) -> Option<(Inline, Option<ChartAt>)> {
             )
         }
         "route" => {
-            let (method, path) = value.split_once(' ')?;
-            let path = path.trim();
-            let known = super::route_explorer::table()
-                .into_iter()
-                .any(|r| r.method == method && r.path == path);
-            known.then_some(())?;
+            let mut words = value.split_whitespace();
+            let method = words.next()?.to_ascii_uppercase();
+            let path = words.next()?.split(['?', '#']).next()?;
+            let verb = matches!(
+                method.as_str(),
+                "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS"
+            );
+            let plain = path.starts_with('/')
+                && path.len() <= 120
+                && path
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "/_-.{}:*".contains(c));
+            (verb && plain).then_some(())?;
+            // The pattern itself, or a concrete path ("/orders/42") the table matches to one.
+            let table = super::route_explorer::table();
+            let known = |p: &str| table.iter().any(|r| r.method == method && r.path == p);
+            let path = if known(path) {
+                path
+            } else {
+                Some(super::http::route_of(&method, path)).filter(|p| known(p))?
+            };
             c(
                 format!("{method} {path}"),
                 link(format!(
@@ -1332,7 +1834,19 @@ fn cite(inner: &str, cx: &Cx) -> Option<(Inline, Option<ChartAt>)> {
             dev.then(|| format!("{}/insights#finding-{value}", cx.base)),
             "finding",
         ),
-        "file" if super::ai_tools::citable_path(value) => c(value.to_owned(), None, "file"),
+        "file" => {
+            // "src/x.rs:303", "src/x.rs:303-310", "src/x.rs:L303", "src/x.rs:303–310".
+            let v = value.replace(['–', '—'], "-").replace(":L", ":");
+            let plain = v.len() <= 160
+                && v.contains('/')
+                && !v.starts_with('/')
+                && !v.split('/').any(|seg| seg.starts_with('.'))
+                && v.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "/_-.:".contains(c))
+                && !v.contains("..");
+            (super::ai_tools::citable_path(&v) || plain).then_some(())?;
+            c(v, None, "file")
+        }
         "job" if digits(value) => c(
             format!("job {value}"),
             dev.then(|| format!("/admin/jobs/{value}")),
@@ -1393,9 +1907,9 @@ fn code_or_guide(s: &str) -> Inline {
         if GUIDES.contains(&file) && anchor_ok {
             let page = file.trim_end_matches(".md");
             let href = if anchor.is_empty() {
-                format!("https://rustoffrails.org/docs/{page}")
+                format!("https://rustoffrails.org/docs/guides/{page}")
             } else {
-                format!("https://rustoffrails.org/docs/{page}#{anchor}")
+                format!("https://rustoffrails.org/docs/guides/{page}#{anchor}")
             };
             return Inline::Guide(path.to_owned(), href);
         }
@@ -1408,6 +1922,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn emphasis_renders_without_its_markers_and_cuts_keep_code_closed() {
+        let blocks = render("This is *unrelated* to `snake_case_name` and 2*3*4, _also_ fine.");
+        let Block::Para(p) = &blocks[0] else { panic!() };
+        assert!(p.contains(&Inline::Em("unrelated".into())), "{p:?}");
+        assert!(p.contains(&Inline::Em("also".into())), "{p:?}");
+        assert!(p.contains(&Inline::Code("snake_case_name".into())), "{p:?}");
+        assert!(
+            !p.iter()
+                .any(|i| matches!(i, Inline::Text(t) if t.contains("*unrelated")))
+        );
+        let cut = truncate_md("the wait is in `tokio::time::sleep` inside the handler", 24);
+        assert_eq!(cut.matches('`').count() % 2, 0, "{cut}");
+        assert!(cut.ends_with('…'), "{cut}");
+        let cut = truncate_md("see [trace:12345678] for the slow part", 14);
+        assert!(!cut.contains('['), "{cut}");
+    }
+
+    #[test]
     fn the_markdown_subset_parses_into_blocks() {
         let blocks = render(
             "# Why\n\nThe **N+1** is in `orders`.\nSee .offrails/guides/models.md#eager-loading.\n\n- one\n- two\n\n1. first\n2) second\n\n```rust\nlet x = 1;\n```\n",
@@ -1418,7 +1950,7 @@ mod tests {
         assert!(p.contains(&Inline::Code("orders".into())));
         assert!(p.contains(&Inline::Guide(
             ".offrails/guides/models.md#eager-loading".into(),
-            "https://rustoffrails.org/docs/models#eager-loading".into()
+            "https://rustoffrails.org/docs/guides/models#eager-loading".into()
         )));
         assert!(matches!(&blocks[2], Block::List(false, items) if items.len() == 2));
         assert!(matches!(&blocks[3], Block::List(true, items) if items.len() == 2));
@@ -1431,6 +1963,26 @@ mod tests {
         assert_eq!(
             inlines("`.offrails/guides/evil.md`", &cx, &mut Vec::new()),
             vec![Inline::Code(".offrails/guides/evil.md".into())]
+        );
+        // Code inside bold is code: no raw backticks.
+        assert_eq!(
+            inlines("**N+1 on `/dev/lab/orders`**", &cx, &mut Vec::new()),
+            vec![
+                Inline::Strong("N+1 on ".into()),
+                Inline::Code("/dev/lab/orders".into())
+            ]
+        );
+        // A citation the model invented without an id reads as words, never as tag syntax.
+        let made_up = inlines(
+            "See [finding:no id in view — see test results] here.",
+            &cx,
+            &mut Vec::new(),
+        );
+        assert_eq!(
+            made_up,
+            vec![Inline::Text(
+                "See no id in view — see test results here.".into()
+            )]
         );
     }
 

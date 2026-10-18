@@ -1,19 +1,16 @@
 {% extends "layouts/application.html" %}
-{# APP: the live room. Scripts load in the head, so links into this page carry hx-boost="false":
-   a boosted swap replaces only <body> and would leave them unloaded. #}
-{% block head %}
-<script src="{{ channels_js }}" defer></script>
-<script src="{{ live_room_js }}" defer></script>
-{% endblock %}
+{# APP: the live room. Its scripts (channels.js, live_room.js) load from the app layout on every
+   page (samples: app head), so a boosted link into this page, or from one room to another, starts
+   the room on htmx:load, and leaving it through a boosted link leaves its topics. #}
 {% block content %}
 <div data-live-room data-topic="{{ topic }}" data-user-topic="{{ user_topic }}" data-since="{{ since }}" data-me="{{ me.id }}">
   <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
     <nav aria-label="Rooms" class="flex flex-wrap gap-2 text-sm">
       {% for r in rooms %}
         {% if r.current %}
-        <a href="/live/{{ r.slug }}" hx-boost="false" aria-current="page" class="rounded-full bg-indigo-600 px-3 py-1 font-medium text-white">{{ r.name }}</a>
+        <a href="/live/{{ r.slug }}" aria-current="page" class="rounded-full bg-indigo-600 px-3 py-1 font-medium text-white">{{ r.name }}</a>
         {% else %}
-        <a href="/live/{{ r.slug }}" hx-boost="false" class="rounded-full bg-gray-100 px-3 py-1 text-gray-800 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">{{ r.name }}</a>
+        <a href="/live/{{ r.slug }}" class="rounded-full bg-gray-100 px-3 py-1 text-gray-800 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">{{ r.name }}</a>
         {% endif %}
       {% endfor %}
     </nav>

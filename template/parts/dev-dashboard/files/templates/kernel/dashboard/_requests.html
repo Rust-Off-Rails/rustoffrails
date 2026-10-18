@@ -19,6 +19,9 @@
       <td class="muted">{{ r.last }}</td>
       <td>{% for (id, dur, tone) in r.slowest %}<a class="chip tone-{{ tone }}" href="{{ base }}/traces/{{ id }}">{{ dur }}</a> {% endfor %}</td>
     </tr>
+    {% if let Some((id, dur, _)) = r.slowest.first() %}
+    <tr class="drawer"><td colspan="11"><details data-inline-wf><summary>Slowest trace ({{ dur }}): its waterfall</summary><div data-wf-src="{{ base }}/traces/{{ id }}/waterfall"><a href="{{ base }}/traces/{{ id }}">Open the trace</a></div></details></td></tr>
+    {% endif %}
   {% endfor %}
   </tbody>
 </table></div>

@@ -32,6 +32,7 @@
       run.classList.remove("st-running");
       run.classList.add(end.querySelector("[role=alert]") ? "st-failed" : stopped ? "st-stopped" : "st-done");
       bindCopy(end);
+      end.querySelectorAll("[data-ai-continue]").forEach(bindContinue);
     });
     es.addEventListener("error", () => {
       // EventSource reconnects by itself (the server resumes after the last step it sent); once
@@ -111,17 +112,58 @@
     });
   };
 
+  // ---- "Continue the answer": the same run, one more call; its fragment replaces the run ----
+  const bindContinue = (form) => {
+    if (form.dataset.bound) return;
+    form.dataset.bound = "1";
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const run = form.closest("[data-ai-run]");
+      const button = form.querySelector("button");
+      if (button) button.disabled = true;
+      try {
+        const res = await fetch(form.action, { method: "POST", headers: { "x-dashboard-fragment": "1" } });
+        if (!res.ok) throw new Error(String(res.status));
+        // Rendered by Askama on the server: every model-written string is escaped there.
+        const box = document.createElement("div");
+        box.innerHTML = await res.text();
+        const next = box.querySelector("[data-ai-run]");
+        if (run && next) {
+          run.replaceWith(next);
+          follow(next);
+          bindAll(next);
+        }
+      } catch {
+        form.submit();
+      }
+    });
+  };
+
   const bindAll = (scope) => {
+    scope.querySelectorAll("[data-ai-continue]").forEach(bindContinue);
     scope.querySelectorAll("[data-ai-form]").forEach(bindForm);
     scope.querySelectorAll("[data-ai-run][data-stream]").forEach(follow);
     bindCopy(scope);
   };
 
   // ---- the panel (a dashboard page's, or the bar on another kernel page) ----
+  // A dashboard tab's panel is open on its first visit in this browser session, then starts
+  // closed (the server renders it open, so it is open without JavaScript too).
+  const seenBefore = (tab) => {
+    try {
+      const key = `dashboard-ai-seen:${tab}`;
+      if (sessionStorage.getItem(key)) return true;
+      sessionStorage.setItem(key, "1");
+    } catch {
+      // Storage blocked: every visit counts as the first.
+    }
+    return false;
+  };
   document.querySelectorAll("[data-ai-panel]").forEach((details) => {
     const body = details.querySelector("[data-ai-body]");
     let loaded = false;
-    details.addEventListener("toggle", async () => {
+    if (details.dataset.aiFirst && details.open && seenBefore(details.dataset.aiFirst)) details.open = false;
+    const load = async () => {
       if (!details.open || loaded) return;
       loaded = true;
       body.setAttribute("aria-busy", "true");
@@ -135,7 +177,9 @@
       } finally {
         body.removeAttribute("aria-busy");
       }
-    });
+    };
+    details.addEventListener("toggle", load);
+    load();
   });
   bindAll(document);
 })();

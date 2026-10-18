@@ -15,11 +15,17 @@ Passwordless sign-in (Phoenix 1.8's default, the framework's `ACCOUNTS: magic-li
 
 Extracted from Rust off Rails apps and improved: the originals had single-use hashed links, the confirm page and the dev hint; this adds the code, browser binding (login-CSRF defense), attempt limits, a per-address limit across networks, re-auth by code, security emails and a stale-port regression test.
 
-Guides: [`.offrails/guides/auth.md`](https://rustoffrails.org/docs/auth#magic-link-variants-magic-link-magic-link-invite), [`.offrails/guides/security.md`](https://rustoffrails.org/docs/security). Depends on: [auth-core](../auth-core/).
+Guides: [`.offrails/guides/auth.md`](https://rustoffrails.org/docs/guides/auth#magic-link-variants-magic-link-magic-link-invite), [`.offrails/guides/security.md`](https://rustoffrails.org/docs/guides/security). Depends on: [auth-core](../auth-core/).
 
-## Screenshots
+## Screens
 
-![Check your email, with the code form, light, desktop](../../docs/screenshots/auth-magic-link/sent-light-desktop.png)
+<a href="../../docs/screenshots/auth-magic-link/sent-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/auth-magic-link/sent-dark-desktop.png"><img src="../../docs/screenshots/auth-magic-link/sent-light-desktop.png" alt="Check your email, with the code form" width="860"></picture></a>
+
+<table>
+<tr><td valign="top"><a href="../../docs/screenshots/auth-magic-link/email-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/auth-magic-link/email-dark-desktop.png"><img src="../../docs/screenshots/auth-magic-link/email-light-desktop.png" alt="The sign-in email with link and code, in the dev mailbox" width="420"></picture></a><br><sub>The email</sub></td><td valign="top"><a href="../../docs/screenshots/auth-magic-link/confirm-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/auth-magic-link/confirm-dark-desktop.png"><img src="../../docs/screenshots/auth-magic-link/confirm-light-desktop.png" alt="Continue as, the scanner-safe confirmation" width="420"></picture></a><br><sub>Confirm the link (scanners can't burn it)</sub></td></tr>
+</table>
+
+<sub>Light or dark follows your GitHub theme; click an image for full size.</sub>
 
 | Screen | Light | Dark |
 |--------|-------|------|
@@ -31,7 +37,7 @@ Guides: [`.offrails/guides/auth.md`](https://rustoffrails.org/docs/auth#magic-li
 
 ## Install
 
-Through the samples MCP server: `get_sample auth-magic-link`. By hand, in the app root (install [auth-core](../auth-core/) first):
+By hand, in the app root (install [auth-core](../auth-core/) first):
 
 1. No crates beyond auth-core's.
 2. Copy `files/` into the app, keeping the paths. Replace `offrails_host` with your crate name in the test file.

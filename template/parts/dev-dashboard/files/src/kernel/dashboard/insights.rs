@@ -24,6 +24,20 @@ pub const LARGE_TABLE_ROWS: i64 = 100_000;
 pub const SCAN_MIN_ROWS: i64 = 500;
 /// RSS growth over the window that suggests a leak.
 pub const LEAK_BYTES: f64 = 64.0 * 1024.0 * 1024.0;
+/// A method (span) whose p95 is past this is slow. APP.
+pub const SLOW_METHOD_US: u64 = 100_000;
+/// A method run more than this many times in one trace is a loop worth batching. APP.
+pub const CALLS_PER_TRACE: u32 = 25;
+/// A method whose p95 at least doubled between the older and newer half of the traces, and is
+/// past this, is getting slower. APP.
+pub const GROWTH_MIN_US: u64 = 20_000;
+/// A function of the app's own with at least this share of CPU samples (self) is hot. APP.
+pub const HOT_CPU_SHARE: f64 = 0.20;
+/// A request that waited this long before its code ran, for at least `WAIT_SHARE` percent of its
+/// time, waited in a queue; `WAIT_MIN_TRACES` of them make a finding. APP.
+pub const WAIT_US: u64 = 100_000;
+pub const WAIT_SHARE: u64 = 25;
+pub const WAIT_MIN_TRACES: usize = 3;
 /// EXPLAINs per refresh, at most (each is cached for a minute).
 const EXPLAIN_BUDGET: usize = 20;
 /// CSP reports kept.
@@ -226,8 +240,20 @@ pub async fn findings(state: &AppState) -> Vec<Finding> {
     slow_routes_and_queries(&mut out);
     rising_errors(&mut out);
     slow_renders(&mut out);
+    {
+        let traces = lock(&HUB.traces).list(false);
+        let (hot, samples) = super::profiler::hot(5, "app");
+        out.extend(slow_functions(&traces, &hot, samples));
+    }
     memory_and_pool(&mut out);
     csp(&mut out);
+    {
+        let traces = lock(&HUB.traces).list(false);
+        out.extend(super::upstreams::findings(&traces));
+        out.extend(queue_waits(&traces));
+    }
+    out.extend(super::threats::findings());
+    out.extend(super::rum::findings());
     let db = &state.db;
     let tables = schema::tables(db).await.unwrap_or_default();
     schema_rules(&tables, &mut out);
@@ -250,7 +276,7 @@ pub async fn findings(state: &AppState) -> Vec<Finding> {
             evidence: pending.join(", "),
             fix: "Run `app db migrate` (bin/dev does it on every rebuild).".into(),
             guide: ".offrails/guides/dev-tools.md#pending-migrations",
-            guide_url: "https://rustoffrails.org/docs/dev-tools#pending-migrations",
+            guide_url: "https://rustoffrails.org/docs/guides/dev-tools#pending-migrations",
             href: "/dev/dashboard/schema/migrations".into(),
         });
     }
@@ -288,7 +314,7 @@ fn n_plus_one(out: &mut Vec<Finding>) {
             evidence: format!("{} runs {}× in one request ({} requests so far): {}", n.route, n.count, n.times, crate::kernel::ui::truncate(&n.sql, 140)),
             fix: "Load the children in one query (`load_many`, or `filter(Column::ParentId.is_in(ids))`), then add an `assert_query_count_stable` test for the page.".into(),
             guide: ".offrails/guides/models.md#associations",
-            guide_url: "https://rustoffrails.org/docs/models#associations",
+            guide_url: "https://rustoffrails.org/docs/guides/models#associations",
             href: format!("/dev/dashboard/traces/{}", n.trace),
         });
     }
@@ -306,7 +332,7 @@ fn slow_routes_and_queries(out: &mut Vec<Finding>) {
                 evidence: format!("p95 {}, p99 {}, max {} over {} requests", micros(r.p95), micros(r.p99), micros(r.max), r.count),
                 fix: "Open its slowest trace: the waterfall shows whether the time goes to SQL, a call out or rendering.".into(),
                 guide: ".offrails/guides/test-standards.md#6-performance-guards",
-                guide_url: "https://rustoffrails.org/docs/test-standards#6-performance-guards",
+                guide_url: "https://rustoffrails.org/docs/guides/test-standards#6-performance-guards",
                 href: r.slowest.first().map_or_else(|| "/dev/dashboard/requests".into(), |(id, _, _)| format!("/dev/dashboard/traces/{id}")),
             });
         }
@@ -322,7 +348,7 @@ fn slow_routes_and_queries(out: &mut Vec<Finding>) {
                 evidence: format!("p95 {}, {} runs, {} in total: {}", micros(q.p95), q.count, micros(q.total), crate::kernel::ui::truncate(&q.sql, 140)),
                 fix: "EXPLAIN it from its SQL page; add the index the plan asks for, or fetch less (a LIMIT, fewer columns, a cached count).".into(),
                 guide: ".offrails/guides/migrations.md#rules",
-                guide_url: "https://rustoffrails.org/docs/migrations#rules",
+                guide_url: "https://rustoffrails.org/docs/guides/migrations#rules",
                 href: format!("/dev/dashboard/sql/{}", q.id),
             });
         }
@@ -343,7 +369,7 @@ fn rising_errors(out: &mut Vec<Finding>) {
                 evidence: format!("{errors} server errors in the last 5 minutes: {:.0}% of requests, up from {:.0}%", recent * 100.0, before * 100.0),
                 fix: "Filter the live log by level=error for the cause; every 500 is logged once, with its request id.".into(),
                 guide: ".offrails/guides/errors-and-logging.md#response-mapping",
-                guide_url: "https://rustoffrails.org/docs/errors-and-logging#response-mapping",
+                guide_url: "https://rustoffrails.org/docs/guides/errors-and-logging#response-mapping",
                 href: "/dev/dashboard/logs?level=error".into(),
             });
         }
@@ -372,11 +398,161 @@ fn slow_renders(out: &mut Vec<Finding>) {
                 evidence: format!("a render span took {}", micros(worst)),
                 fix: "Compute in the handler, not the template; paginate long lists; render partials once.".into(),
                 guide: ".offrails/guides/views.md#layout--partials",
-                guide_url: "https://rustoffrails.org/docs/views#layout--partials",
+                guide_url: "https://rustoffrails.org/docs/guides/views#layout--partials",
                 href: format!("/dev/dashboard/traces/{trace}"),
             });
         }
     }
+}
+
+/// Slow functions, deterministically, from the spans (wall clock) and the CPU samples: a method
+/// whose p95 is past `SLOW_METHOD_US`, one run more than `CALLS_PER_TRACE` times in a trace, one
+/// whose p95 doubled between the older and newer half of the traces, and an app function hot on
+/// the CPU (`HOT_CPU_SHARE`).
+pub fn slow_functions(
+    traces: &[std::sync::Arc<super::trace::Trace>],
+    hot: &[super::profiler::Hot],
+    samples: u64,
+) -> Vec<Finding> {
+    let mut out = Vec::new();
+    let (stats, _) = super::methods::aggregate(traces);
+    let methods_href = |name: &str| {
+        format!(
+            "/dev/dashboard/traces?fn={}",
+            crate::kernel::cookie::encode(name)
+        )
+    };
+    for m in &stats {
+        // Handlers and renders have their own rules (slow routes, slow renders).
+        if matches!(m.kind, "handler" | "template" | "middleware" | "job") {
+            continue;
+        }
+        if m.calls >= 3 && m.p95() >= SLOW_METHOD_US {
+            out.push(Finding {
+                key: format!("slow-fn-{}", m.key),
+                kind: "slow_function",
+                severity: if m.p95() >= 5 * SLOW_METHOD_US { Severity::High } else { Severity::Medium },
+                score: m.p95() / 1000 * m.calls.min(100),
+                title: format!("Slow function {}", m.name),
+                evidence: format!("p95 {} over {} calls (self {} of {} total), in {}", micros(m.p95()), m.calls, micros(m.self_us), micros(m.total_us), m.routes.keys().take(3).copied().collect::<Vec<_>>().join(", ")),
+                fix: format!("Open a trace that ran it: if its time is SQL, fix the query; if it is self time, look at Hot functions for where the CPU went; if it waits, add a span inside to see on what. Ask AI \"Why is {} slow?\" from its trace.", m.name),
+                guide: ".offrails/guides/dev-tools.md",
+                guide_url: "https://rustoffrails.org/docs/dev-tools",
+                href: methods_href(m.name),
+            });
+        }
+        if m.max_per_trace > CALLS_PER_TRACE {
+            out.push(Finding {
+                key: format!("loop-fn-{}", m.key),
+                kind: "slow_function",
+                severity: Severity::Medium,
+                score: u64::from(m.max_per_trace),
+                title: format!("{} runs {}× in one request", m.name, m.max_per_trace),
+                evidence: format!("{} calls in {} traces ({:.0} per trace), {} in total", m.calls, m.traces, m.per_trace(), micros(m.total_us)),
+                fix: "A loop calls it once per item: give it every item at once (one query with `is_in(ids)`, one batch call), then loop over the result.".into(),
+                guide: ".offrails/guides/models.md#associations",
+                guide_url: "https://rustoffrails.org/docs/models#associations",
+                href: methods_href(m.name),
+            });
+        }
+    }
+    // Growth: the older half of the traces against the newer half.
+    if traces.len() >= 20 {
+        let mut by_age: Vec<&std::sync::Arc<super::trace::Trace>> = traces.iter().collect();
+        by_age.sort_by_key(|t| t.id);
+        let (old, new) = by_age.split_at(by_age.len() / 2);
+        let own = |v: &[&std::sync::Arc<super::trace::Trace>]| {
+            super::methods::aggregate(&v.iter().map(|t| (*t).clone()).collect::<Vec<_>>()).0
+        };
+        let before: HashMap<String, (u64, u64)> = own(old)
+            .into_iter()
+            .map(|m| (m.key.clone(), (m.calls, m.p95())))
+            .collect();
+        for m in own(new) {
+            if let Some((calls, p95)) = before.get(&m.key)
+                && *calls >= 5
+                && m.calls >= 5
+                && m.p95() >= GROWTH_MIN_US
+                && m.p95() >= 2 * p95.max(&1)
+                && !matches!(m.kind, "middleware")
+            {
+                out.push(Finding {
+                    key: format!("grow-fn-{}", m.key),
+                    kind: "slow_function",
+                    severity: Severity::Medium,
+                    score: m.p95() / 1000,
+                    title: format!("{} is getting slower", m.name),
+                    evidence: format!("p95 {} in the newer traces, {} before", micros(m.p95()), micros(*p95)),
+                    fix: "Compare a recent trace with an older one of the same route (tick both in Traces, then Compare): the diff shows what it does now that it didn't.".into(),
+                    guide: ".offrails/guides/dev-tools.md",
+                    guide_url: "https://rustoffrails.org/docs/dev-tools",
+                    href: methods_href(m.name),
+                });
+            }
+        }
+    }
+    if samples >= 50 {
+        for h in hot.iter().filter(|h| h.origin == "app").take(3) {
+            let share = h.self_n as f64 / samples as f64;
+            if share >= HOT_CPU_SHARE {
+                out.push(Finding {
+                    key: format!("hot-cpu-{}", h.name),
+                    kind: "slow_function",
+                    severity: if share >= 0.5 { Severity::High } else { Severity::Medium },
+                    score: (share * 1000.0) as u64,
+                    title: format!("{} is hot on the CPU", super::profiler::short(&h.name)),
+                    evidence: format!("{:.0}% of the CPU samples in the last 5 minutes were in it (via {})", share * 100.0, if h.path.is_empty() { "the root" } else { &h.path }),
+                    fix: "Do less per call (cache a computed value, avoid cloning large values, move work out of a loop), or move it off the request (a job).".into(),
+                    guide: ".offrails/guides/dev-tools.md",
+                    guide_url: "https://rustoffrails.org/docs/dev-tools",
+                    href: format!("/dev/dashboard/profile?filter=app&fn={}", crate::kernel::cookie::encode(&h.name)),
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Requests that waited before their code ran (the waterfall's `wait` rows): the server is
+/// saturated (every worker busy, a concurrency limit, a connection to wait for).
+pub fn queue_waits(traces: &[std::sync::Arc<super::trace::Trace>]) -> Vec<Finding> {
+    let mut hits: Vec<(u64, u64, &'static str, &'static str, u64)> = Vec::new();
+    for t in traces.iter().filter(|t| t.kind == "request").take(300) {
+        let waited = super::waterfall::waited_us(&super::waterfall::tree(t, false));
+        if waited >= WAIT_US && waited * 100 >= t.dur_us.max(1) * WAIT_SHARE {
+            hits.push((waited, t.id, t.method, t.route, t.dur_us));
+        }
+    }
+    if hits.len() < WAIT_MIN_TRACES {
+        return Vec::new();
+    }
+    hits.sort_by_key(|h| std::cmp::Reverse(h.0));
+    let (worst, trace, _, _, dur) = hits[0];
+    let mut routes: Vec<String> = hits.iter().map(|h| format!("{} {}", h.2, h.3)).collect();
+    routes.sort();
+    routes.dedup();
+    vec![Finding {
+        key: "queue-wait".into(),
+        kind: "saturation",
+        severity: if worst >= 5 * WAIT_US { Severity::High } else { Severity::Medium },
+        score: worst / 1000 * hits.len() as u64,
+        title: format!(
+            "Requests waited up to {} before running: the server is saturated",
+            micros(worst)
+        ),
+        evidence: format!(
+            "{} waited at least {} before any of their code ran ({:.0}% of the worst one's {}), on {}",
+            super::web::count(hits.len(), "request", "requests"),
+            micros(WAIT_US),
+            worst as f64 * 100.0 / dur.max(1) as f64,
+            micros(dur),
+            routes.into_iter().take(4).collect::<Vec<_>>().join(", ")
+        ),
+        fix: "Look at Tokio busy and the database pool on Charts at those minutes: busy workers mean blocking work on the runtime (move it to spawn_blocking) or too few cores; a full pool means slow or long-held connections (raise DATABASE_POOL, shorten transactions); otherwise a concurrency limit is queueing them.".into(),
+        guide: ".offrails/guides/database.md#kerneldbrs-spec",
+        guide_url: "https://rustoffrails.org/docs/guides/database",
+        href: format!("/dev/dashboard/traces/{trace}"),
+    }]
 }
 
 /// Least-squares slope of (t, v), per second.
@@ -414,7 +590,7 @@ fn memory_and_pool(out: &mut Vec<Finding>) {
                 evidence: format!("RSS grew {} over the last {} at a steady rate ({}/min)", super::web::bytes(growth as u64), crate::kernel::ui::duration((span * 1000.0) as i64), super::web::bytes((per_sec * 60.0) as u64)),
                 fix: "Look for a cache or a Vec that only grows (bound it, like the dashboard bounds itself), or a task per request that never ends.".into(),
                 guide: ".offrails/guides/caching.md#key-design",
-                guide_url: "https://rustoffrails.org/docs/caching#key-design",
+                guide_url: "https://rustoffrails.org/docs/guides/caching#key-design",
                 href: "/dev/dashboard/charts?range=1h#chart-memory".into(),
             });
         }
@@ -434,7 +610,7 @@ fn memory_and_pool(out: &mut Vec<Finding>) {
             evidence: format!("every connection was in use for {saturated} of the last {} seconds; requests waited for one (sqlx doesn't count waiters, so the dashboard counts the seconds with none idle)", recent.len()),
             fix: "Raise DATABASE_POOL, shorten transactions, and never hold a connection across an await on something slow.".into(),
             guide: ".offrails/guides/database.md#kerneldbrs-spec",
-            guide_url: "https://rustoffrails.org/docs/database",
+            guide_url: "https://rustoffrails.org/docs/guides/database",
             href: "/dev/dashboard/charts#chart-pool".into(),
         });
     }
@@ -471,7 +647,7 @@ fn csp(out: &mut Vec<Finding>) {
             fix: "Move inline script or style into a file under static/; never loosen the CSP."
                 .into(),
             guide: ".offrails/guides/security.md#the-header-matrix",
-            guide_url: "https://rustoffrails.org/docs/security#the-header-matrix",
+            guide_url: "https://rustoffrails.org/docs/guides/security#the-header-matrix",
             href: "/dev/dashboard/insights#csp".into(),
         });
     }
@@ -491,7 +667,7 @@ fn schema_rules(tables: &[schema::Table], out: &mut Vec<Finding>) {
                 evidence: format!("{}.{} references {}, and no index starts with it: every lookup by {} (and every delete of a {} row) scans {} rows", t.name, fk.columns.join(", "), fk.table, fk.table, fk.table, t.rows.unwrap_or(0)),
                 fix: format!("A migration with `Index::create().table({}).col({})`.", t.name, fk.columns.join(").col(")),
                 guide: ".offrails/guides/migrations.md#rules",
-                guide_url: "https://rustoffrails.org/docs/migrations#rules",
+                guide_url: "https://rustoffrails.org/docs/guides/migrations#rules",
                 href: format!("/dev/dashboard/schema#table-{}", t.name),
             });
         }
@@ -508,7 +684,7 @@ fn schema_rules(tables: &[schema::Table], out: &mut Vec<Finding>) {
                 evidence: format!("{} rows{}{}", crate::kernel::ui::thousands(rows as u64), t.bytes.map(|b| format!(", {}", super::web::bytes(b as u64))).unwrap_or_default(), if grew > 0 { format!(", +{} since {}", crate::kernel::ui::thousands(grew as u64), crate::kernel::ui::ago(seen_at, now)) } else { String::new() }),
                 fix: "Make sure every query on it uses an index and a LIMIT; prune old rows with a recurring job.".into(),
                 guide: ".offrails/guides/jobs.md#recurring-jobs-srcjobsrecurringrs-the-oban-cron-plugin",
-                guide_url: "https://rustoffrails.org/docs/jobs",
+                guide_url: "https://rustoffrails.org/docs/guides/jobs",
                 href: format!("/dev/dashboard/schema#table-{}", t.name),
             });
         }
@@ -568,7 +744,7 @@ async fn scans(state: &AppState, tables: &[schema::Table], out: &mut Vec<Finding
                 ),
                 fix: "Index the columns in its WHERE (and ORDER BY), in that order.".into(),
                 guide: ".offrails/guides/migrations.md#rules",
-                guide_url: "https://rustoffrails.org/docs/migrations#rules",
+                guide_url: "https://rustoffrails.org/docs/guides/migrations#rules",
                 href: format!("/dev/dashboard/sql/{}", q.id),
             });
         }
@@ -634,7 +810,7 @@ async fn jobs(state: &AppState, out: &mut Vec<Finding>) {
             evidence: format!("{n} jobs of {worker} are retrying or discarded"),
             fix: "Open its errors on the jobs dashboard; a job that fails on every attempt needs a fix, not more retries.".into(),
             guide: ".offrails/guides/jobs.md#observability",
-            guide_url: "https://rustoffrails.org/docs/jobs#observability",
+            guide_url: "https://rustoffrails.org/docs/guides/jobs#observability",
             href: format!("/admin/jobs/list?state=retryable&worker={worker}"),
         });
     }

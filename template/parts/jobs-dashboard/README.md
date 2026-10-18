@@ -14,11 +14,18 @@ A live operations dashboard for the [jobs](../jobs/) queue at **`/admin/jobs`**,
 
 Extracted from Rust off Rails apps and rebuilt from the best of two of them. Kept: the state cards, the stacked chart with its legend, running/paused/no-nodes pills with Pause buttons, keyset paging and the confirmation page for bulk actions. Fixed: a chart built as an HTML string and rendered with `|safe` (now an SVG template of numbers, no `|safe` anywhere), dashboard CSS living in a shared stylesheet that pages forgot to link (now its own file, linked by the page, with a test that every template class has a rule), destructive single-job actions without confirmation, and a cron page that found its last job by string-matching JSON. Added: queue-wait percentiles, the now-running lane with progress, worker success rates, error groups, discard and pause-all, the timeline, per-attempt reports, filter chips, keyboard navigation, copyable CLI commands, the mobile card layout and the password gate's rate limit.
 
-Guide: [`.offrails/guides/jobs-dashboard.md`](https://rustoffrails.org/docs/jobs-dashboard) · [`.offrails/guides/jobs.md`](https://rustoffrails.org/docs/jobs). Depends on: [jobs](../jobs/).
+Guide: [`.offrails/guides/jobs-dashboard.md`](https://rustoffrails.org/docs/guides/jobs-dashboard) · [`.offrails/guides/jobs.md`](https://rustoffrails.org/docs/guides/jobs). Depends on: [jobs](../jobs/).
 
-## Screenshots
+## Screens
 
-![The overview, light, desktop](../../docs/screenshots/jobs-dashboard/overview-light-desktop.png)
+<a href="../../docs/screenshots/jobs-dashboard/overview-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/jobs-dashboard/overview-dark-desktop.png"><img src="../../docs/screenshots/jobs-dashboard/overview-light-desktop.png" alt="The jobs overview: counters, throughput and queue wait charts, running jobs, queues" width="860"></picture></a>
+
+<table>
+<tr><td valign="top"><a href="../../docs/screenshots/jobs-dashboard/errors-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/jobs-dashboard/errors-dark-desktop.png"><img src="../../docs/screenshots/jobs-dashboard/errors-light-desktop.png" alt="Errors grouped by worker and root cause" width="420"></picture></a><br><sub>Errors grouped by root cause</sub></td><td valign="top"><a href="../../docs/screenshots/jobs-dashboard/job-failed-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/jobs-dashboard/job-failed-dark-desktop.png"><img src="../../docs/screenshots/jobs-dashboard/job-failed-light-desktop.png" alt="A failed job with its timeline and every attempt's error" width="420"></picture></a><br><sub>A failed job: timeline and every attempt</sub></td></tr>
+<tr><td valign="top"><a href="../../docs/screenshots/jobs-dashboard/cron-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/jobs-dashboard/cron-dark-desktop.png"><img src="../../docs/screenshots/jobs-dashboard/cron-light-desktop.png" alt="Cron schedule with next and last runs" width="420"></picture></a><br><sub>Cron</sub></td><td valign="top"><a href="../../docs/screenshots/jobs-dashboard/list-filtered-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/jobs-dashboard/list-filtered-dark-desktop.png"><img src="../../docs/screenshots/jobs-dashboard/list-filtered-light-desktop.png" alt="The jobs list filtered, with chips and bulk actions" width="420"></picture></a><br><sub>Jobs, filtered, with bulk actions</sub></td></tr>
+</table>
+
+<sub>Light or dark follows your GitHub theme; click an image for full size.</sub>
 
 | Screen | Light | Dark |
 |--------|-------|------|
@@ -35,7 +42,7 @@ Guide: [`.offrails/guides/jobs-dashboard.md`](https://rustoffrails.org/docs/jobs
 
 ## Install
 
-Through the samples MCP server: `get_sample jobs-dashboard`. Or by hand, in the app root, after the [jobs](../jobs/) sample:
+By hand, in the app root, after the [jobs](../jobs/) sample:
 
 1. No crates to add.
 2. Copy `files/` into the app, keeping the paths. In the test file, replace `offrails_host` with your crate name.
