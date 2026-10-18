@@ -207,6 +207,12 @@ async fn the_gallery_renders_in_development() {
     app.get(&APP_CRATE::routes::paths::dev_components()).await.assert_ok();
 }
 TEST
+  # The a11y smoke's scenario, so prove_app runs it the way `verify --full` does.
+  mkdir -p tests/e2e
+  cat > tests/e2e/smoke.scenario.mjs <<'SCENARIO'
+// The a11y smoke's pages (test-template.sh prove).
+export const a11yPaths = ["/", "/dev/components"];
+SCENARIO
   krate=$(awk -F'"' '/^name = /{ print $2; exit }' Cargo.toml)
   perl -pi -e "s/APP_CRATE/$krate/g" tests/app/proof_fixture_test.rs
   printf 'mod proof_fixture_test;\n' >> tests/app/main.rs
@@ -242,6 +248,18 @@ prove_app() {
   base="http://localhost:$port"
   if [ "$status" = 0 ]; then
     BASE=$base node .offrails/tools/browser-smoke/smoke-components.mjs || status=$?
+  fi
+  # The a11y smoke exactly as `verify --full` runs it (the vendored run.sh, the scenario, exit 77 a
+  # skip): run.sh runs a copy of lib.mjs from its own directory under the cache, so axe-core must be
+  # found from there.
+  if [ "$status" = 0 ]; then
+    a11y=0
+    BASE=$base SCENARIO=tests/e2e/smoke.scenario.mjs sh .offrails/tools/browser-smoke/run.sh a11y || a11y=$?
+    if [ "$a11y" = 77 ]; then
+      echo "skip: a11y smoke (run.sh exit 77)" > "$work/$name/browser-smoke-skipped"
+    elif [ "$a11y" != 0 ]; then
+      status=$a11y
+    fi
   fi
   if [ "$status" = 0 ]; then
     t0=$(date +%s)

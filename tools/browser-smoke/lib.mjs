@@ -4,6 +4,7 @@
 // server and bounces in the browser. A smoke that ignores certificate errors can't see that.
 import puppeteer from "puppeteer-core";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -78,7 +79,9 @@ export async function loginAndProve(page, sc, check) {
 
 /** axe-core (WCAG 2.2 AA) on the current page. Injected through CDP, so the strict CSP stays on. */
 export async function axe(page) {
-  const src = fs.readFileSync(new URL("./node_modules/axe-core/axe.min.js", import.meta.url), "utf8");
+  // Resolved the way the puppeteer-core import is: up from this file to the nearest node_modules.
+  // run.sh runs a copy from its own $cache/run.XXXXXX, whose parent (the cache) holds it.
+  const src = fs.readFileSync(createRequire(import.meta.url).resolve("axe-core/axe.min.js"), "utf8");
   await page.evaluate(src);
   return page.evaluate(async () => {
     const r = await window.axe.run(document, {
