@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/Rust-Off-Rails/rustoffrails/security/advisories/new
+    url: https://github.com/rust-off-rails/rustoffrails/security/advisories/new
     about: Please report security issues privately (see SECURITY.md).
   - name: Questions and show-and-tell
-    url: https://github.com/Rust-Off-Rails/rustoffrails/discussions
+    url: https://github.com/rust-off-rails/rustoffrails/discussions
     about: Ask questions and share what you built.

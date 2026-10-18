@@ -15,7 +15,7 @@
 set -eu
 
 cd "$(dirname "$0")/../.."
-REPO="Rust-Off-Rails/rustoffrails"
+REPO="rust-off-rails/rustoffrails"
 DRY=0; BUILD_ONLY=0; WORKTREE=0; OUT=""
 while [ $# -gt 0 ]; do
   case "$1" in

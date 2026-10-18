@@ -1,7 +1,7 @@
 # Accounts (`rails generate authentication` / `phx.gen.auth`): the auth parts
 
 > **TL;DR**
-> - Accounts are **parts**, not a recipe to type: `cargo offrails add auth-core auth-password` (email + password), `auth-core auth-magic-link` (passwordless), both, and `auth-totp` for two-factor. They bring users, database sessions, sign-in, the account security page, security emails, the audit trail, throttling and their own tests ([the parts](../template/README.md#choosing-parts), [samples](https://github.com/Rust-Off-Rails/samples)).
+> - Accounts are **parts**, not a recipe to type: `cargo offrails add auth-core auth-password` (email + password), `auth-core auth-magic-link` (passwordless), both, and `auth-totp` for two-factor. They bring users, database sessions, sign-in, the account security page, security emails, the audit trail, throttling and their own tests ([the parts](../template/README.md#choosing-parts), [samples](https://github.com/rust-off-rails/samples)).
 > - Before: write `product/features/accounts.md`, and pick the variant from the interview (`ACCOUNTS: password | magic-link | password+magic-link`, plus ` invite` when sign-up is closed). After: the header (`ACCOUNTS`, `TENANCY`), `APP_SECRET_KEY`, where people land after sign-in, your own handlers scoped to the user, the tenancy suites (the first scoped `g resource` writes them), and the browser smoke.
 > - What's left is product, not plumbing: invite-only sign-up, roles, teams, the spec's own acceptance tests. Each is listed below with where it goes.
 >

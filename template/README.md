@@ -2,7 +2,7 @@
 
 > **TL;DR**
 > - `template/app/` is a complete, compiling, tested blank app (htmx). A new app is a copy of it, renamed, with this framework vendored into `.offrails/`: one command, no code retyped.
-> - `template/parts/<name>/` are the optional kernel parts (mailer, dev mailbox, jobs, jobs dashboard, accounts, realtime, dev dashboard). They are the [samples](https://github.com/Rust-Off-Rails/samples), vendored into the release. Add one at any time with `cargo offrails add-part <name>`.
+> - `template/parts/<name>/` are the optional kernel parts (mailer, dev mailbox, jobs, jobs dashboard, accounts, realtime, dev dashboard). They are the [samples](https://github.com/rust-off-rails/samples), vendored into the release. Add one at any time with `cargo offrails add-part <name>`.
 > - `template/snippets/<name>/` are small, tested code to copy (a feed, slugs, Markdown, a pager, a theme toggle, backdated seeds, a public page by slug, a CRUD resource): `cargo offrails snippets`, `snippet show <name>`, `snippet add <name>` ([snippets](snippets/README.md)).
 > - The generators are `tools/offrails-gen`, a standard-library-only Rust tool: the same commands on Linux, macOS and Windows. Snippets and generators are both optional starting points; whatever you start from, a feature is small files in its own folders plus one marked line per shared spot.
 > - Pages are built from the component kit, `templates/components/ui.html` (every component at `/dev/components`), in one of five layouts, branded by `brand.toml` (`cargo offrails brand`); generated and snippet pages use the kit. `BASE=… cargo offrails prove` screenshots and checks every page and writes `docs/proof/PROOF.md` ([views](../guides/views.md#components), [testing](../guides/testing.md#proof-cargo-offrails-prove)).
@@ -76,7 +76,7 @@ The agent decides which parts the app needs from what the human said and the spe
 | Chat, presence ("who's online"), typing indicators, multiplayer, live updates pushed to other users | `realtime` | Channels over WebSocket with SSE and long-poll fallbacks |
 | None of the above (a content site, an internal read-only tool) | `dev-dashboard` only | The base already has `/dev`, the cache, security headers and the theme switch |
 
-When the human wants to see what a part is before deciding, point them at **<https://github.com/Rust-Off-Rails/samples>**: its README has screenshots of every screen, light and dark. When the product later grows a need, add the part then: `cargo offrails add-part <name>`. Before hand-writing a mailer, a queue, sessions or a socket layer, run `cargo offrails list-parts`: if a part does it, add the part ([workflow](../workflow.md#when-the-product-grows-a-need-add-the-part)).
+When the human wants to see what a part is before deciding, point them at **<https://github.com/rust-off-rails/samples>**: its README has screenshots of every screen, light and dark. When the product later grows a need, add the part then: `cargo offrails add-part <name>`. Before hand-writing a mailer, a queue, sessions or a socket layer, run `cargo offrails list-parts`: if a part does it, add the part ([workflow](../workflow.md#when-the-product-grows-a-need-add-the-part)).
 
 ## Other modes
 

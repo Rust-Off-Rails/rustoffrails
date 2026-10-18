@@ -51,7 +51,7 @@ cargo offrails add-part mailer        # e.g. the spec now says "email the owner 
 cargo run -q -- db migrate && cargo run -q -- routes
 ```
 
-Typical moments: the first email (`mailer`, `dev-mailbox`), the first slow, retried or scheduled work (`jobs`, `jobs-dashboard`), the first sign-in (`auth-core` + a method), the first push to other users (`realtime`). The [decision table](template/README.md#choosing-parts) maps spec signals to parts. Tell the human in one line what the part adds (link: <https://github.com/Rust-Off-Rails/samples>, screenshots of every screen), log it (`add-part` writes the `docs/decisions.md` line), then the Definition of Done on both databases. Hand-write it only when no part fits, or the human declined the part (recorded in `docs/decisions.md`).
+Typical moments: the first email (`mailer`, `dev-mailbox`), the first slow, retried or scheduled work (`jobs`, `jobs-dashboard`), the first sign-in (`auth-core` + a method), the first push to other users (`realtime`). The [decision table](template/README.md#choosing-parts) maps spec signals to parts. Tell the human in one line what the part adds (link: <https://github.com/rust-off-rails/samples>, screenshots of every screen), log it (`add-part` writes the `docs/decisions.md` line), then the Definition of Done on both databases. Hand-write it only when no part fits, or the human declined the part (recorded in `docs/decisions.md`).
 
 ## Definition of Done
 

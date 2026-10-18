@@ -28,7 +28,7 @@
 
 set -eu
 
-REPO="Rust-Off-Rails/rustoffrails"
+REPO="rust-off-rails/rustoffrails"
 OFFRAILS_HOME="${OFFRAILS_HOME:-$HOME/.offrails}"
 BIN_DIR="${OFFRAILS_BIN_DIR:-$HOME/.local/bin}"
 ASSET="rustoffrails.tar.gz"
