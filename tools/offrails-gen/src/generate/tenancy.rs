@@ -11,6 +11,46 @@ use super::routes_md;
 
 const GUARD: &str = include_str!("files/guard_test.rs.txt");
 
+/// The guide's guard test, plus the handler files the app's parts installed: their scoping is the
+/// part's own suite's (the samples don't mark their lines yet), so a generated guard doesn't fail
+/// on code the app didn't write.
+fn guard_file(info: &AppInfo) -> String {
+    let mut files: Vec<String> = Vec::new();
+    for part in crate::parts::installed(&info.dir) {
+        let root = info
+            .dir
+            .join(".offrails/template/parts")
+            .join(&part)
+            .join("files");
+        for f in crate::util::files_under(&root).unwrap_or_default() {
+            let handler = [
+                "src/controllers/",
+                "src/channels/",
+                "src/graphql/",
+                "src/api/",
+            ]
+            .iter()
+            .any(|d| f.starts_with(d));
+            if handler && f.ends_with(".rs") && !files.contains(&f) {
+                files.push(f);
+            }
+        }
+    }
+    files.sort();
+    let list: String = files.iter().map(|f| format!("    \"{f}\",\n")).collect();
+    GUARD
+        .replace(
+            "const MARKER: &str = \"// unscoped:\";\n",
+            &format!(
+                "const MARKER: &str = \"// unscoped:\";\n\n/// Handler files the app's parts installed (`cargo offrails parts`): the part's own suite tests\n/// their scoping. APP: drop a line once you've reviewed that file's lookups or marked them.\nconst PART_FILES: &[&str] = &[\n{list}];\n"
+            ),
+        )
+        .replace(
+            "    for file in &files {\n        let src = fs::read_to_string(file).expect(\"read source\");\n        for (n, line) in src.lines().enumerate() {\n            let code = line.trim_start();",
+            "    for file in &files {\n        let rel = file.strip_prefix(root).unwrap_or(file);\n        if PART_FILES\n            .iter()\n            .any(|p| rel == std::path::Path::new(p))\n        {\n            continue;\n        }\n        let src = fs::read_to_string(file).expect(\"read source\");\n        for (n, line) in src.lines().enumerate() {\n            let code = line.trim_start();",
+        )
+}
+
 fn tenancy_file(info: &AppInfo, own_prefix: &str) -> String {
     let k = &info.krate;
     // Id routes the parts already have (sessions, sockets…): not a tenant's record; their own
@@ -61,7 +101,7 @@ pub fn plan_into(info: &AppInfo, plan: &mut Plan, spec: &ModelSpec, flags: &Flag
             .read("tests/app/tenancy_test.rs")
             .is_some_and(|t| t.contains("// samples: tenant fill"));
     if guard == "gen" {
-        plan.shared("tests/app/guard_test.rs", GUARD);
+        plan.shared("tests/app/guard_test.rs", guard_file(info));
         plan.insert_for(
             "tests/app/guard_test.rs",
             "tests/app/main.rs",
@@ -115,4 +155,13 @@ pub fn plan_into(info: &AppInfo, plan: &mut Plan, spec: &ModelSpec, flags: &Flag
             "assert_eq!(\n    factories::reload_{s}(app.db(), b.{s}.id).await.as_ref(),\n    Some(&b.{s})\n);\n"
         ),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_guard_template_has_the_lines_part_exemptions_hook_into() {
+        assert!(super::GUARD.contains("const MARKER: &str = \"// unscoped:\";\n"));
+        assert!(super::GUARD.contains("    for file in &files {\n        let src = fs::read_to_string(file).expect(\"read source\");\n        for (n, line) in src.lines().enumerate() {\n            let code = line.trim_start();"));
+    }
 }
