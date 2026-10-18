@@ -494,17 +494,34 @@ async fn connect_or_reset(path: &Path, writable: bool) -> anyhow::Result<Databas
                 moved_to = %aside.display(),
                 "the dashboard's history file is damaged or from another version; starting a fresh one"
             );
-            std::fs::rename(path, &aside)?;
+            rename_when_released(path, &aside).await?;
             for ext in ["-wal", "-shm"] {
                 let side = PathBuf::from(format!("{}{ext}", path.display()));
                 if side.exists() {
-                    let _ = std::fs::rename(&side, format!("{}{ext}", aside.display()));
+                    let to = PathBuf::from(format!("{}{ext}", aside.display()));
+                    let _ = rename_when_released(&side, &to).await;
                 }
             }
             prepare(path)?;
             connect(path, writable).await
         }
         Err(e) => Err(e),
+    }
+}
+
+/// Renames a file, retrying for up to 2 s while another handle still holds it. Windows refuses to
+/// rename an open file (os error 32), and a failed SQLite connection's worker thread can close its
+/// handle a moment after the error comes back; Unix renames at once.
+async fn rename_when_released(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut tries = 0;
+    loop {
+        match std::fs::rename(from, to) {
+            Err(e) if tries < 20 && e.kind() != std::io::ErrorKind::NotFound => {
+                tries += 1;
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            other => return other,
+        }
     }
 }
 
