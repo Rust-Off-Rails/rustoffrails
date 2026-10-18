@@ -1,5 +1,7 @@
-// static/app.js: each behavior is one delegated listener, keyed by a data attribute. No inline
-// scripts (CSP): this file is the only JS the app layout loads.
+// static/app.js: each behavior is one delegated listener on `document`, keyed by a data attribute.
+// No inline scripts (CSP): the app's own JS (parts add theirs at `samples: app head` in the layout).
+// Links are boosted (hx-boost): this file runs once, on the first full load, and never again, so
+// never bind to elements directly or on DOMContentLoaded (guides/frontend-htmx.md#boosted-navigation).
 document.addEventListener("click", (e) => {
   const el = e.target.closest("[data-toggle]");
   if (el) document.getElementById(el.dataset.toggle)?.classList.toggle("hidden");

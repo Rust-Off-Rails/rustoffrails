@@ -6,7 +6,9 @@
 //! SQLite and Postgres suites at the same time. `--full` (once, before you say done): also the
 //! mechanical gates (offrails-check), coverage (it is the SQLite run, instrumented), cargo-deny,
 //! gitleaks, the no-unwrap lint, `routes` against docs/routes.md, the TS checks when there is a
-//! `web/`, and the browser smoke when `BASE` names a running app.
+//! `web/`, and the browser smokes when `BASE` names a running app: the kernel pages, axe when the
+//! app has a scenario, and every page after a boosted link (`smoke-boosted.mjs`; "skip: no Chrome"
+//! without a browser).
 //!
 //! Each step writes `target/verify/<step>.log`; the summary prints one line per step and the
 //! tail of each failure. Exit status: 0 all green, 1 something failed, 2 usage.
@@ -37,6 +39,9 @@ struct Step {
     after: Vec<&'static str>,
     /// Reported, never fails the run (a review list, not a gate).
     advisory: bool,
+    /// An exit status that means "skipped" (the browser smokes exit 77 without a browser): reported
+    /// as skip with the log's last line, never as passed.
+    skip_code: Option<i32>,
 }
 
 impl Step {
@@ -48,6 +53,7 @@ impl Step {
             env: Vec::new(),
             after: Vec::new(),
             advisory: false,
+            skip_code: None,
         }
     }
     fn after(mut self, deps: &[&'static str]) -> Self {
@@ -62,7 +68,14 @@ impl Step {
         self.args.extend_from_slice(more);
         self
     }
+    fn skip_on(mut self, code: i32) -> Self {
+        self.skip_code = Some(code);
+        self
+    }
 }
+
+/// The exit status a browser smoke uses for "no browser here: skipped" (automake's convention).
+const SKIP_EXIT: i32 = 77;
 
 /// A suite step's name and environment.
 type Suite = (&'static str, Vec<(String, Option<String>)>);
@@ -364,18 +377,35 @@ fn plan(
             steps.push(Step::new(name, "pnpm", args));
         }
     }
-    let smoke = app
-        .join(".offrails")
-        .join("tools")
-        .join("browser-smoke")
-        .join("run.sh");
+    let smokes = app.join(".offrails").join("tools").join("browser-smoke");
+    let smoke = smokes.join("run.sh");
     match std::env::var("BASE") {
         Ok(base) if !base.is_empty() && smoke.is_file() => {
             steps.push(Step::new(
                 "browser smoke",
-                "bash",
+                "sh",
                 &[".offrails/tools/browser-smoke/run.sh"],
             ));
+            // Every page in docs/routes.md, after a full load and after a boosted link: the same
+            // elements must react (guides/frontend-htmx.md#boosted-navigation). No npm install:
+            // Node and the installed Chrome; exit 77 without one, reported as skip.
+            if smokes.join("smoke-boosted.mjs").is_file() {
+                if util::have("node") {
+                    steps.push(
+                        Step::new(
+                            "browser smoke (boosted)",
+                            "node",
+                            &[".offrails/tools/browser-smoke/smoke-boosted.mjs"],
+                        )
+                        .skip_on(SKIP_EXIT),
+                    );
+                } else {
+                    skipped.push(skip(
+                        "browser smoke (boosted)",
+                        "needs Node >= 18 (https://nodejs.org)".into(),
+                    ));
+                }
+            }
             if app
                 .join("tests")
                 .join("e2e")
@@ -385,7 +415,7 @@ fn plan(
                 steps.push(
                     Step::new(
                         "browser a11y",
-                        "bash",
+                        "sh",
                         &[".offrails/tools/browser-smoke/run.sh", "a11y"],
                     )
                     .env("SCENARIO", Some("tests/e2e/smoke.scenario.mjs")),
@@ -516,6 +546,17 @@ fn run_step(app: &Path, log: &Path, s: &Step) -> Done {
     let note = summary_note(&text);
     match status {
         Ok(st) if st.success() => finish(Outcome::Passed, note),
+        Ok(st) if s.skip_code.is_some() && st.code() == s.skip_code => finish(
+            Outcome::Skipped(
+                text.lines()
+                    .rev()
+                    .find(|l| !l.trim().is_empty())
+                    .unwrap_or("skipped")
+                    .trim()
+                    .to_owned(),
+            ),
+            String::new(),
+        ),
         Ok(_) if s.advisory => finish(
             Outcome::Passed,
             format!("{note} (advisory: review the log)"),
@@ -805,6 +846,31 @@ mod tests {
         assert!(matches!(by("broken").outcome, Outcome::Failed(_)));
         assert!(matches!(by("after broken").outcome, Outcome::Skipped(_)));
         assert!(matches!(by("independent").outcome, Outcome::Passed));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_smoke_without_a_browser_is_skipped_never_passed() {
+        if !cfg!(unix) || !util::have("sh") {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("offrails-verify-s-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let steps = vec![
+            Step::new(
+                "no browser",
+                "sh",
+                &["-c", "echo 'skip: no Chrome (set CHROME_PATH)'; exit 77"],
+            )
+            .skip_on(SKIP_EXIT),
+            Step::new("fails", "sh", &["-c", "exit 1"]).skip_on(SKIP_EXIT),
+        ];
+        let done = execute(&dir, &dir, steps);
+        let by = |n: &str| done.iter().find(|d| d.name == n).unwrap();
+        assert!(
+            matches!(&by("no browser").outcome, Outcome::Skipped(why) if why == "skip: no Chrome (set CHROME_PATH)")
+        );
+        assert!(matches!(by("fails").outcome, Outcome::Failed(_)));
         let _ = fs::remove_dir_all(&dir);
     }
 }

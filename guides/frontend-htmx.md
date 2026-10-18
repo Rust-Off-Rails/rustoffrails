@@ -133,7 +133,7 @@ Rules:
 One plain-JS file using event delegation and `data-` attributes. No Alpine, no frameworks.
 
 ```js
-// static/app.js: each behavior is one delegated listener, keyed by a data attribute
+// static/app.js: each behavior is one delegated listener on `document`, keyed by a data attribute
 document.addEventListener("click", (e) => {
   const el = e.target.closest("[data-toggle]");
   if (el) document.getElementById(el.dataset.toggle)?.classList.toggle("hidden");
@@ -142,6 +142,20 @@ document.addEventListener("htmx:afterSwap", () => { /* re-init anything that nee
 ```
 
 If a behavior outgrows ~50 lines or needs real client state, it's an island.
+
+### Boosted navigation
+
+**The rule: page JS loads from the app layout's `<head>` (or the body) and binds by delegation on `document`. Never in a page's `{% block head %}`, never on `DOMContentLoaded`.** The layout boosts every link (`<body hx-boost="true">`). A boosted click fetches the next page and swaps `<body>`: nothing in that page's `<head>` loads or runs, and `DOMContentLoaded` doesn't fire again. So a script in a page's head block, or one that finds its elements on `DOMContentLoaded`, works on a fresh load, in request tests and in screenshots, and is dead after a click. The real case: the sign-in page's password **Show** button worked when the page was loaded directly and did nothing after clicking **Sign in** in the nav.
+
+- Every script loads from `templates/layouts/application.html`: the app's in `static/app.js`, a part's at the `samples: app head` anchor. It runs once, on the first full load. A page with nothing to enhance costs one cached request.
+- Each behavior is one listener on `document` that finds its element with `e.target.closest("[data-…]")`. It works on the first page, on every boosted page and on every htmx swap, with nothing to bind again. Code that must start per element (a live room's socket) also listens to `htmx:load`, which htmx fires for each swapped-in element, and cleans up on `htmx:beforeSwap`.
+- **The live-element convention** (what the browser smoke clicks): every element page JS reacts to on click is a `<button type="button">`, or carries `data-js` (or `data-toggle`, or `role="button"`). Give a non-button clickable element `data-js="<behavior>"`. `data-smoke-skip` leaves one out.
+
+Two guards hold the rule. `tests/app/smoke_test.rs` (every app, both databases): `app_pages_load_no_scripts_or_stylesheets_in_their_head_block` and `page_scripts_never_bind_only_on_dom_content_loaded` (a script in `static/` outside `vendor/` that uses `DOMContentLoaded` or `load` without `htmx:load`). And the browser smoke, which proves the behavior: for each GET page in `docs/routes.md` it clicks the live elements after a full load, then again after a boosted link from `/`, and fails on any element that only works on the full load, on a page-specific script in `<head>`, and on any console error ([testing](testing.md#browser-smoke-boosted-navigation)):
+
+```sh
+BASE=<the URL bin/dev printed> node .offrails/tools/browser-smoke/smoke-boosted.mjs   # or: cargo offrails verify --full
+```
 
 ### No full reload after a mutation
 

@@ -49,7 +49,7 @@ bin/setup                      # first run
 bin/dev                        # develop: open the URL it prints (https + HTTP/2 with mkcert, else http){{TS modes only: ", or :5173 via Vite"; htmx: nothing}}; tabs reload on save
 sh .offrails/tools/offrails-check   # mechanical gates: header, specs ↔ tests, tenancy, scoped lookups
 cargo offrails verify          # after each slice: fmt, CSS, clippy, one build, SQLite + Postgres suites at once
-cargo offrails verify --full   # before saying done: + offrails-check, coverage, deny, gitleaks, routes, browser smoke (BASE=…)
+cargo offrails verify --full   # before saying done: + offrails-check, coverage, deny, gitleaks, routes, browser smokes incl. every page after a boosted link (BASE=…)
 cargo nextest run <name>       # one test while it's red (SQLite)
 docker compose up --build      # the whole app, production-shaped, on Postgres (http://localhost:3000)
 docker compose up -d db        # a Postgres for verify (or set TEST_DATABASE_URL in .env)

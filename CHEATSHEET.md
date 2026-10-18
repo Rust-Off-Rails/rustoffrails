@@ -49,7 +49,7 @@ Never weaken without a decision entry **and** the human's OK: strict CSP (no `un
 2. **Committed migrations are append-only.** A repair migration's `down` restores the predecessor's schema ([migrations](guides/migrations.md#rules)).
 3. **Postgres:** a caught unique violation aborts the transaction. Use `on_conflict_do_nothing` / `try_insert` inside transactions ([models](guides/models.md)).
 4. **`hx-boost="false"`** on every link into kernel pages (`/dev`, mailbox, `/admin/jobs`), or they render unstyled ([dev-tools](guides/dev-tools.md#rules)).
-5. **htmx sse extension in the layout**, never a page's head; one `sse-connect` per page; never reconnect by editing the attribute; `hx-sync` on live regions ([realtime](guides/realtime.md#client-side)).
+5. **Page JS loads from the layout and binds by delegation on `document`**: never in a page's `{% block head %}`, never on `DOMContentLoaded`. A boosted link runs nothing from the next page's `<head>`, so the button works on a fresh load and is dead after a click ([frontend-htmx](guides/frontend-htmx.md#boosted-navigation); caught by `smoke-boosted.mjs`). **htmx sse extension in the layout** too; one `sse-connect` per page; never reconnect by editing the attribute; `hx-sync` on live regions ([realtime](guides/realtime.md#client-side)).
 6. **htmx history cache off** (`historyCacheSize: 0`, `refreshOnHistoryMiss: true`) plus the `pageshow` reload guard ([frontend-htmx](guides/frontend-htmx.md)).
 7. **Signals carry a cursor** (`?since=`); without it, anything sent during a disconnect is lost ([realtime](guides/realtime.md#resume)).
 8. **SSE events need non-empty data**, or browsers drop them.

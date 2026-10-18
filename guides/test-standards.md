@@ -508,6 +508,7 @@ There are two complementary smokes:
 
 - **The app's own flows** (this section): `tests/e2e/` or `web/e2e/`, written per app, covering the spec's critical flows. A fresh app from `new` has no flows yet, so the package is created with the **first critical flow** (`generators/authentication.md`, or the first `scaffold` when there are no accounts). Until then the kernel smoke below covers the browser.
 - **The kernel pages** (`/dev`, `/dev/mailbox`, `/admin/jobs`): `.offrails/tools/browser-smoke/run.sh`, shipped by the framework ([dev-tools](dev-tools.md#browser-smoke)). It checks styling after boosted navigation and Back/Forward behavior, and needs no per-app code.
+- **Every page after a boosted link** (htmx mode): `.offrails/tools/browser-smoke/smoke-boosted.mjs` clicks each page's live elements after a full load and again after a boosted link, and fails on one that only works on the full load ([testing](testing.md#browser-smoke-boosted-navigation)). It reads `docs/routes.md`, so it needs no per-app code either; `cargo offrails verify --full` runs it when `BASE` is set.
 
 Run both after any UI-affecting change.
 
