@@ -21,11 +21,13 @@ Before building anything new, run the relevant part of [`interview.md`](intervie
 4. MODEL    customize the `// APP:` lines: validation rules, scopes the spec names, side effects
             (inertia/spa: derive TS on Params + view props; tests export them)
 5. TEST     failing tests for the acceptance criteria, next to the generated ones
-6. BUILD    controller, routes, views (templates / Inertia pages / SPA routes), jobs, mailers
+6. BUILD    controller, routes, views (templates from the component kit, components/ui.html, in a
+            layout / Inertia pages / SPA routes), jobs, mailers
 7. CHECK    cargo check → fix → repeat (the compiler is your pair); one test: cargo nextest run <name>
             running app: bin/dev rebuilds, restarts and reloads open tabs on save;
             ask it before guessing: curl -s $URL/dev/introspect.json (migrations, css, realtime, url)
-8. VERIFY   cargo offrails verify after each slice (seconds); --full once, before you say done
+8. VERIFY   cargo offrails verify after each slice (seconds); --full once, before you say done;
+            pages: BASE=… cargo offrails prove → docs/proof/PROOF.md, linked in your final message
 9. RECORD   docs/routes.md, docs/decisions.md, spec checkboxes
 ```
 

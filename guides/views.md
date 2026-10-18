@@ -61,46 +61,24 @@ Verified with askama 0.16.1:
 
 ## Layout & partials
 
-```html
-{# templates/layouts/application.html #}
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light dark">
-  <title>{% block title %}{{ ctx.title }}{% endblock %}</title>
-  <meta name="htmx-config" content='{"allowEval":false,"includeIndicatorStyles":false,"historyCacheSize":0,"refreshOnHistoryMiss":true,"responseHandling":[…]}'>  {# full value: frontend-htmx.md #}
-  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="{{ ctx.assets.css }}">
-  <script src="{{ ctx.assets.htmx }}" defer></script>
-  <script src="{{ ctx.assets.app_js }}" defer></script>
-  {% if ctx.dev %}<script src="/static/dev-reload.js" defer></script>{% endif %}   {# dev-tools.md#hot-reload #}
-  {% block head %}{% endblock %}   {# per-page scripts, e.g. the sse extension on pages that stream #}
-</head>
-<body hx-boost="true" class="min-h-screen bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100 antialiased">
-  {% include "shared/_nav.html" %}
-  <main>
-    {% include "shared/_flash.html" %}
-    {% block content %}{% endblock %}
-  </main>
-</body>
-</html>
-```
+Every page extends a layout ([layouts](#layouts)); `templates/layouts/application.html` is the shell they all share: one `<head>` (the `htmx-config` and CSP pairing from [frontend-htmx](frontend-htmx.md#required-config-swap-422-responses), the stylesheet, htmx, `app.js`, `components.js`, `dev-reload.js` in development, and the parts' scripts at `samples: app head`), `<body hx-boost="true">`, the skip link, the icon sprite, the overlays (confirm dialog, modals, toasts) and, inside each layout's `<main id="main">`, `shared/_notices.html` (the development CSS warning, then the flash).
 
 ```html
 {# templates/posts/index.html #}
 {% extends "layouts/application.html" %}
+{% import "components/ui.html" as ui %}
 {% block content %}
-  <h1>Posts</h1>
-  <div id="posts">
-    {% for post in posts %}{% include "posts/_post.html" %}{% endfor %}
-  </div>
+{% call ui::page_header("Posts") %}{% call ui::link_button("New post", paths::new_post(), icon = "plus") %}{% endcall %}{% endcall %}
+<div id="posts">
+  {% for post in posts %}{% include "posts/_post.html" %}{% endfor %}
+</div>
 {% endblock %}
 ```
 
-- `{% include %}` sees the including template's variables, so a partial's variable names must match at every include site (`post` inside a `for post in posts` loop).
+- Never put scripts in a page's `{% block head %}`: a boosted link swaps only `<body>`, so they never run ([frontend-htmx](frontend-htmx.md#gotchas-agents-get-wrong)). Load them from the layout.
+- `{% include %}` sees the including template's variables, so a partial's variable names must match at every include site (`post` inside a `for post in posts` loop). An included template that calls the kit has its own `{% import "components/ui.html" as ui %}`.
 - A partial that htmx also swaps on its own gets a standalone struct (`PostPartial { post }`) with the same field names.
-- Shared partials: `templates/shared/_flash.html`, `_errors.html`, `_nav.html`, `_pagination.html`.
+- Shared partials: `templates/shared/_flash.html` (the kit's `flash`), `_errors.html` (a form's error summary), `_nav.html` (the top nav: `samples: nav links`), `_sidebar.html`, `_brand.html`, `_notices.html`. Pagination is the kit's `ui::pagination` (a generated index calls it; the [pagination snippet](../template/snippets/pagination/README.md) is the same for lists you write).
 
 ## Brand
 
@@ -168,7 +146,7 @@ cargo offrails brand            # renders everything below; `new` runs it; --che
 | `badge` | `label, tone="neutral"` | tone `neutral\|primary\|accent\|success\|warning\|danger` |
 | `stat` | `label, value, delta="", trend=""` | trend `up\|down` colors the delta |
 | `table` | `caption, columns, empty=false, empty_message="Nothing here yet.", sort="", dir="asc", base="?"` | `columns`: (key, label), a key makes a sort link `{base}sort=key&dir=…`; **body**: the `<tr>` rows |
-| `pagination` | `page, pages, base="?"` | any integer types; links `{base}page=n`, gaps as … |
+| `pagination` | `page, pages, base="?"` | any integer types; links `{base}page=n`, gaps as …; a query that knows only whether there's `more` (the generated `all`, no COUNT) passes `pages = page + more` |
 | `empty_state` | `title, message="", action_label="", action_href="", icon="inbox"` | |
 | `avatar` | `name, src="", size="md"` | initials without `src`; size `sm\|md\|lg` |
 | `breadcrumbs` | `items` | (label, href) pairs, the last is the current page |
@@ -181,26 +159,28 @@ cargo offrails brand            # renders everything below; `new` runs it; --che
 
 For anything the macros don't cover, the same look is a few class names (`assets/app.css`, light + dark built in): `.btn` `.btn-secondary` `.btn-danger` `.btn-ghost` `.btn-sm` `.btn-lg` `.btn-icon` `.link` · `.label` `.input` `.hint` `.field-error` `.check` `.choice` `.form-actions` · `.card` `.card-header` `.card-body` `.card-footer` `.muted` · `.badge(-tone)` · `.alert` `.alert-<tone>` · `.table-wrap` `.table` · `.tabs` `.tab` · `.page-link` · `.menu` `.menu-item` · `.nav-link` `.toc-link` `.prose-doc`. The behaviors live in `static/components.js` (delegated, so they survive boosted links): `data-dropdown`, `[data-tabs]`, `data-modal-open|close`, `data-confirm` (forms and submit buttons) and `hx-confirm` (both ask in `#confirm-dialog`), `data-dismiss`, `data-toast-timeout`; `data-toggle` (show/hide, `aria-expanded` kept in step) is in `app.js`.
 
-**Rules.** Build pages from the kit; a class list longer than eight utilities on a `<button>`, `<input>`, `<select>`, `<textarea>` or a button-like `<a>` in an app template is an `offrails-check` warning (`[classes]`; end a deliberate one's line with `{# offrails-check: classes ok #}`). `/dev/components` shows every component in every state (`?theme=light|dark` pins one); `theme_test` renders it and the layout demos and checks every class list for its `dark:` partner and its CSS rule, and `.offrails/tools/browser-smoke/smoke-components.mjs` drives the modals, the confirm dialog and the 422 form in a real browser.
+**Rules.** Build pages from the kit (the generators and the snippets do: their pages are worked examples); a class list longer than eight utilities on a `<button>`, `<input>`, `<select>`, `<textarea>` or a button-like `<a>` in an app template is an `offrails-check` warning (`[classes]`; end a deliberate one's line with `{# offrails-check: classes ok #}`). `/dev/components` shows every component in every state (`?theme=light|dark` pins one); `theme_test` renders it and the layout demos and checks every class list for its `dark:` partner and its CSS rule, and `.offrails/tools/browser-smoke/smoke-components.mjs` drives the modals, the confirm dialog and the 422 form in a real browser.
 
 ## Forms
 
 ```html
 {# templates/posts/_form.html: used by new.html and edit.html #}
-<form method="post" action="{{ action }}">
+{% import "components/ui.html" as ui %}
+<form method="post" action="{{ action }}" novalidate>
   {% include "shared/_errors.html" %}
-  <label for="post_title">Title</label>
-  <input id="post_title" name="title" value="{{ params.title }}"
-         {% if !errors.on("title").is_empty() %}aria-invalid="true"{% endif %}>
-  {% for msg in errors.on("title") %}<p class="field-error">Title {{ msg }}</p>{% endfor %}
-  <button>Save</button>
+  {% call ui::field(errors, "title", "Title", params.title, required = true, maxlength = 200) %}{% endcall %}
+  {% call ui::textarea(errors, "body", "Body", params.body, 8) %}{% endcall %}
+  {% call ui::select(errors, "author_id", "Author", choices.author, params.author_id, blank = "Choose an author", key = "author") %}{% endcall %}
+  {% call ui::checkbox(errors, "published", "Published", params.published == "true") %}{% endcall %}
+  {% call ui::form_actions("Save post", paths::posts()) %}{% endcall %}
 </form>
 ```
 
-- `name` attributes match `PostParams` field names exactly.
+- `name` attributes match `PostParams` field names exactly; the kit gives each control its label, `aria-invalid`, `aria-describedby` and its error text from `errors.on(name)` (`key` when the errors are under another name, like a `*_id` select's).
 - `action` comes from `paths::` helpers: set it on the view struct, or with `{% let action = paths::books() %}` before the `{% include %}`. Never hard-code URLs.
-- Delete is a separate small form: `<form method="post" action="{{ delete_path }}">` with a `hx-confirm` / `data-confirm`.
-- Re-render with `params` (what the user typed), never with the DB row, after a failed submit.
+- Delete is a separate small form, confirmed first: `{% call ui::confirm_button("Delete", paths::delete_post(*post.id), "Delete this post?") %}{% endcall %}`.
+- Re-render with `params` (what the user typed), never with the DB row, after a failed submit (422).
+- `g resource` writes exactly this shape for every field type ([generators](../generators/README.md#what-the-generators-decide-so-you-dont)).
 
 ## Helpers (`src/views/helpers.rs`)
 

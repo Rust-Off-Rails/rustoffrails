@@ -11,11 +11,11 @@ use crate::util::{Fail, Result};
 /// The layouts a generated page may extend (`--layout`, templates/layouts/<name>.html).
 pub const LAYOUTS: [&str; 5] = ["application", "sidebar", "marketing", "auth", "docs"];
 
-/// The layout the generated pages extend: `--layout <name>` (recorded, so a re-run and `destroy`
-/// see the same pages), default `application` (the top nav: guides/views.md#layouts).
+/// The layout the generated pages extend: `--layout <name>` (recorded as `page_layout`, so a re-run
+/// and `destroy` see the same pages; `layout` is the file layout's version), default `application` (the top nav: guides/views.md#layouts).
 pub fn layout(info: &AppInfo, flags: &Flags, plan: &mut Plan) -> Result<String> {
     let name = flags
-        .recorded("layout")
+        .recorded("page_layout")
         .or_else(|| flags.value("layout"))
         .unwrap_or_else(|| "application".to_owned());
     if !LAYOUTS.contains(&name.as_str()) {
@@ -30,7 +30,7 @@ pub fn layout(info: &AppInfo, flags: &Flags, plan: &mut Plan) -> Result<String> 
         )));
     }
     if name != "application" {
-        plan.option("layout", name.clone());
+        plan.option("page_layout", name.clone());
     }
     Ok(name)
 }

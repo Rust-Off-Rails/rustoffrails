@@ -280,5 +280,5 @@ match am.insert(db).await {
 
 ## Pagination & search
 
-- `Page` (in `models/mod.rs`): deserialized from `?page=`, `per` clamped to 1..=100 (default 25), with `per()`/`offset()`. A garbage `?page=x` → 422. To render "Older →" without a `COUNT(*)`, fetch `per() + 1` rows, set `more = rows.len() > per`, then `truncate(per)`. Order by `created_at DESC, id DESC`, so ties are stable. For big or infinite lists, use keyset pagination: `.filter(Column::Id.lt(cursor)).order_by_desc(Column::Id).limit(per)`.
+- `Page` (in `models/mod.rs`): deserialized from `?page=`, `per` clamped to 1..=100 (default 25), with `per()`/`offset()`. A garbage `?page=x` → 422. To know there's a next page without a `COUNT(*)`, fetch `per() + 1` rows, set `more = rows.len() > per`, then `truncate(per)`; the page shows `ui::pagination(page, page + more, base)` ([views](views.md#components)). Order by `created_at DESC, id DESC`, so ties are stable. For big or infinite lists, use keyset pagination: `.filter(Column::Id.lt(cursor)).order_by_desc(Column::Id).limit(per)`.
 - Search: portable `LIKE` via `Expr::expr(Func::lower(Expr::col(Column::Title))).like(format!("%{}%", q.to_lowercase()))`. For real full-text search, see `database.md#escape-hatch` (Postgres `tsvector` / SQLite FTS5, both branches required).

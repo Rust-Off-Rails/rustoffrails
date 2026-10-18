@@ -10,11 +10,13 @@
 > Read the rest for what to fill in.
 
 ```
-cargo offrails g controller reports index summary [--public] [--nav]
+cargo offrails g controller reports index summary [--public] [--nav] [--layout sidebar]
 cargo offrails g controller blog index show:/blog/{slug}
-cargo offrails g page about [--nav] [--path /about-us]
+cargo offrails g page about [--nav] [--path /about-us] [--layout docs]
 cargo offrails g page profile --path /people/{handle}
 ```
+
+Each page is a `ui::page_header` and a placeholder paragraph in `layouts/application.html` (the top nav); `--layout sidebar|marketing|auth|docs` extends another ([views](../guides/views.md#layouts)).
 
 ## Controller
 
@@ -22,7 +24,7 @@ Each action renders a page that reads nothing yet: the handler is marked `// uns
 
 1. Load the data in the handler through scoped model functions (`<model>::all_for(&s.db, &user, page)`), then drop the `_` from `RequireUser(_user)` and the `// unscoped:` marker.
 2. Add the fields to the page struct in `src/views/reports.rs`; compute display strings there, never in the template. A path parameter is already a field (untrusted text: Askama escapes it; look records up by it with a scoped query, and answer 404 for one that doesn't exist).
-3. Write the template (every light surface and dark text with its `dark:` partner).
+3. Write the template from the component kit (`ui::card`, `ui::table`, `ui::stat`…: [views](../guides/views.md#components)); a class list of your own has every light surface and dark text with its `dark:` partner.
 4. Replace the generated "renders" test with the spec's acceptance criteria; keep the signed-out test.
 
 An action that changes data is a POST to a noun, not a verb ([routing](../guides/routing.md#the-resource-shape)): generate a `resource` for it, or add the handler by hand next to these.
