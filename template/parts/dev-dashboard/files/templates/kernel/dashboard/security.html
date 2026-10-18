@@ -1,0 +1,57 @@
+{% extends "kernel/dashboard/_layout.html" %}
+{% block dash %}
+<header class="dash-head">
+  <h1>Security</h1>
+  <span class="badge verdict tone-{{ verdict_tone }}">{{ verdict }}</span>
+  {% if !d.ro %}<a class="btn quiet" href="{{ base }}/lab#lab-attack">Attack simulator</a>{% endif %}
+</header>
+<p class="hint">{{ summary }} Scanners and probes, injection attempts, brute force and credential stuffing, odd clients. {% if production %}Client addresses show as their network and a keyed hash (personal data).{% else %}Development shows client addresses whole; production shows only their network and a keyed hash.{% endif %} Guide: <a href="https://rustoffrails.org/docs/guides/security" rel="noopener noreferrer"><code>.offrails/guides/security.md</code></a>.</p>
+<section class="panel" aria-labelledby="sec-tl-title">
+  <header><h2 id="sec-tl-title">Timeline</h2><span class="muted">flagged requests and failed sign-ins per minute, last 30 minutes</span></header>
+  <div class="pad">
+    <svg class="sec-tl" width="100%" height="120" role="img" aria-label="Flagged events per minute: {{ crate::kernel::dashboard::web::count(totals[0], "probe", "probes") }}, {{ totals[1] }} injection attempts, {{ totals[2] }} failed sign-ins, {{ totals[3] }} abuse; the peak minute had {{ peak }}">
+      <line class="sec-base" x1="0" x2="100%" y1="100%" y2="100%"/>
+      {% for b in bars %}<g><title>{{ b.title }}</title>{% for (y, h, cat) in b.parts %}<rect class="sec-{{ cat }}" x="{{ b.x }}" y="{{ y }}" width="{{ b.w }}" height="{{ h }}"/>{% endfor %}</g>{% endfor %}
+    </svg>
+    <div class="sec-axis small muted" aria-hidden="true">{% for (x, l) in ticks %}<span>{{ l }}</span>{% endfor %}</div>
+    <ul class="up-legend"><li><span class="sw sec-probe" aria-hidden="true"></span>probes {{ totals[0] }}</li><li><span class="sw sec-injection" aria-hidden="true"></span>injection {{ totals[1] }}</li><li><span class="sw sec-auth" aria-hidden="true"></span>failed sign-ins {{ totals[2] }}</li><li><span class="sw sec-abuse" aria-hidden="true"></span>abuse {{ totals[3] }}</li></ul>
+  </div>
+</section>
+<section class="panel" aria-labelledby="sec-f-title">
+  <header><h2 id="sec-f-title">Findings</h2><span class="muted">{{ findings.len() }} in the last 10 minutes</span></header>
+  {% if findings.is_empty() %}
+  <p class="empty">Nothing suspicious. {% if !d.ro %}The load lab's <a href="{{ base }}/lab#lab-attack">attack simulator</a> sends a scanner run, a brute force, credential stuffing and injection probes at this app so you can see each detector fire.{% endif %}</p>
+  {% else %}
+  <ol class="findings" role="list">
+  {% for (id, f) in findings %}
+    <li class="finding sev-{{ f.severity.key() }}" id="sec-{{ id }}">
+      <div class="finding-head"><span class="badge sev">{{ f.severity.key() }}</span><h3>{{ f.title }}</h3><span class="kind mono">{{ f.kind }}</span></div>
+      <p class="evidence">{{ f.detail }}</p>
+      <p class="fix"><strong>What to do:</strong> {{ f.action }}</p>
+      {% if !f.evidence.is_empty() %}
+      <details class="sec-ev"><summary>Evidence: {{ f.evidence.len() }} request{% if f.evidence.len() != 1 %}s{% endif %}</summary>
+        <div class="scroll" tabindex="0" role="region" aria-label="Evidence"><table class="data-table"><thead><tr><th scope="col">When (UTC)</th><th scope="col">Client</th><th scope="col">Request</th><th scope="col" class="num">Status</th><th scope="col">Signals</th><th scope="col">Agent</th><th scope="col">Trace</th></tr></thead>
+        <tbody>{% for e in f.evidence %}<tr><td class="mono">{{ e.when() }}</td><td class="mono">{{ e.ip }}</td><td class="mono">{{ e.method }} {{ e.path }}</td><td class="num">{{ e.status }}</td><td class="small">{{ e.labels.join(", ") }}</td><td class="small">{{ e.ua }}</td><td>{% if e.trace > 0 %}<a href="{{ base }}/traces/{{ e.trace }}">#{{ e.trace }}</a>{% else %}—{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+      </details>
+      {% endif %}
+      {% if d.ai_on %}<p class="finding-actions"><a class="btn quiet" href="{{ base }}/ai?tab=security&amp;q={{ f.title|urlencode }}">Ask AI about this</a></p>{% endif %}
+    </li>
+  {% endfor %}
+  </ol>
+  {% endif %}
+</section>
+<div class="grid two">
+<section class="panel" aria-labelledby="sec-ip-title">
+  <header><h2 id="sec-ip-title">Top offending addresses</h2><span class="muted">last 10 minutes</span></header>
+  {% if ips.is_empty() %}<p class="empty">No address with flagged requests.</p>{% else %}
+  <div class="scroll" tabindex="0" role="region" aria-label="Addresses"><table class="data-table"><thead><tr><th scope="col">Client</th><th scope="col" class="num">Requests</th><th scope="col" class="num">4xx</th><th scope="col" class="num">Probes</th><th scope="col" class="num">Injection</th><th scope="col" class="num">Sign-in fails</th><th scope="col" class="num">Agents</th><th scope="col">Last</th></tr></thead>
+  <tbody>{% for r in ips %}<tr><th scope="row" class="mono"><span class="sw h-{{ r.tone }}" aria-hidden="true"></span> {{ r.label }}</th><td class="num">{{ r.requests }}</td><td class="num">{{ r.errors }}</td><td class="num">{{ r.probes }}</td><td class="num">{{ r.injections }}</td><td class="num">{{ r.auth }}</td><td class="num">{{ r.uas }}</td><td class="muted small">{{ r.last }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+</section>
+<section class="panel" aria-labelledby="sec-recent-title">
+  <header><h2 id="sec-recent-title">Latest flagged requests</h2><span class="muted">{{ crate::kernel::dashboard::web::count(requests, "request", "requests") }} seen</span></header>
+  {% if recent.is_empty() %}<p class="empty">None.</p>{% else %}
+  <div class="scroll" tabindex="0" role="region" aria-label="Latest flagged requests"><table class="data-table"><thead><tr><th scope="col">When</th><th scope="col">Client</th><th scope="col">Request</th><th scope="col" class="num">Status</th><th scope="col">Signals</th></tr></thead>
+  <tbody>{% for e in recent %}<tr><td class="mono small">{{ e.when() }}</td><td class="mono small">{{ e.ip }}</td><td class="mono small">{% if e.trace > 0 %}<a href="{{ base }}/traces/{{ e.trace }}">{{ e.method }} {{ e.path }}</a>{% else %}{{ e.method }} {{ e.path }}{% endif %}</td><td class="num">{{ e.status }}</td><td class="small">{{ e.labels.join(", ") }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+</section>
+</div>
+{% endblock %}

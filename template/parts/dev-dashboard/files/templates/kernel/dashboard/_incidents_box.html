@@ -1,0 +1,2 @@
+{# The insights page's incident cards (a live fragment: the investigation's status and story arrive as they happen). #}
+{% if incidents.is_empty() %}<p class="empty">Watching: latency spikes, error bursts, new N+1s, memory growth, job failures, schema drift and failing tests. Nothing has fired.</p>{% else %}{% include "kernel/dashboard/_incidents.html" %}{% endif %}

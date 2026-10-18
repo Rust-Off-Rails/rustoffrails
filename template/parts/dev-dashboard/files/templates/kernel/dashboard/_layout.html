@@ -11,10 +11,13 @@
   </nav>
   {% if d.ro %}<p class="dash-ro">Read-only production view: no load lab, no EXPLAIN, no parameters, no logs.</p>{% endif %}
   {% if !d.ai_tab.is_empty() %}
-  {# Ask AI: dashboard.js loads the panel (ai/panel) the first time it opens; without it, the link. #}
-  <details class="ai-panel" data-ai-panel data-src="{{ d.base }}/ai/panel?tab={{ d.ai_tab }}&amp;item={{ d.ai_item }}">
+  {# Ask AI: open on this tab's first visit in the session (dashboard.js closes it after that, and
+     remembers nothing else); dashboard-ai.js loads the panel (ai/panel) when it is open. Without
+     JavaScript: the guide line, the questions as links, and the summary toggle. #}
+  <details class="ai-panel" open data-ai-panel data-ai-first="{{ d.ai_tab }}" data-src="{{ d.base }}/ai/panel?tab={{ d.ai_tab }}&amp;item={{ d.ai_item }}">
     <summary><svg class="ai-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>Ask AI <span class="muted">about this page</span></summary>
-    <div class="ai-mount" data-ai-body><p class="pad"><a href="{{ d.base }}/ai?tab={{ d.ai_tab }}&amp;item={{ d.ai_item }}">Open the assistant</a> for this page.</p></div>
+    <p class="ai-guide"><strong>What this tab tells you:</strong> {{ d.ai_guide }}</p>
+    <div class="ai-mount" data-ai-body><div class="pad"><ul class="ai-prompts" role="list">{% for q in d.ai_prompts %}<li><a class="chip" href="{{ d.base }}/ai?tab={{ d.ai_tab }}&amp;item={{ d.ai_item }}&amp;q={{ q|urlencode }}">{{ q }}</a></li>{% endfor %}</ul><p class="ai-links"><a href="{{ d.base }}/ai?tab={{ d.ai_tab }}&amp;item={{ d.ai_item }}">Open the assistant</a> for this page.</p></div></div>
   </details>
   {% endif %}
   {% block dash %}{% endblock %}

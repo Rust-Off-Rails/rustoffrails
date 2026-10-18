@@ -1,6 +1,6 @@
 {% extends "kernel/dashboard/_layout.html" %}
 {% block dash %}
-<header class="dash-head"><h1>Ask AI <span class="muted">{{ p.tab_label }}{% if !p.item.is_empty() %} · <span class="mono">{{ p.item }}</span>{% endif %}</span></h1><a href="{{ p.base }}/ai/history">History</a></header>
+<header class="dash-head"><h1>Ask AI <span class="muted">{{ p.tab_label }}{% if !p.item_title.is_empty() %} · {{ p.item_title }}{% endif %}</span></h1><a href="{{ p.base }}/ai/history">History</a></header>
 <p class="hint">An agent with your own provider: it reads the dashboard through read-only tools, shows each step, cites its evidence, and changes nothing unless you click.</p>
 {% if let Some(r) = r %}<section class="panel ai-page-answer" aria-labelledby="answer-title"><header><h2 id="answer-title">Investigation</h2></header><div class="pad">{% include "kernel/dashboard/_ai_run.html" %}</div></section>{% endif %}
 <section class="panel ai-page" aria-label="Ask AI">{% include "kernel/dashboard/_ai_panel.html" %}</section>

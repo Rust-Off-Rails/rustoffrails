@@ -123,6 +123,34 @@ impl Hist {
         *self = Self::default();
     }
 
+    /// The non-empty buckets as (index, count), with the sum and max: what the history file keeps
+    /// of a minute's latencies (a few dozen pairs, not 288 counters), so an hour's rollup can merge
+    /// its minutes and still report true percentiles.
+    pub fn sparse(&self) -> (Vec<(u16, u32)>, u64, u64) {
+        let pairs = self
+            .counts
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| **c > 0)
+            .map(|(i, c)| (i as u16, *c))
+            .collect();
+        (pairs, self.sum, self.max)
+    }
+
+    /// The inverse of `sparse`. Out-of-range indexes (a damaged file) are dropped.
+    pub fn from_sparse(pairs: &[(u16, u32)], sum: u64, max: u64) -> Self {
+        let mut h = Self::default();
+        for (i, c) in pairs {
+            if let Some(slot) = h.counts.get_mut(usize::from(*i)) {
+                *slot = slot.saturating_add(*c);
+                h.total += u64::from(*c);
+            }
+        }
+        h.sum = sum;
+        h.max = max;
+        h
+    }
+
     /// Bytes this histogram holds (for the memory bound).
     pub const BYTES: usize = BUCKETS * 4 + 32;
 }

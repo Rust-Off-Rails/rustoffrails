@@ -1,9 +1,30 @@
 {% extends "kernel/dashboard/_layout.html" %}
 {% block dash %}
 <header class="dash-head">
-  <h1>Traces{% if !route.is_empty() %} <span class="muted mono">{{ route }}</span>{% endif %}{% if !minute.is_empty() %} <span class="muted">at {{ minute }}</span>{% endif %}</h1>
-  <nav class="segmented" aria-label="Filter">{% for f in filters %}<a href="{{ f.href }}"{% if f.current %} aria-current="true"{% endif %}>{{ f.label }}</a>{% endfor %}</nav>
+  <h1>Traces{% if !minute.is_empty() %} <span class="muted">at {{ minute }}</span>{% endif %}</h1>
+  <a class="btn quiet" href="{{ methods_href }}">Methods</a>
 </header>
-<p class="hint">{{ kept }}. Notable: a 5xx, an N+1, or slower than half a second.{% if !route.is_empty() || !minute.is_empty() %} <a href="{{ base }}/traces">All traces</a>{% endif %}</p>
-<div data-live="traces">{% include "kernel/dashboard/_traces.html" %}</div>
+{# The filters: a plain GET form (every view is a link; the back button works). dashboard-trace.js
+   submits it on change; without JavaScript, Apply does. #}
+<form class="tx-filters" method="get" action="{{ base }}/traces" data-tx-filters aria-label="Filter traces">
+  <label><span>Route</span><select name="route">{% for o in routes %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select></label>
+  <label><span>Kind</span><select name="kind">{% for o in kinds %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select></label>
+  <label><span>Status</span><select name="status">{% for o in statuses %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select></label>
+  <label><span>Duration</span><select name="min">{% for o in mins %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select></label>
+  <label><span>When</span><select name="range">{% for o in ranges %}<option value="{{ o.value }}"{% if o.selected %} selected{% endif %}>{{ o.label }}</option>{% endfor %}</select></label>
+  <label class="grow"><span>Path</span><input type="search" name="q" value="{{ text }}" placeholder="/orders" autocomplete="off"></label>
+  {% if !method.is_empty() %}<label><span>Method</span><input type="text" name="fn" value="{{ method }}" class="mono"></label>{% endif %}
+  <span class="chips" role="group" aria-label="Only">
+    <label class="chip-check"><input type="checkbox" name="n1" value="1"{% if n1 %} checked{% endif %}> N+1</label>
+    <label class="chip-check"><input type="checkbox" name="err" value="1"{% if err %} checked{% endif %}> Errors</label>
+    <label class="chip-check"><input type="checkbox" name="notable" value="1"{% if notable %} checked{% endif %}> Notable</label>
+  </span>
+  {% if let Some(f) = q.from %}<input type="hidden" name="from" value="{{ f }}">{% endif %}
+  {% if let Some(t) = q.to %}<input type="hidden" name="to" value="{{ t }}">{% endif %}
+  {% if let Some(m) = q.minute %}<input type="hidden" name="minute" value="{{ m }}">{% endif %}
+  <span class="tx-actions"><button type="submit" class="btn" data-tx-apply>Apply</button> <a class="btn quiet" href="{{ reset }}">Clear</a></span>
+</form>
+<p class="hint">{{ kept }}. Notable: a 5xx, an N+1, or slower than half a second. Open a row for its waterfall (<kbd>j</kbd>/<kbd>k</kbd> move, <kbd>Enter</kbd> opens, <kbd>Esc</kbd> closes); tick two to compare.</p>
+<form id="tx-compare" method="get" action="{{ base }}/traces/compare" class="tx-compare-bar"><button type="submit" class="btn" data-tx-compare>Compare selected</button> <span class="muted small" data-tx-compare-hint>Tick two rows.</span></form>
+<div data-live="traces" data-tx-list>{{ list_html|safe }}</div>
 {% endblock %}

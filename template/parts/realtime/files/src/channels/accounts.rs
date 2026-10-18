@@ -58,7 +58,7 @@ pub async fn current(s: &AppState, headers: &HeaderMap) -> Result<Option<Signed>
 /// absolute expiry as the cookie lookup.
 pub async fn by_session(s: &AppState, session_id: i64) -> Result<Option<Signed>, AppError> {
     let now = Utc::now();
-    let found = session::Entity::find_by_id(session_id)
+    let found = session::Entity::find_by_id(session_id) // unscoped: resolves the actor from a signed token
         .filter(session::Column::LastSeenAt.gt(now - Duration::days(auth_cookie::IDLE_DAYS)))
         .filter(session::Column::CreatedAt.gt(now - Duration::days(auth_cookie::ABSOLUTE_DAYS)))
         .find_also_related(user::Entity)

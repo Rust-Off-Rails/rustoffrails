@@ -51,6 +51,7 @@
   </section>
 </div>
 
+{# samples: job panels #}
 <section class="panel" aria-labelledby="h-errors">
   <header><h2 id="h-errors">Errors <span class="count">{{ job.attempts_list.len() }}</span></h2><span class="muted small">newest first · the last 20 attempts are kept</span></header>
   {% if job.attempts_list.is_empty() %}

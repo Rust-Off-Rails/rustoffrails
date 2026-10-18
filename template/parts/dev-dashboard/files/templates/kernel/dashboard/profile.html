@@ -1,0 +1,52 @@
+{% extends "kernel/dashboard/_layout.html" %}
+{% block dash %}
+<header class="dash-head">
+  <h1>Hot functions <span class="muted">CPU, sampled</span></h1>
+  {% if running %}
+  <form method="post" action="{{ base }}/profile/toggle">{% if paused %}<input type="hidden" name="paused" value="0"><button type="submit" class="btn primary">Start sampling</button>{% else %}<input type="hidden" name="paused" value="1"><button type="submit" class="btn">Stop sampling</button>{% endif %}</form>
+  {% endif %}
+</header>
+{% if !available %}
+<p class="callout" role="note">CPU sampling isn't available on this platform (it needs Linux or macOS). The <a href="{{ base }}/methods">Methods</a> view (spans, wall clock) works everywhere.</p>
+{% else if !running %}
+<p class="callout" role="note">The sampler is off (<code>DASHBOARD_PROFILER=false</code>, or it couldn't start: see the log). The <a href="{{ base }}/methods">Methods</a> view (spans, wall clock) still works.</p>
+{% else if paused %}
+<p class="callout" role="note"><strong>Sampling is stopped.</strong> Start it, use the app (or run the <a href="{{ base }}/lab">load lab</a>), and the hot functions fill in every 15 seconds. While it samples it costs memory (measured on the demo app: about 440 MB resident, most of it the debug build's symbols, file-backed); stopping gives the symbols back, but its sample table (about 90 MB) stays until the app restarts. It stops by itself after 30 minutes. <code>DASHBOARD_PROFILER=always</code> starts it at boot.</p>
+{% endif %}
+<div class="dash-head">
+  <nav class="segmented" aria-label="Window">{% for w in windows %}<a href="{{ w.href }}"{% if w.current %} aria-current="true"{% endif %}>{{ w.label }}</a>{% endfor %}</nav>
+  <nav class="segmented" aria-label="Whose code">{% for f in filters %}<a href="{{ f.href }}"{% if f.current %} aria-current="true"{% endif %}>{{ f.label }}</a>{% endfor %}</nav>
+</div>
+<p class="hint">Which functions the CPU was in, with no annotations: {{ crate::kernel::dashboard::web::count(samples, "sample", "samples") }}. <strong>Self</strong>: the function itself was running; <strong>total</strong>: it was on the stack. Time spent waiting (the database, a sleep) isn't CPU: <a href="{{ base }}/methods">Methods</a> measures that. {{ overhead }}. Development only; never in production.</p>
+{% if !routes.is_empty() %}<p class="hint">Serving in this window: {% for (r, n) in routes %}<a class="mono" href="{{ base }}/traces?route={{ r|urlencode }}">{{ r }}</a> <span class="muted">×{{ n }}</span>{% if !loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+{% if !func.is_empty() %}
+<section class="panel" aria-labelledby="fn-title">
+  <header><h2 id="fn-title" class="mono">{{ func }}</h2></header>
+  <div class="grid two pad">
+    <div><h3>Called from</h3>{% if callers.is_empty() %}<p class="muted">(the root of its stacks)</p>{% else %}<ul class="plain">{% for (n, c, href) in callers %}<li><a class="mono" href="{{ href }}">{{ n }}</a> <span class="muted">{{ crate::kernel::dashboard::web::count(c, "sample", "samples") }}</span></li>{% endfor %}</ul>{% endif %}</div>
+    <div><h3>Calls</h3>{% if callees.is_empty() %}<p class="muted">(nothing below it: its own code)</p>{% else %}<ul class="plain">{% for (n, c, href) in callees %}<li><a class="mono" href="{{ href }}">{{ n }}</a> <span class="muted">{{ crate::kernel::dashboard::web::count(c, "sample", "samples") }}</span></li>{% endfor %}</ul>{% endif %}</div>
+  </div>
+</section>
+{% endif %}
+{% if rows.is_empty() %}
+<p class="empty">No samples yet{% if running %}: they arrive every {{ 15 }} seconds while the app does work (try the <a href="{{ base }}/lab">load lab</a>){% endif %}.</p>
+{% else %}
+<div class="scroll" tabindex="0" role="region" aria-label="Table"><table class="data-table">
+  <caption class="visually-hidden">Hot functions by self samples</caption>
+  <thead><tr><th scope="col">Function</th><th scope="col">Self</th><th scope="col" class="num">Total</th><th scope="col">Whose</th><th scope="col">Usual path</th></tr></thead>
+  <tbody>
+  {% for h in rows %}
+    <tr><th scope="row"><a class="mono" href="{{ h.href }}" title="{{ h.name }}">{{ h.short }}</a></th>
+      <td class="barcell"><span class="num">{{ h.selfp }}</span><svg class="dbar" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect width="{{ h.bar }}" height="6" rx="2"/></svg></td>
+      <td class="num">{{ h.totalp }}</td>
+      <td><span class="badge tone-{% if h.origin == "app" %}info{% else %}muted{% endif %}">{% if h.origin == "app" %}your code{% else if h.origin == "deps" %}dependency{% else if h.origin == "native" %}native (C){% else %}std / Tokio{% endif %}</span></td>
+      <td class="small mono muted">{{ h.path }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
+<section class="panel" aria-labelledby="flame-title">
+  <header><h2 id="flame-title">Flame graph</h2></header>
+  <div class="pad">{% let icicle = flame %}{% include "kernel/dashboard/_icicle.html" %}</div>
+</section>
+{% endblock %}

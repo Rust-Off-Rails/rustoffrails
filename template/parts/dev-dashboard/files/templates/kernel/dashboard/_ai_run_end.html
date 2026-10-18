@@ -3,6 +3,7 @@
 {% if r.status == "stopped" %}<p class="ai-stopped" role="note">{{ r.status_text }}</p>{% endif %}
 {% if !r.blocks.is_empty() %}<div class="ai-text">{% for b in r.blocks %}{% include "kernel/dashboard/_ai_block.html" %}{% endfor %}</div>{% endif %}
 {% if !r.note.is_empty() %}<p class="hint">{{ r.note }}</p>{% endif %}
+{% if r.can_continue %}<form class="ai-continue" method="post" action="{{ r.base }}/ai/runs/{{ r.id }}/continue" data-ai-continue><button class="btn primary">Continue the answer</button> <span class="muted small">one more call, from the same budget</span></form>{% endif %}
 {% if !r.actions.is_empty() %}
 <div class="ai-proposed" role="group" aria-label="Proposed actions">
   <p class="ai-proposed-head">Proposed actions <span>nothing runs until you click</span></p>

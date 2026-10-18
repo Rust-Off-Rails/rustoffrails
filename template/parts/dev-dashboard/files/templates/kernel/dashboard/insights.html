@@ -22,6 +22,7 @@
     <div class="finding-actions">
       <a class="btn" href="{{ f.href }}">See the evidence</a>
       {% if d.ai_on %}<a class="btn quiet" href="{{ d.ask_href("insights", &f.id) }}">Ask AI about this</a>{% endif %}
+      {% if !f.trace.is_empty() %}<details data-inline-wf><summary>Its waterfall</summary><div data-wf-src="/dev/dashboard/traces/{{ f.trace }}/waterfall"><a href="{{ f.href }}">Open the trace</a></div></details>{% endif %}
       <form method="post" action="/dev/dashboard/insights/dismiss"><input type="hidden" name="id" value="{{ f.id }}"><button class="btn quiet">Dismiss for this session</button></form>
     </div>
   </li>
@@ -31,7 +32,7 @@
 {% if watching || !incidents.is_empty() %}
 <section class="panel" id="incidents" aria-labelledby="incidents-title">
   <header><h2 id="incidents-title">Incidents</h2><span class="muted">the watcher (DASHBOARD_AI_PROACTIVE) posts one when a signal fires</span></header>
-  <div class="pad">{% if incidents.is_empty() %}<p class="empty">Watching: latency spikes, error bursts, new N+1s, memory growth, job failures, schema drift and failing tests. Nothing has fired.</p>{% else %}{% include "kernel/dashboard/_incidents.html" %}{% endif %}</div>
+  <div class="pad" data-live="incidents">{% include "kernel/dashboard/_incidents_box.html" %}</div>
 </section>
 {% endif %}
 <section class="panel" id="csp" aria-labelledby="csp-title">

@@ -277,25 +277,35 @@ async fn every_sockets_response_is_no_store() {
     }
 }
 
+/// Links are boosted (a boosted click runs nothing in the next page's `<head>`), so every app page
+/// loads the room's scripts from the layout, by digest, and a link into the room may be boosted.
+/// `/dev/sockets` is a kernel page (its own layout and head): links into it aren't boosted.
 #[tokio::test]
-async fn links_into_the_live_room_and_dev_sockets_are_not_boosted() {
+async fn the_layout_loads_the_live_room_scripts_and_dev_sockets_links_are_not_boosted() {
     let app = TestApp::with_config(development()).await;
     let home = app.get("/").await;
     home.assert_ok();
-    for href in ["href=\"/live\"", "href=\"/dev/sockets\""] {
-        let tag = home
-            .body
-            .split("<a ")
-            .find(|t| t.contains(href))
-            .unwrap_or_else(|| panic!("a link {href}"));
-        assert!(
-            tag.split('>')
-                .next()
-                .unwrap()
-                .contains("hx-boost=\"false\""),
-            "{href}"
+    for script in ["/static/channels.js?v=", "/static/live_room.js?v="] {
+        assert_eq!(
+            home.body
+                .matches(&format!(r#"<script src="{script}"#))
+                .count(),
+            1,
+            "{script}"
         );
     }
+    let tag = |href: &str| {
+        home.body
+            .split("<a ")
+            .find(|t| t.contains(href))
+            .unwrap_or_else(|| panic!("a link {href}"))
+            .split('>')
+            .next()
+            .unwrap()
+            .to_owned()
+    };
+    assert!(!tag("href=\"/live\"").contains("hx-boost"));
+    assert!(tag("href=\"/dev/sockets\"").contains("hx-boost=\"false\""));
 }
 
 /// The room, the guest sign-in and /dev/sockets follow the kernel header's theme switch: the

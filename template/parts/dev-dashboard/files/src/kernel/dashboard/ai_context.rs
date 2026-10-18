@@ -97,6 +97,9 @@ pub async fn build(
         (Tab::Jobs, Some("errors")) => Ok(job_errors(state, 15).await),
         (Tab::Jobs, Some(id)) => job(state, id).await,
         (Tab::Sockets, _) => Ok(sockets(state).await),
+        (Tab::Upstreams, _) => Ok(super::upstreams::list_text()),
+        (Tab::Security, _) => Ok(super::threats::list_text(ro)),
+        (Tab::Frontend, _) => Ok(super::rum::list_text()),
     }
 }
 
@@ -280,11 +283,7 @@ pub(super) fn trace(id: &str, ro: bool) -> Result<String, String> {
     let t = id
         .parse::<u64>()
         .ok()
-        .and_then(|id| {
-            lock(&HUB.traces)
-                .find(id)
-                .or_else(|| lock(&HUB.http).example(id))
-        })
+        .and_then(super::trace::find)
         .ok_or("That trace is no longer kept.")?;
     let mut s = format!(
         "## Trace {}\n{} {} (path {}) → {} in {}; {} SQL statements taking {}\n\n### Spans (start, duration)\n",

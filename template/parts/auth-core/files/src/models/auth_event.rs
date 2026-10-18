@@ -151,6 +151,7 @@ pub async fn record(
     meta: &Meta,
     now: DateTime<Utc>,
 ) -> Result<(), AppError> {
+    // samples: auth events
     ActiveModel {
         user_id: Set(user_id),
         kind: Set(kind),

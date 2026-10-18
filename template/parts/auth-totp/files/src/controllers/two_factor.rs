@@ -105,7 +105,9 @@ async fn load_pending(
     let Some(raw) = auth_cookie::read(headers, &auth_cookie::name(PENDING_COOKIE, secure)) else {
         return Ok(None);
     };
-    let Some(pending) = pending_login::find(&s.db, &raw, Utc::now()).await? else {
+    // Nobody is signed in yet: the pending-login cookie's token is the key.
+    let pending = pending_login::find(&s.db, &raw, Utc::now()).await?; // unscoped: before sign-in
+    let Some(pending) = pending else {
         return Ok(None);
     };
     let u = user::find_self(&s.db, pending.user_id).await?;

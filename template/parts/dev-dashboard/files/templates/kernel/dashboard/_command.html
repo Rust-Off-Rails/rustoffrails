@@ -1,0 +1,106 @@
+{# The AI command center (ai_home.rs): expanded by default (`open`); dashboard.js remembers a collapse in this browser. Without JavaScript every part works: links, the summary toggle, the forms post to ai/ask. #}
+<details class="cc tone-{{ cc.tone }}" id="cc" open data-cc>
+  <summary class="cc-summary">
+    <svg class="cc-logo" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>
+    <span class="cc-title">AI command center</span>
+    <span class="cc-verdict tone-{{ cc.tone }}"><span class="dot" aria-hidden="true"></span>{{ cc.verdict }}</span>
+    <span class="cc-headline">{{ cc.headline }}</span>
+    <span class="cc-chevron" aria-hidden="true"></span>
+  </summary>
+  <div class="cc-body">
+    {# The briefing and the AI briefing's controls side by side; the AI briefing's run below, full width. #}
+    <div class="cc-main"{% if cc.ai.allowed %} id="health" data-ai-scope{% endif %}>
+    <div class="cc-top{% if !cc.ai.allowed %} solo{% endif %}">
+      <section class="cc-brief" aria-labelledby="cc-brief-h">
+        <h2 id="cc-brief-h">Briefing <span class="cc-tag">no key needed</span></h2>
+        <ol class="cc-bullets" role="list">
+          {% for b in cc.bullets %}
+          <li class="cc-b tone-{{ b.tone }}">
+            <span class="cc-n" aria-hidden="true">{{ b.n }}</span>
+            <p class="cc-b-text">{{ b.text }}{% if !b.fix.is_empty() %} <span class="cc-fix">— {{ b.fix }}</span>{% endif %} <a class="cc-ev" href="{{ b.href }}">{{ b.link }}</a></p>
+            {% if let Some(s) = b.spark %}<svg class="cc-spark" viewBox="0 0 120 32" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path class="spark-area" d="{{ s.area }}"/><path class="spark-line" d="{{ s.d }}"/></svg>{% endif %}
+          </li>
+          {% endfor %}
+        </ol>
+      </section>
+      {% if cc.ai.allowed %}
+      <section class="cc-ai" aria-labelledby="cc-ai-h">
+        <h2 id="cc-ai-h">AI briefing {% if cc.ai.configured %}<span class="cc-tag">{{ cc.ai.provider }}</span>{% endif %}</h2>
+        {% if cc.ai.configured %}
+        {% if !cc.ai.note.is_empty() %}<p class="hint">{{ cc.ai.note }}</p>{% endif %}
+        <form class="cc-health" method="post" action="{{ cc.base }}/ai/ask" data-ai-form data-runs="{{ cc.base }}/ai/runs">
+          <input type="hidden" name="prepared" value="{{ cc.ai.prepared }}">
+          <input type="hidden" name="tab" value="overview">
+          <input type="hidden" name="item" value="">
+          <input type="hidden" name="kind" value="health">
+          <div class="row ai-actions"><button class="btn {% if cc.ai.run.is_none() %}primary cc-big{% endif %}" data-ai-send>{% if cc.ai.run.is_none() %}Generate AI briefing{% else %}Regenerate the AI briefing{% endif %}</button><span class="ai-busy" data-ai-busy hidden><span class="spinner" aria-hidden="true"></span> Starting…</span></div>
+          <p class="hint small">{{ cc.ai.left }}</p>
+          {% if cc.ai.run.is_none() %}<p class="hint">The agent reads the overview and the insights, looks deeper where something is off, and writes the verdict, what needs attention and what to fix first, each claim linked to its evidence.</p>{% endif %}
+          <details class="ai-preview"><summary>Preview what will be sent first</summary><pre class="code ai-json" tabindex="0">{{ cc.ai.health_preview }}</pre></details>
+        </form>
+        {% else %}
+        {% include "kernel/dashboard/_ai_setup.html" %}
+        {% endif %}
+      </section>
+      {% endif %}
+    </div>
+    {% if cc.ai.allowed && cc.ai.configured %}<div class="ai-answer cc-run" data-ai-answer aria-live="polite">{% if let Some(r) = cc.ai.run %}{% include "kernel/dashboard/_ai_run.html" %}{% endif %}</div>{% endif %}
+    </div>
+
+    <section class="cc-ask" id="cc-ask" aria-labelledby="cc-ask-h" data-ai-scope>
+      <h2 id="cc-ask-h">Ask</h2>
+      {% if cc.ai.allowed && cc.ai.configured %}
+      <form class="cc-form" method="post" action="{{ cc.base }}/ai/ask" data-ai-form data-runs="{{ cc.base }}/ai/runs">
+        <input type="hidden" name="prepared" value="{{ cc.ai.prepared }}">
+        <input type="hidden" name="tab" value="overview">
+        <input type="hidden" name="item" value="">
+        <input type="hidden" name="kind" value="ask">
+        <label class="visually-hidden" for="cc-q">Ask anything about your running app</label>
+        <div class="cc-box">
+          <textarea id="cc-q" name="question" rows="2" maxlength="2000" required placeholder="Ask anything about your running app…" data-ai-question data-cc-question></textarea>
+          <button class="btn primary" data-ai-send>Investigate</button>
+        </div>
+        <div class="ai-prompts cc-prompts" role="group" aria-label="Suggested questions">{% for s in cc.suggestions %}<button type="button" class="chip" data-ai-prompt>{{ s }}</button>{% endfor %}</div>
+        <div class="row ai-actions"><span class="ai-busy" data-ai-busy hidden><span class="spinner" aria-hidden="true"></span> Starting…</span><span class="muted small">{{ cc.ai.left }}</span></div>
+        <details class="ai-preview"><summary>Preview what will be sent first</summary><pre class="code ai-json" tabindex="0" data-ai-preview>{{ cc.ai.preview }}</pre></details>
+      </form>
+      <div class="ai-answer" data-ai-answer aria-live="polite"></div>
+      {% else %}
+      <p class="hint">With a key, the assistant answers questions like these about this app, right now:</p>
+      <ul class="cc-prompts cc-asks" role="list">{% for s in cc.suggestions %}<li class="chip">{{ s }}</li>{% endfor %}</ul>
+      {% endif %}
+      <nav class="cc-quick" aria-label="Quick actions">{% for q in cc.quick %}<a class="cc-q" href="{{ q.1 }}">{{ q.0 }}</a>{% endfor %}</nav>
+    </section>
+
+    <section class="cc-graphs" aria-labelledby="cc-graphs-h">
+      <h2 id="cc-graphs-h">Last 15 minutes {% if cc.demo %}<span class="ai-badge">demo data</span>{% endif %}<span class="cc-tag">numbered marks are the briefing's findings</span></h2>
+      <ul class="cc-minis" role="list">
+        {% for m in cc.minis %}
+        <li><a class="cc-mini" href="{{ m.href }}">
+          <span class="cc-mini-head"><span class="cc-mini-title">{{ m.title }}</span><span class="cc-mini-value">{{ m.value }}</span></span>
+          <svg class="cc-plot {{ m.class }}" viewBox="0 0 240 56" role="img" aria-label="{{ m.summary }}" focusable="false">
+            <line class="cc-base" x1="0" x2="240" y1="55.5" y2="55.5"/>
+            {% if !m.empty %}<path class="cc-area" d="{{ m.area }}"/><path class="cc-line" d="{{ m.d }}"/>{% else %}<text class="cc-nodata" x="120" y="32">No data yet</text>{% endif %}
+            {% for k in m.marks %}{% if k.finding %}<g class="cc-pin"><title>{{ k.title }}</title><line x1="{{ k.x }}" x2="{{ k.x }}" y1="16" y2="56"/><circle cx="{{ k.x }}" cy="9" r="7"/><text x="{{ k.x }}" y="12.5">{{ k.label }}</text></g>{% else %}<line class="cc-event" x1="{{ k.x }}" x2="{{ k.x }}" y1="0" y2="56"><title>{{ k.title }}</title></line>{% endif %}{% endfor %}
+          </svg>
+          <span class="cc-mini-sub">{{ m.sub }}</span>
+        </a></li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section class="cc-guide" aria-labelledby="cc-guide-h">
+      <h2 id="cc-guide-h">What you can do here</h2>
+      <ul class="cc-cards" role="list">
+        {% for g in cc.guide %}
+        <li class="cc-card">
+          <svg class="cc-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">{% if g.icon == "trace" %}<path d="M3 6h10M6 12h12M9 18h8"/><circle cx="3" cy="6" r="1"/>{% else if g.icon == "n1" %}<path d="M4 5h16M4 10h16M4 15h16M4 20h16"/><path d="M19 3l2 2-2 2"/>{% else if g.icon == "schema" %}<rect x="3" y="3" width="7" height="6" rx="1"/><rect x="14" y="15" width="7" height="6" rx="1"/><path d="M10 6h4v12h0"/>{% else if g.icon == "logs" %}<path d="M4 4h16v16H4z"/><path d="M7 9l3 3-3 3M12 15h5"/>{% else if g.icon == "lab" %}<path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3"/>{% else if g.icon == "chart" %}<path d="M4 20V4M4 20h16M7 15l4-5 3 3 5-6"/>{% else if g.icon == "route" %}<path d="M5 19c4 0 4-14 8-14h6M15 2l4 3-4 3"/>{% else %}<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>{% endif %}</svg>
+          <h3>{{ g.title }}</h3>
+          <p>{{ g.how }}</p>
+          <a href="{{ g.href }}">{{ g.cta }} <span aria-hidden="true">→</span></a>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+  </div>
+</details>

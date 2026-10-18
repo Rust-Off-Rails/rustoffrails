@@ -1,19 +1,33 @@
+{# The explorer's scatter and list (traces_web.rs `ListFragment`): the page and the live stream. #}
 {% if rows.is_empty() %}
-<p class="empty">No traces match. Every request the app serves is traced here (the dashboard's own pages excepted).</p>
+<p class="empty">No traces match. Every request the app serves is traced here (the dashboard's own pages excepted), and every job when the jobs sample runs.</p>
 {% else %}
-<div class="scroll" tabindex="0" role="region" aria-label="Table"><table class="data-table">
-  <caption class="visually-hidden">Recent requests, newest first</caption>
-  <thead><tr><th scope="col">When</th><th scope="col">Request</th><th scope="col">Status</th><th scope="col">Duration</th><th scope="col" class="num">SQL</th></tr></thead>
-  <tbody>
+<figure class="tx-scatter" data-tx-scatter data-from="{{ scatter.from }}" data-to="{{ scatter.to }}">
+  <svg width="100%" height="140" role="img" aria-label="Duration by time: {{ scatter.summary }}. The list below has every trace.">
+    {% for (y, label) in scatter.yticks %}<line class="grid" x1="0" x2="100%" y1="{{ y }}" y2="{{ y }}"/><text class="ylab" x="2" y="{{ y }}" dy="-2">{{ label }}</text>{% endfor %}
+    {% for d in scatter.dots %}<circle class="dot tone-{{ d.tone }}{% if d.big %} big{% endif %}" cx="{{ d.x }}" cy="{{ d.y }}" r="{% if d.big %}4.5{% else %}3{% endif %}" data-id="{{ d.id }}"><title>{{ d.title }}</title></circle>{% endfor %}
+    <rect class="brush" x="0" y="0" width="0" height="100%" data-tx-brush hidden/>
+  </svg>
+  <figcaption class="tx-xticks" aria-hidden="true">{% for (_, l) in scatter.xticks %}<span>{{ l }}</span>{% endfor %}</figcaption>
+</figure>
+<p class="visually-hidden">{{ crate::kernel::dashboard::web::count(count, "trace", "traces") }}, newest first.</p>
+<ol class="tx-list" aria-label="Traces, newest first">
   {% for t in rows %}
-    <tr>
-      <td class="muted nowrap">{{ t.when }}</td>
-      <th scope="row"><span class="method m-{{ t.method }}">{{ t.method }}</span> <a class="mono" href="{{ base }}/traces/{{ t.id }}">{{ t.path }}</a>{% if t.n_plus_one %} <span class="badge tone-warn">N+1</span>{% endif %}<span class="sub mono">{{ t.route }}</span></th>
-      <td><span class="badge tone-{{ t.tone }}">{{ t.status }}</span></td>
-      <td class="barcell"><span class="num">{{ t.dur }}</span><svg class="dbar" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect width="{{ t.bar }}" height="6" rx="2"/></svg></td>
-      <td class="num">{{ t.sql }}</td>
-    </tr>
+  <li class="tx" id="tx-{{ t.id }}">
+    <input type="checkbox" class="tx-pick" name="cmp" value="{{ t.id }}" form="tx-compare" aria-label="Compare trace {{ t.id }}">
+    <details class="tx-d" data-tx-id="{{ t.id }}">
+      <summary>
+        <span class="tx-when" title="{{ t.clock }} UTC">{{ t.when }}</span>
+        <span class="method m-{{ t.method }}">{{ t.method }}</span>
+        <span class="tx-path"><span class="mono">{{ t.path }}</span><span class="sub mono">{{ t.route }}</span></span>
+        <span class="tx-badges">{% if t.kind != "request" %}<span class="badge tone-info">{{ t.kind }}</span>{% endif %}{% if t.n_plus_one %}<span class="badge tone-warn">N+1</span>{% endif %}{% if t.from_disk %}<span class="badge tone-muted" title="From the history file: an earlier run of the app">from disk</span>{% endif %}</span>
+        <span class="badge tone-{{ t.tone }}">{{ t.status }}</span>
+        <span class="tx-dur"><span class="num">{{ t.dur }}</span><svg class="dbar" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect width="{{ t.bar }}" height="6" rx="2"/></svg></span>
+        <span class="tx-sql num" title="SQL statements">{{ t.sql }} SQL</span>
+      </summary>
+      <div class="tx-body" data-wf-src="{{ base }}/traces/{{ t.id }}/waterfall"><p class="hint"><a href="{{ base }}/traces/{{ t.id }}">Open its waterfall</a></p></div>
+    </details>
+  </li>
   {% endfor %}
-  </tbody>
-</table></div>
+</ol>
 {% endif %}

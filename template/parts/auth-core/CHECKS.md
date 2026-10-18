@@ -63,6 +63,7 @@ What "working and safe" means for the shared accounts layer, and the test that p
 | Background emails finish before `settle()` returns | `idle_waits_for_spawned_work` |
 | Emails are normalized (trimmed, lowercased) everywhere | `normalizes_and_validates` |
 | Auth pages use the app layout and follow the kernel theme switch (`data-theme` from the cookie) | `auth_pages_follow_the_theme_switch` |
+| `static/auth.js` loads once, from the app layout, on every page, and binds only on `document`: the Show button, Caps Lock hint, code auto-submit, copy and print work after a boosted link and after an htmx swap (a form re-rendered after a failed attempt); in a real browser, `tools/e2e.sh` arrives at each page through a boosted click | `auth_js_loads_from_the_layout_on_every_page`, `app_pages_load_no_scripts_or_stylesheets_in_their_head_block` |
 | Every handler that deletes session rows calls `auth::sessions_ended` after its commit (realtime wires its socket revocation there), signing in over another session included | `every_session_ending_path_calls_sessions_ended`, `signing_in_over_a_session_closes_its_sockets` |
 
 ## Known limits (accepted, documented)

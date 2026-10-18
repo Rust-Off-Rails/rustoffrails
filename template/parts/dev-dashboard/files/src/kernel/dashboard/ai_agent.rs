@@ -32,7 +32,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tokio::sync::watch;
 
-use super::ai::{self, AiError, BUDGET, Tab, ToolChoice};
+use super::ai::{self, AiError, Tab, ToolChoice};
 use super::ai_tools::{self, Action};
 use super::{HUB, http, lock, sql};
 use crate::config::{AiProvider, DashboardAi};
@@ -45,13 +45,14 @@ pub const TOOL_TIMEOUT: Duration = Duration::from_secs(15);
 /// APP: runs kept on disk (`storage/dashboard/ai-runs/`), and each tool result's size there.
 pub const MAX_HISTORY: usize = 50;
 pub const HISTORY_RESULT_CHARS: usize = 2_000;
-pub const HISTORY_DIR: &str = "storage/dashboard/ai-runs";
+pub const HISTORY_DIR: &str = "ai-runs";
 /// Runs kept in memory (live ones, and the latest finished).
 const LIVE_RUNS: usize = 16;
 /// The browser's run-owner cookie.
 pub const OWNER_COOKIE: &str = "dashboard_ai";
 
-/// A run's bounds: the `ai.rs` constants (`MAX_STEPS`, `RUN_TOKENS`, `RUN_TIMEOUT`, `TIMEOUT`).
+/// A run's bounds: the `ai.rs` constants (`MAX_STEPS`, `RUN_TIMEOUT`, `TIMEOUT`); the token cap
+/// is `DASHBOARD_AI_RUN_MAX_TOKENS` (`run_tokens` here only lowers it).
 /// WHY a value and not the constants directly: tests shorten them to prove each stop.
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
@@ -65,7 +66,7 @@ impl Default for Limits {
     fn default() -> Self {
         Limits {
             max_steps: ai::MAX_STEPS,
-            run_tokens: ai::RUN_TOKENS,
+            run_tokens: u64::MAX,
             run_timeout: ai::RUN_TIMEOUT,
             call_timeout: ai::TIMEOUT,
         }
@@ -80,7 +81,7 @@ pub static LIMITS: LazyLock<Mutex<Limits>> = LazyLock::new(|| Mutex::new(Limits:
 pub enum Kind {
     /// A question from the panel.
     Ask,
-    /// "Generate health summary" on the overview.
+    /// "Generate AI briefing" on the overview's command center.
     Health,
     /// The watcher's auto-investigation of a signal (`ai_watch.rs`).
     Incident,
@@ -163,6 +164,9 @@ pub struct Record {
     /// The first request's body, pretty-printed (the preview it matched).
     #[serde(default)]
     pub sent: String,
+    /// The answer hit its length cap; while the run is in memory it can be continued.
+    #[serde(default)]
+    pub cut: bool,
 }
 
 pub struct Run {
@@ -172,6 +176,8 @@ pub struct Run {
     pub ro: bool,
     rec: Mutex<Record>,
     tx: watch::Sender<u64>,
+    /// The system prompt and the conversation so far, the final answer included (for Continue).
+    convo: Mutex<(String, Vec<Value>)>,
 }
 
 impl Run {
@@ -239,7 +245,7 @@ pub fn start(state: &AppState, spec: Spec) -> Result<Arc<Run>, AiError> {
         return Err(AiError::NotConfigured);
     }
     if !spec.reserved {
-        lock(&BUDGET).reserve(ai::today(), Instant::now())?;
+        ai::budget(cfg).reserve(ai::today(), Instant::now())?;
     }
     let rec = Record {
         id: ai::random_id(),
@@ -261,6 +267,7 @@ pub fn start(state: &AppState, spec: Spec) -> Result<Arc<Run>, AiError> {
         model: cfg.model.clone(),
         base: spec.base.to_owned(),
         sent: String::new(),
+        cut: false,
     };
     let run = Arc::new(Run {
         id: rec.id.clone(),
@@ -268,6 +275,7 @@ pub fn start(state: &AppState, spec: Spec) -> Result<Arc<Run>, AiError> {
         ro: spec.ro,
         rec: Mutex::new(rec),
         tx: watch::channel(0).0,
+        convo: Mutex::new((spec.system.clone(), Vec::new())),
     });
     {
         let mut runs = lock(&RUNS);
@@ -341,6 +349,15 @@ pub struct Turn {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub note: Option<String>,
+    /// The answer hit `max_tokens` (it can be continued).
+    pub cut: bool,
+}
+
+fn cut_note(ai: &DashboardAi) -> String {
+    format!(
+        "The answer reached its {} tokens (DASHBOARD_AI_MAX_ANSWER_TOKENS): Continue picks it up where it stopped.",
+        crate::kernel::ui::thousands(u64::from(ai.max_answer_tokens))
+    )
 }
 
 /// Reads one answer in either shape: Anthropic `content` blocks (`text`, `tool_use` with an
@@ -371,14 +388,17 @@ pub fn parse_turn(ai: &DashboardAi, v: &Value) -> Turn {
                     _ => {}
                 }
             }
-            t.input_tokens = n(&v["usage"]["input_tokens"]);
+            // Cache writes and reads count as input too: the daily token cap stays conservative.
+            t.input_tokens = n(&v["usage"]["input_tokens"])
+                + n(&v["usage"]["cache_creation_input_tokens"])
+                + n(&v["usage"]["cache_read_input_tokens"]);
             t.output_tokens = n(&v["usage"]["output_tokens"]);
             t.note = match v["stop_reason"].as_str() {
                 Some("refusal") => Some("The model declined to answer this one.".into()),
-                Some("max_tokens") => Some(format!(
-                    "The answer was cut at {} tokens (MAX_ANSWER_TOKENS).",
-                    ai::MAX_ANSWER_TOKENS
-                )),
+                Some("max_tokens") => {
+                    t.cut = true;
+                    Some(cut_note(ai))
+                }
                 _ => None,
             };
         }
@@ -407,10 +427,8 @@ pub fn parse_turn(ai: &DashboardAi, v: &Value) -> Turn {
             t.input_tokens = n(&v["usage"]["prompt_tokens"]);
             t.output_tokens = n(&v["usage"]["completion_tokens"]);
             if v["choices"][0]["finish_reason"] == "length" {
-                t.note = Some(format!(
-                    "The answer was cut at {} tokens (MAX_ANSWER_TOKENS).",
-                    ai::MAX_ANSWER_TOKENS
-                ));
+                t.cut = true;
+                t.note = Some(cut_note(ai));
             }
         }
     }
@@ -465,6 +483,53 @@ pub fn tool_results(ai: &DashboardAi, results: &[(String, String, bool)]) -> Vec
     }
 }
 
+/// APP: an earlier step's tool result longer than this (characters) is cut before the next call:
+/// the model has read it, its answer so far reflects it, and it can call the tool again.
+pub const OLD_RESULT_CHARS: usize = 1_500;
+/// What an old result keeps of its start.
+const OLD_RESULT_HEAD: usize = 1_000;
+
+/// Cuts the tool results already in the conversation to `OLD_RESULT_CHARS` (both shapes), keeping
+/// their untrusted-data delimiters; the newest results are added after this, whole.
+// WHY: every step re-sends the whole conversation, so a 6,000-character result read at step 1 is
+// paid for again at every later step; cutting it once keeps the provider's prefix cache valid up
+// to it from then on.
+pub fn compact_results(convo: &mut [Value]) {
+    for m in convo.iter_mut() {
+        if m["role"] == "tool" {
+            if let Some(t) = m["content"].as_str().and_then(compact_one) {
+                m["content"] = Value::String(t);
+            }
+        } else if m["role"] == "user"
+            && let Some(blocks) = m["content"].as_array_mut()
+        {
+            for b in blocks.iter_mut().filter(|b| b["type"] == "tool_result") {
+                if let Some(t) = b["content"].as_str().and_then(compact_one) {
+                    b["content"] = Value::String(t);
+                }
+            }
+        }
+    }
+}
+
+/// One old result, cut (or `None` when it is short enough already).
+pub fn compact_one(text: &str) -> Option<String> {
+    if text.chars().count() <= OLD_RESULT_CHARS {
+        return None;
+    }
+    let tail_at = text.rfind("\n</app-data>").unwrap_or(text.len());
+    let head: String = text[..tail_at].chars().take(OLD_RESULT_HEAD).collect();
+    let tool = text
+        .split("tool=\"")
+        .nth(1)
+        .and_then(|r| r.split('"').next())
+        .unwrap_or("the tool");
+    Some(format!(
+        "{head}\n… [an earlier result, cut to save tokens (OLD_RESULT_CHARS); call {tool} again for all of it]{}",
+        &text[tail_at..]
+    ))
+}
+
 /// A tool result as the provider gets it: delimited and labelled as data.
 // SECURITY: app data (log lines, subjects, job errors, paths) can carry instructions; it goes
 // back delimited, marked untrusted, with any closing delimiter inside it defused
@@ -494,22 +559,23 @@ async fn drive(state: &AppState, run: &Run, system: &str, first: &str) {
     let tools_list = ai_tools::enabled(run.ro, cfg.tools_core);
     let tools = ai_tools::definitions(cfg.provider, &tools_list);
     let limits = *lock(&LIMITS);
+    let run_tokens = limits.run_tokens.min(cfg.run_max_tokens);
     let mut convo = vec![ai::user_turn(first)];
     let deadline = Instant::now() + limits.run_timeout;
     let mut tokens = 0_u64;
     for step in 0..limits.max_steps {
         // SECURITY: a model that keeps calling tools stops at max_steps calls, run_tokens tokens
         // and run_timeout, and says so (test: an_agent_run_stops_at_its_budget_and_says_so)
-        if tokens >= limits.run_tokens {
+        if tokens >= run_tokens {
             return finish(
                 run,
                 Status::Stopped(format!(
-                    "budget: this run used its {} tokens (RUN_TOKENS)",
-                    crate::kernel::ui::thousands(limits.run_tokens)
+                    "budget: this run used its {} tokens (DASHBOARD_AI_RUN_MAX_TOKENS; raise it in .env and restart)",
+                    crate::kernel::ui::thousands(run_tokens)
                 )),
             );
         }
-        if let Err(e) = lock(&BUDGET).reserve_call(ai::today()) {
+        if let Err(e) = ai::budget(&cfg).reserve_call(ai::today()) {
             return finish(run, Status::Stopped(format!("budget: {}", e.message())));
         }
         let left = deadline.saturating_duration_since(Instant::now());
@@ -517,12 +583,16 @@ async fn drive(state: &AppState, run: &Run, system: &str, first: &str) {
             return finish(run, timeout_status(limits));
         }
         // The last allowed call, or one past three quarters of the token budget, must answer.
-        let choice = if step + 1 == limits.max_steps || tokens >= limits.run_tokens * 3 / 4 {
+        let choice = if step + 1 == limits.max_steps || tokens >= run_tokens / 4 * 3 {
             ToolChoice::Final
         } else {
             ToolChoice::Auto
         };
-        let body = ai::request(&cfg, system, &convo, &tools, choice);
+        let body = ai::cached(
+            &cfg,
+            ai::request(&cfg, system, &convo, &tools, choice),
+            step > 0,
+        );
         if step == 0 {
             let sent = serde_json::to_string_pretty(&body).unwrap_or_default();
             run.update(|r| r.sent = sent);
@@ -540,15 +610,73 @@ async fn drive(state: &AppState, run: &Run, system: &str, first: &str) {
         let turn = parse_turn(&cfg, &v);
         let spent = turn.input_tokens + turn.output_tokens;
         tokens += spent;
-        lock(&BUDGET).spend(ai::today(), spent);
+        {
+            let mut b = ai::budget(&cfg);
+            b.spend_io(ai::today(), turn.input_tokens, turn.output_tokens);
+            if run.record().kind == Kind::Incident {
+                b.spent_by_watcher(ai::today(), spent);
+            }
+        }
         run.update(|r| {
             r.input_tokens += turn.input_tokens;
             r.output_tokens += turn.output_tokens;
             r.calls += 1;
         });
         if turn.calls.is_empty() || choice == ToolChoice::Final {
-            let text = turn.text.trim().to_owned();
-            let note = turn.note.clone().unwrap_or_default();
+            let mut text = turn.text.trim().to_owned();
+            let mut note = turn.note.clone().unwrap_or_default();
+            let mut cut = turn.cut;
+            let mut answered_turn = v.clone();
+            // The last call came back without an answer (a model that still asks for tools, or
+            // says nothing): one more call that may only answer, so a run never ends empty.
+            if text.is_empty() && choice == ToolChoice::Final && note.is_empty() {
+                if !turn.calls.is_empty() {
+                    convo.push(assistant_turn(&cfg, &v));
+                    let results: Vec<(String, String, bool)> = turn
+                        .calls
+                        .iter()
+                        .enumerate()
+                        .map(|(i, c)| {
+                            let id = if c.id.is_empty() {
+                                format!("call_{step}_{i}")
+                            } else {
+                                c.id.clone()
+                            };
+                            (id, "Not run: the call limit is reached.".to_owned(), true)
+                        })
+                        .collect();
+                    convo.extend(tool_results(&cfg, &results));
+                }
+                convo.push(ai::user_turn(ANSWER_NOW_PROMPT));
+                let left = deadline.saturating_duration_since(Instant::now());
+                let rescued =
+                    if ai::budget(&cfg).reserve_call(ai::today()).is_ok() && !left.is_zero() {
+                        let body = ai::cached(
+                            &cfg,
+                            ai::request(&cfg, system, &convo, &tools, ToolChoice::Final),
+                            true,
+                        );
+                        ai::send_raw(&cfg, &body, limits.call_timeout.min(left))
+                            .await
+                            .ok()
+                    } else {
+                        None
+                    };
+                if let Some(v2) = rescued {
+                    let t2 = parse_turn(&cfg, &v2);
+                    ai::budget(&cfg).spend_io(ai::today(), t2.input_tokens, t2.output_tokens);
+                    tokens += t2.input_tokens + t2.output_tokens;
+                    run.update(|r| {
+                        r.input_tokens += t2.input_tokens;
+                        r.output_tokens += t2.output_tokens;
+                        r.calls += 1;
+                    });
+                    text = t2.text.trim().to_owned();
+                    note = t2.note.clone().unwrap_or_default();
+                    cut = t2.cut;
+                    answered_turn = v2;
+                }
+            }
             if text.is_empty() {
                 let why = if !note.is_empty() {
                     note
@@ -569,9 +697,12 @@ async fn drive(state: &AppState, run: &Run, system: &str, first: &str) {
                 tokens,
                 "dashboard: the AI agent answered"
             );
+            convo.push(assistant_turn(&cfg, &answered_turn));
+            lock(&run.convo).1 = convo;
             run.update(|r| {
                 r.answer = text;
                 r.note = note;
+                r.cut = cut;
             });
             return finish(run, Status::Done);
         }
@@ -654,6 +785,7 @@ async fn drive(state: &AppState, run: &Run, system: &str, first: &str) {
             };
             results.push((id, wrap_untrusted(&call.name, &out.text), out.is_error));
         }
+        compact_results(&mut convo);
         convo.extend(tool_results(&cfg, &results));
     }
     finish(
@@ -663,6 +795,90 @@ async fn drive(state: &AppState, run: &Run, system: &str, first: &str) {
             limits.max_steps
         )),
     );
+}
+
+/// APP: what the extra call asks when the last allowed call came back without an answer.
+pub const ANSWER_NOW_PROMPT: &str = "That was the last tool call this run allows. Answer now from what you have: the bottom line first, then the evidence with its citation tags; say what you couldn't check.";
+
+/// APP: what Continue asks the model.
+pub const CONTINUE_PROMPT: &str = "Your answer was cut at its length limit. Continue exactly where it stopped: no preamble, don't repeat anything, keep the same format and citation tags.";
+
+impl Run {
+    /// Whether Continue can pick this run up: finished with a cut answer, conversation in memory.
+    pub fn can_continue(&self) -> bool {
+        let r = self.record();
+        r.cut && r.status == Status::Done && !lock(&self.convo).1.is_empty()
+    }
+}
+
+/// Continues a cut answer in the same run: one more call (no tools), its text appended to the
+/// answer. Counts against the per-minute rate and the day's budget like a question.
+pub fn continue_run(state: &AppState, run: &Arc<Run>) -> Result<(), AiError> {
+    let cfg = state.config.dashboard.ai.clone();
+    if !run.can_continue() {
+        return Err(AiError::Budget(
+            "This answer can't be continued (it wasn't cut, or the run is no longer in memory)."
+                .into(),
+        ));
+    }
+    ai::budget(&cfg).reserve(ai::today(), Instant::now())?;
+    run.update(|r| {
+        r.status = Status::Running;
+        r.finished = None;
+        r.cut = false;
+    });
+    let (state2, run2) = (state.clone(), run.clone());
+    let worker = tokio::spawn(http::quietly(async move {
+        extend(&state2, &run2).await;
+    }));
+    let run3 = run.clone();
+    tokio::spawn(async move {
+        if worker.await.is_err() {
+            finish(
+                &run3,
+                Status::Failed("The run stopped unexpectedly (see the log).".into()),
+            );
+        }
+    });
+    Ok(())
+}
+
+async fn extend(state: &AppState, run: &Run) {
+    let cfg = state.config.dashboard.ai.clone();
+    let tools_list = ai_tools::enabled(run.ro, cfg.tools_core);
+    let tools = ai_tools::definitions(cfg.provider, &tools_list);
+    let limits = *lock(&LIMITS);
+    let (system, mut convo) = lock(&run.convo).clone();
+    if let Err(e) = ai::budget(&cfg).reserve_call(ai::today()) {
+        return finish(run, Status::Stopped(format!("budget: {}", e.message())));
+    }
+    compact_results(&mut convo);
+    convo.push(ai::user_turn(CONTINUE_PROMPT));
+    let body = ai::cached(
+        &cfg,
+        ai::request(&cfg, &system, &convo, &tools, ToolChoice::Final),
+        true,
+    );
+    let v = match ai::send_raw(&cfg, &body, limits.call_timeout).await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(provider = provider_label(&cfg), error = ?e, "dashboard: the AI agent's continue call failed");
+            return finish(run, Status::Failed(e.message()));
+        }
+    };
+    let turn = parse_turn(&cfg, &v);
+    ai::budget(&cfg).spend_io(ai::today(), turn.input_tokens, turn.output_tokens);
+    convo.push(assistant_turn(&cfg, &v));
+    lock(&run.convo).1 = convo;
+    run.update(|r| {
+        r.input_tokens += turn.input_tokens;
+        r.output_tokens += turn.output_tokens;
+        r.calls += 1;
+        r.answer.push_str(&turn.text);
+        r.note = turn.note.clone().unwrap_or_default();
+        r.cut = turn.cut;
+    });
+    finish(run, Status::Done);
 }
 
 fn timeout_status(limits: Limits) -> Status {
@@ -675,7 +891,8 @@ fn timeout_status(limits: Limits) -> Status {
 // ---- history -----------------------------------------------------------------------------------
 
 fn history_dir() -> PathBuf {
-    super::testruns::root().join(HISTORY_DIR)
+    // In the dashboard's storage folder (`DASHBOARD_STORAGE_DIR`; a test process's own).
+    super::storage_dir().join(HISTORY_DIR)
 }
 
 /// A run id from a URL: 32 lowercase hex digits, nothing else (it names a file).
@@ -699,13 +916,7 @@ pub fn save_in(dir: &Path, rec: &Record) {
     if !valid_id(&rec.id) || std::fs::create_dir_all(dir).is_err() {
         return;
     }
-    let mut r = rec.clone();
-    for s in &mut r.steps {
-        s.result = crate::kernel::ui::truncate(&s.result, HISTORY_RESULT_CHARS);
-    }
-    r.answer = redact::text(&r.answer);
-    r.question = redact::text(&r.question);
-    r.sent = crate::kernel::ui::truncate(&r.sent, 64 * 1024);
+    let r = stored(rec);
     let name = format!("{}-{}.json", r.started.timestamp(), r.id);
     if let Ok(json) = serde_json::to_vec_pretty(&r) {
         let tmp = dir.join(format!(".{name}.tmp"));
@@ -718,6 +929,18 @@ pub fn save_in(dir: &Path, rec: &Record) {
         let oldest = files.remove(0);
         let _ = std::fs::remove_file(dir.join(oldest));
     }
+}
+
+/// A run as the history keeps it: results capped, question and answer redacted.
+fn stored(rec: &Record) -> Record {
+    let mut r = rec.clone();
+    for s in &mut r.steps {
+        s.result = crate::kernel::ui::truncate(&s.result, HISTORY_RESULT_CHARS);
+    }
+    r.answer = redact::text(&r.answer);
+    r.question = redact::text(&r.question);
+    r.sent = crate::kernel::ui::truncate(&r.sent, 64 * 1024);
+    r
 }
 
 /// History file names, oldest first.
@@ -739,9 +962,22 @@ fn list_files(dir: &Path) -> Vec<String> {
     names
 }
 
-/// Every stored run, newest first.
+/// Every stored run plus the live ones not yet written, newest first, at most `MAX_HISTORY`.
+// WHY: a run is written when it finishes, so without the live ones a question asked a moment
+// ago is missing from the history page until then (test: run_history_is_capped_redacted_and_reopened)
 pub fn history() -> Vec<Record> {
-    history_in(&history_dir())
+    let mut all = history_in(&history_dir());
+    let runs: Vec<Arc<Run>> = lock(&RUNS).iter().cloned().collect();
+    let live: Vec<Record> = runs
+        .iter()
+        .map(|r| r.record())
+        .filter(|r| all.iter().all(|h| h.id != r.id))
+        .map(|r| stored(&r))
+        .collect();
+    all.extend(live);
+    all.sort_by_key(|r| std::cmp::Reverse(r.started));
+    all.truncate(MAX_HISTORY);
+    all
 }
 
 pub fn history_in(dir: &Path) -> Vec<Record> {
@@ -825,9 +1061,7 @@ fn evidence_line(kind: &str, value: &str) -> Option<String> {
     match kind {
         "trace" => {
             let id: u64 = value.parse().ok()?;
-            let t = lock(&HUB.traces)
-                .find(id)
-                .or_else(|| lock(&HUB.http).example(id))?;
+            let t = super::trace::find(id)?;
             Some(format!(
                 "trace {id}: {} {} → {} in {}, {} SQL statements ({}){}",
                 t.method,

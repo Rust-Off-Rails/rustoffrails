@@ -277,7 +277,7 @@ app = app
 file = "src/routes.rs"
 anchor = "paths"
 text = '''
-/// The live room (realtime sample). Links into it carry `hx-boost="false"`: its scripts load in <head>.
+/// The live room (realtime sample). Links into it may be boosted: its scripts load from the layout.
 pub fn live() -> String {
     "/live".into()
 }
@@ -392,10 +392,37 @@ Box::new(m20261016_005200_create_realtime_token_uses::Migration),
 '''
 
 [[wire]]
+file = "src/views/mod.rs"
+anchor = "ctx fields"
+text = '''
+/// `static/channels.js` and `static/live_room.js`, digested (realtime): the app layout loads them on
+/// every page (`samples: app head`), so a boosted link into the live room starts it.
+pub channels_js: String,
+pub live_room_js: String,
+'''
+
+[[wire]]
+file = "src/controllers/application.rs"
+anchor = "ctx init"
+text = '''
+channels_js: state.assets.path("channels.js"),
+live_room_js: state.assets.path("live_room.js"),
+'''
+
+[[wire]]
+file = "templates/layouts/application.html"
+anchor = "app head"
+text = '''
+{# realtime: the channels client and the live room (inert on pages without [data-live-room]). Every page: links are boosted. #}
+<script src="{{ ctx.channels_js }}" defer></script>
+<script src="{{ ctx.live_room_js }}" defer></script>
+'''
+
+[[wire]]
 file = "templates/shared/_nav.html"
 anchor = "nav links"
 text = '''
-<a href="{{ paths::live() }}" hx-boost="false" class="text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white">Live room</a>
+<a href="{{ paths::live() }}" class="text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white">Live room</a>
 '''
 
 [[wire]]

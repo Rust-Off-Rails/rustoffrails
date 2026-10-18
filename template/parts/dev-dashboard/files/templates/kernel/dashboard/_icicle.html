@@ -1,0 +1,12 @@
+{# An icicle (a flame graph, root on top; traces_web.rs `Icicle`). A frame links to itself as the
+   new root; the crumbs zoom back out. #}
+{% if icicle.empty %}
+<p class="empty">Nothing to draw yet.</p>
+{% else %}
+<nav class="crumbs" aria-label="Zoom">{% for (name, path) in icicle.crumbs %}<a href="{{ icicle.href }}{{ path|urlencode }}"{% if loop.last %} aria-current="true"{% endif %}>{{ name }}</a>{% if !loop.last %} › {% endif %}{% endfor %}</nav>
+<div class="scroll icicle-scroll" tabindex="0" role="region" aria-label="{{ icicle.label }}">
+<svg class="icicle" width="100%" height="{{ icicle.height }}" role="group" aria-label="{{ icicle.label }}">
+  {% for c in icicle.cells %}<a href="{{ icicle.href }}{{ c.path|urlencode }}"><rect class="k-{{ c.kind }}" x="{{ c.x }}" y="{{ c.y }}" width="{{ c.w }}" height="19" rx="2"><title>{{ c.title }}</title></rect>{% if c.labeled %}<text x="{{ c.x }}" dx="4" y="{{ c.y + 13 }}">{{ c.label }}</text>{% endif %}</a>{% endfor %}
+</svg>
+</div>
+{% endif %}

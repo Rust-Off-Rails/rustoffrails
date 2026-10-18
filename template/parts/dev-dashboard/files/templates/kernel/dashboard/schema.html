@@ -1,6 +1,6 @@
 {% extends "kernel/dashboard/_layout.html" %}
 {% block dash %}
-<header class="dash-head"><h1>Schema <span class="muted">{{ backend }} · {{ tables.len() }} tables · {{ erd.edges.len() }} relationships</span></h1></header>
+<header class="dash-head"><h1>Schema <span class="muted">{{ backend }} · {{ crate::kernel::dashboard::web::count(tables.len(), "table", "tables") }} · {{ crate::kernel::dashboard::web::count(erd.edges.len(), "relationship", "relationships") }}</span></h1></header>
 <nav class="segmented" aria-label="Schema views">{% for t in tabs %}<a href="{{ t.href }}"{% if t.current %} aria-current="true"{% endif %}>{{ t.label }}</a>{% endfor %}</nav>
 <p class="hint">Tables, columns, keys, indexes and foreign keys from the database's own catalog, with row counts. Never a row's data.</p>
 {% if let Some(e) = error %}<p class="notice-inline">Couldn't read the catalog: {{ e }}</p>{% endif %}
@@ -25,7 +25,7 @@
   <p class="hint erd-help" data-erd-help hidden><span class="help-wide">Drag the background to pan, the wheel or + and − to zoom, a table to move it (remembered in this browser). Click or focus a table to see its neighbours and details. Arrow keys pan while the diagram has focus; 0 fits.</span><span class="help-narrow">Swipe to pan the diagram; tap a table for its neighbours and details. The tables and relationships are listed below too.</span></p>
   <div class="erd-wrap" data-erd-viewport tabindex="0" role="region" aria-label="Schema diagram">
     <svg class="erd" data-erd-svg data-color="area" width="{{ erd.w() }}" height="{{ erd.h() }}" viewBox="{{ erd.view_box() }}" aria-labelledby="erd-svg-title">
-      <title id="erd-svg-title">Entity-relationship diagram: {{ erd.tables.len() }} tables and {{ erd.edges.len() }} relationships. The table listing and the relationships list below say the same in text.</title>
+      <title id="erd-svg-title">Entity-relationship diagram: {{ crate::kernel::dashboard::web::count(erd.tables.len(), "table", "tables") }} and {{ crate::kernel::dashboard::web::count(erd.edges.len(), "relationship", "relationships") }}. The table listing and the relationships list below say the same in text.</title>
       <g data-erd-scene>
         <g class="erd-edges" aria-hidden="true">{% for e in erd.edges %}<g class="erd-edge" data-from="{{ e.child }}" data-to="{{ e.parent }}" data-fc="{{ e.child_col }}" data-tc="{{ e.parent_col }}" data-pe="{{ e.parent_end.key() }}" data-ce="{{ e.child_end.key() }}"><path class="erd-line" d="{{ e.d }}"/><path class="erd-glyph" d="{{ e.glyphs }}"/></g>{% endfor %}</g>
         {% for t in erd.tables %}<a class="erd-t {{ t.area_class }}-a {{ t.prefix_class }}-p" href="/dev/dashboard/schema/tables/{{ t.name }}" data-table="{{ t.name }}" data-x="{{ t.x }}" data-y="{{ t.y }}" data-w="{{ t.ws() }}" data-h="{{ t.hs() }}" data-hk="{{ t.hks() }}" transform="{{ t.tx() }}" aria-describedby="erd-d-{{ t.name }}"><desc id="erd-d-{{ t.name }}">{{ t.label() }}</desc>
@@ -51,7 +51,7 @@
 <nav class="toc" aria-label="Tables">{% for t in tables %}<a href="#table-{{ t.name }}">{{ t.name }} <span class="muted">{{ t.rows }}</span></a>{% endfor %}</nav>
 {% for t in tables %}
 <section class="panel table-card" id="table-{{ t.name }}" aria-labelledby="t-{{ t.name }}">
-  <header><h2 id="t-{{ t.name }}" class="mono"><a href="/dev/dashboard/schema/tables/{{ t.name }}">{{ t.name }}</a></h2><span class="muted">{{ t.rows }} rows{% if !t.size.is_empty() %} · {{ t.size }}{% endif %} · {{ t.area }}</span></header>
+  <header><h2 id="t-{{ t.name }}" class="mono"><a href="/dev/dashboard/schema/tables/{{ t.name }}">{{ t.name }}</a></h2><span class="muted">{{ crate::kernel::dashboard::web::count(t.rows, "row", "rows") }}{% if !t.size.is_empty() %} · {{ t.size }}{% endif %} · {{ t.area }}</span></header>
   {% if !t.unindexed.is_empty() %}<p class="notice-inline">No index on the foreign key{% if t.unindexed.len() > 1 %}s{% endif %} {% for c in t.unindexed %}<code>{{ c }}</code> {% endfor %}: lookups and cascades scan this table.</p>{% endif %}
   <div class="scroll" tabindex="0" role="region" aria-label="Columns of {{ t.name }}"><table class="data-table">
     <caption class="visually-hidden">Columns of {{ t.name }}</caption>

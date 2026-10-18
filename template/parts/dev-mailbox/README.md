@@ -17,11 +17,18 @@ Every email your app sends in development, in a real inbox at **`/dev/mailbox`**
 
 Extracted from Rust off Rails apps and rebuilt. Fixed on the way: an app moved the mailbox styles into `app.css`, which kernel pages never load, so the mailbox rendered unstyled; `<base target="_blank">` could land before the doctype (quirks mode); the inbox polled every 2 s per tab. Added: the live stream, codes, checks, previews in four widths and themes, keyboard, JSON filters and the CLI.
 
-Guide: [`.offrails/guides/mailers.md#the-dev-mailbox`](https://rustoffrails.org/docs/mailers) · [`.offrails/guides/dev-tools.md`](https://rustoffrails.org/docs/dev-tools). Depends on: [mailer](../mailer/).
+Guide: [`.offrails/guides/mailers.md#the-dev-mailbox`](https://rustoffrails.org/docs/guides/mailers) · [`.offrails/guides/dev-tools.md`](https://rustoffrails.org/docs/guides/dev-tools). Depends on: [mailer](../mailer/).
 
-## Screenshots
+## Screens
 
-![The inbox with a one-time code, light, desktop](../../docs/screenshots/dev-mailbox/inbox-light-desktop.png)
+<a href="../../docs/screenshots/dev-mailbox/inbox-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/dev-mailbox/inbox-dark-desktop.png"><img src="../../docs/screenshots/dev-mailbox/inbox-light-desktop.png" alt="The inbox with a one-time code and its copy button" width="860"></picture></a>
+
+<table>
+<tr><td valign="top"><a href="../../docs/screenshots/dev-mailbox/checks-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/dev-mailbox/checks-dark-desktop.png"><img src="../../docs/screenshots/dev-mailbox/checks-light-desktop.png" alt="Checks for an email before real inboxes see it" width="420"></picture></a><br><sub>Checks: what Gmail and phones will break</sub></td><td valign="top"><a href="../../docs/screenshots/dev-mailbox/width-320-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/dev-mailbox/width-320-dark-desktop.png"><img src="../../docs/screenshots/dev-mailbox/width-320-light-desktop.png" alt="The message previewed at 320 px" width="420"></picture></a><br><sub>320 px phone preview</sub></td></tr>
+<tr><td valign="top"><a href="../../docs/screenshots/dev-mailbox/dark-preview-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/dev-mailbox/dark-preview-dark-desktop.png"><img src="../../docs/screenshots/dev-mailbox/dark-preview-light-desktop.png" alt="The message in a mail app's dark mode" width="420"></picture></a><br><sub>Dark preview</sub></td><td valign="top"><a href="../../docs/screenshots/dev-mailbox/attachments-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/dev-mailbox/attachments-dark-desktop.png"><img src="../../docs/screenshots/dev-mailbox/attachments-light-desktop.png" alt="Attachments and extracted links" width="420"></picture></a><br><sub>Attachments and links</sub></td></tr>
+</table>
+
+<sub>Light or dark follows your GitHub theme; click an image for full size.</sub>
 
 | Screen | Light | Dark |
 |--------|-------|------|
@@ -38,7 +45,7 @@ Guide: [`.offrails/guides/mailers.md#the-dev-mailbox`](https://rustoffrails.org/
 
 ## Install
 
-Through the samples MCP server: `get_sample dev-mailbox`. Or by hand, in the app root, after the [mailer](../mailer/) sample:
+By hand, in the app root, after the [mailer](../mailer/) sample:
 
 1. No crates to add.
 2. Copy `files/` into the app, keeping the paths. In the test file and the `main.rs` wiring, replace `offrails_host` with your crate name.

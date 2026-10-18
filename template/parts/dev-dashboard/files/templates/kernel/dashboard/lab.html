@@ -33,13 +33,33 @@
     </form>
   </section>
   <section class="panel" aria-labelledby="lab-data">
-    <header><h2 id="lab-data">Fake data</h2><span class="muted">{{ records }} orders</span></header>
+    <header><h2 id="lab-data">Fake data</h2><span class="muted">{{ crate::kernel::dashboard::web::count(records, "order", "orders") }}</span></header>
     <form method="post" action="/dev/dashboard/lab/seed" class="row pad">
       <label>Orders to add <input type="number" name="n" min="1" max="10000" value="200" required></label>
       <button class="btn">Add</button>
     </form>
     <form method="post" action="/dev/dashboard/lab/clear" class="pad"><button class="btn danger">Remove all fake orders</button></form>
     <p class="muted small pad">Written by <code>lab::seed</code>, the hook to point at your own models. The lab's pages: <a href="/dev/lab/orders">orders</a> (two queries), <a href="/dev/lab/orders/n-plus-one">orders with an N+1</a>.</p>
+  </section>
+  <section class="panel" id="lab-upstreams" aria-labelledby="lab-up-title">
+    <header><h2 id="lab-up-title">Simulated APIs</h2><span class="muted">for the <a href="/dev/lab/checkout" hx-boost="false">checkout fan-out</a></span></header>
+    <p class="hint pad">Four APIs this app serves itself under <code>/dev/lab/upstream/{name}</code>; the checkout calls them through <code>kernel::outbound</code> one after another (<a href="/dev/lab/checkout?mode=sequential" hx-boost="false">sequential</a>), concurrently (<a href="/dev/lab/checkout?mode=parallel" hx-boost="false">parallel</a>) or with <a href="/dev/lab/checkout?mode=retry" hx-boost="false">retries</a>. See <a href="/dev/dashboard/upstreams">Upstreams</a>.</p>
+    <ul class="scenarios" role="list">{% for (key, label, what) in presets %}<li><form method="post" action="/dev/dashboard/lab/upstreams"><input type="hidden" name="preset" value="{{ key }}"><button class="btn scenario-btn">{{ label }}</button></form><p>{{ what }}</p></li>{% endfor %}</ul>
+    <div class="scroll" tabindex="0" role="region" aria-label="Simulated APIs"><table class="data-table">
+      <thead><tr><th scope="col">API</th><th scope="col">Latency ms</th><th scope="col">Jitter ms</th><th scope="col">503 %</th><th scope="col">Hang %</th><th scope="col"><span class="visually-hidden">Save</span></th></tr></thead>
+      <tbody>{% for (name, s) in sims %}<tr><th scope="row">{{ name }}</th><td colspan="5"><form method="post" action="/dev/dashboard/lab/upstreams" class="row sim-form"><input type="hidden" name="name" value="{{ name }}"><label><span class="visually-hidden">{{ name }} latency in ms</span><input type="number" name="latency_ms" min="0" max="5000" value="{{ s.latency_ms }}"></label><label><span class="visually-hidden">{{ name }} jitter in ms</span><input type="number" name="jitter_ms" min="0" max="5000" value="{{ s.jitter_ms }}"></label><label><span class="visually-hidden">{{ name }} share of 503 answers</span><input type="number" name="error_pct" min="0" max="100" value="{{ s.error_pct }}"></label><label><span class="visually-hidden">{{ name }} share of hung calls</span><input type="number" name="hang_pct" min="0" max="100" value="{{ s.hang_pct }}"></label><button class="btn quiet">Set</button></form></td></tr>{% endfor %}</tbody>
+    </table></div>
+    {% if !traceparent.is_empty() %}<p class="muted small pad">Last <code>traceparent</code> a simulated API received: <code>{{ traceparent }}</code></p>{% endif %}
+  </section>
+  <section class="panel" id="lab-attack" aria-labelledby="lab-attack-title">
+    <header><h2 id="lab-attack-title">Attack simulator</h2><span class="muted">this app's own address · TEST-NET client addresses</span></header>
+    <p class="hint pad">Hostile traffic for the <a href="/dev/dashboard/security">Security</a> tab: each run sends its requests to this app only, claiming a documentation address (192.0.2.x, 198.51.100.x, 203.0.113.x) with this process's secret.{% if attacking %} <strong>A run is in progress.</strong>{% endif %}</p>
+    <ul class="scenarios" role="list">{% for (key, label, what) in attacks %}<li><form method="post" action="/dev/dashboard/lab/attack"><input type="hidden" name="kind" value="{{ key }}"><button class="btn scenario-btn">{{ label }}</button></form><p>{{ what }}</p></li>{% endfor %}
+      <li><form method="post" action="/dev/dashboard/lab/attack"><input type="hidden" name="kind" value="all"><button class="btn primary scenario-btn">All of them</button></form><p>Every run above, one after another.</p></li></ul>
+  </section>
+  <section class="panel" aria-labelledby="lab-ux-title">
+    <header><h2 id="lab-ux-title">UX trouble</h2><span class="muted">for the <a href="/dev/dashboard/frontend">Frontend</a> tab</span></header>
+    <p class="hint pad">An app page with a slow button, a dead button, one that throws, and a widget that only works on a full page load (its script waits for DOMContentLoaded, which never fires again after a boosted link). <a class="btn" href="/dev/lab/ux" hx-boost="false">Open it</a> <a class="btn quiet" href="/dev/lab/ux?simulate=1" hx-boost="false">Open it and simulate rage clicks</a> (the page clicks by itself, then follows the boosted link).</p>
   </section>
 </div>
 <p class="hint">From a terminal: <code>app bench --rps 50 --secs 10 --route /dev/lab/orders</code></p>

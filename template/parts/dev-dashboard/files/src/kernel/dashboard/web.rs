@@ -26,7 +26,7 @@ use serde::Deserialize;
 
 use super::charts::{self, ChartView, Heatmap, SeriesSpec, Spark, Unit, Window};
 use super::series::{Range, Sample};
-use super::trace::{LogLine, Trace, WaterRow};
+use super::trace::{LogLine, Trace};
 use super::{
     HUB, ai, github, http, insights, lab, lock, panels, route_explorer as rx, schema, sql, testruns,
 };
@@ -49,6 +49,13 @@ pub fn micros(us: u64) -> String {
         u if u < 1_000_000 => format!("{}ms", u / 1_000),
         u => format!("{:.2}s", u as f64 / 1_000_000.0),
     }
+}
+
+/// "1 error", "2 errors", "0 errors": a count and its noun, singular only for exactly one.
+pub fn count(n: impl std::fmt::Display, one: &str, many: &str) -> String {
+    let n = n.to_string();
+    let noun = if n == "1" { one } else { many };
+    format!("{n} {noun}")
 }
 
 /// "512 B", "1.5 KB", "210.4 MB", "2.1 GB".
@@ -125,6 +132,10 @@ pub struct Dash {
     pub ai_item: String,
     /// The assistant is available here (so "Ask about this" links show).
     pub ai_on: bool,
+    /// The panel's one-line "what this tab tells you" and its suggested questions (shown before
+    /// the panel loads, and without JavaScript as links).
+    pub ai_guide: &'static str,
+    pub ai_prompts: &'static [&'static str],
 }
 
 impl Dash {
@@ -138,6 +149,8 @@ impl Dash {
         self.ai_on = ai::allowed(config, self.ro);
         if self.ai_on && (!self.ro || tab.in_read_only()) {
             self.ai_tab = tab.key();
+            self.ai_guide = tab.guide_line();
+            self.ai_prompts = tab.suggestions(item.is_some());
             self.ai_item = item.unwrap_or_default();
         }
         self
@@ -157,8 +170,13 @@ pub(super) fn dash(mode: Mode, page: &str, live: Option<String>, refresh: u64) -
         ("Requests", "/requests", true),
         ("Routes", "/routes", false),
         ("Traces", "/traces", true),
+        ("Methods", "/methods", true),
+        ("Upstreams", "/upstreams", true),
+        ("Hot functions", "/profile", false),
         ("SQL", "/sql", true),
         ("Logs", "/logs", false),
+        ("Security", "/security", true),
+        ("Frontend", "/frontend", true),
         ("Schema", "/schema", false),
         ("Tests", "/tests", false),
         ("GitHub", "/github", false),
@@ -182,6 +200,8 @@ pub(super) fn dash(mode: Mode, page: &str, live: Option<String>, refresh: u64) -
         ai_tab: "",
         ai_item: String::new(),
         ai_on: false,
+        ai_guide: "",
+        ai_prompts: &[],
     }
 }
 
@@ -202,7 +222,9 @@ pub(super) fn chrome(
     )
     .stylesheet(state.assets.path("kernel/dashboard.css"))
     .stylesheet(state.assets.path("kernel/dashboard-ai.css"))
+    .stylesheet(state.assets.path("kernel/dashboard-trace.css"))
     .script(state.assets.path("kernel/dashboard.js"))
+    .script(state.assets.path("kernel/dashboard-trace.js"))
     .script(state.assets.path("kernel/dashboard-ai.js"))
 }
 
@@ -226,6 +248,14 @@ pub fn dev_router() -> Router<AppState> {
         .route("/dev/dashboard/insights", get(insights_page))
         .route("/dev/dashboard/insights/dismiss", post(dismiss))
         .route("/dev/dashboard/routes", get(routes_page))
+        .route(
+            "/dev/dashboard/profile",
+            get(super::traces_web::profile_page),
+        )
+        .route(
+            "/dev/dashboard/profile/toggle",
+            post(super::traces_web::profile_toggle),
+        )
         .route("/dev/dashboard/logs", get(logs_page))
         .route("/dev/dashboard/logs/stream", get(logs_stream))
         .route("/dev/dashboard/sql/{id}/explain", post(explain))
@@ -245,6 +275,9 @@ pub fn dev_router() -> Router<AppState> {
         .route("/dev/dashboard/lab/scenario", post(lab_scenario))
         .route("/dev/dashboard/reset", post(reset))
         .route("/dev/csp-reports", post(csp_report))
+        .route("/dev/dashboard/rum", post(super::rum::collect))
+        .route("/dev/dashboard/lab/upstreams", post(lab_upstreams))
+        .route("/dev/dashboard/lab/attack", post(lab_attack))
         .layer(Extension(DEV))
         .merge(lab::demo_router())
         // SECURITY: dashboard data (SQL, logs, traces) never lands in a shared or back/forward
@@ -266,8 +299,19 @@ fn read_routes(r: Router<AppState>, base: &'static str) -> Router<AppState> {
     r.route(&p(""), get(overview))
         .route(&p("/charts"), get(charts_page))
         .route(&p("/requests"), get(requests_page))
-        .route(&p("/traces"), get(traces_page))
-        .route(&p("/traces/{id}"), get(trace_page))
+        .route(&p("/traces"), get(super::traces_web::explorer))
+        .route(&p("/traces/compare"), get(super::traces_web::compare))
+        .route(&p("/traces/lookup"), get(super::traces_web::lookup))
+        .route(&p("/traces/{id}"), get(super::traces_web::trace_page))
+        .route(
+            &p("/traces/{id}/waterfall"),
+            get(super::traces_web::waterfall_fragment),
+        )
+        .route(&p("/traces/{id}/json"), get(super::traces_web::trace_json))
+        .route(&p("/methods"), get(super::traces_web::methods_page))
+        .route(&p("/upstreams"), get(super::upstreams::upstreams_page))
+        .route(&p("/security"), get(super::threats::security_page))
+        .route(&p("/frontend"), get(super::rum::frontend_page))
         .route(&p("/sql"), get(sql_page))
         .route(&p("/sql/{id}"), get(sql_show))
         .route(&p("/config"), get(config_page))
@@ -544,6 +588,21 @@ struct CardsFragment {
     cards: Vec<Card>,
 }
 
+/// The overview's incident cards, live (an investigation's status and story as they arrive).
+#[derive(Template)]
+#[template(path = "kernel/dashboard/_incidents_panel.html")]
+struct IncidentsPanel {
+    incidents: Vec<super::ai_web::IncidentView>,
+    base: &'static str,
+}
+
+/// The insights page's incident cards, live.
+#[derive(Template)]
+#[template(path = "kernel/dashboard/_incidents_box.html")]
+struct IncidentsBox {
+    incidents: Vec<super::ai_web::IncidentView>,
+}
+
 #[derive(Template)]
 #[template(path = "kernel/dashboard/overview.html")]
 struct OverviewPage {
@@ -555,12 +614,38 @@ struct OverviewPage {
     slow_sql: Vec<SqlView>,
     n_plus_one: Vec<NPlusOneRow>,
     traces: Vec<TraceRow>,
+    slow_fns: Vec<SlowFn>,
     findings: Vec<FindingView>,
     finding_total: usize,
-    empty: bool,
-    health: super::ai_web::HealthView,
+    cc: super::ai_home::CommandCenter,
     digest: super::ai_watch::Digest,
     incidents: Vec<super::ai_web::IncidentView>,
+}
+
+/// A row of the overview's "Slowest functions".
+pub struct SlowFn {
+    pub name: &'static str,
+    pub module: &'static str,
+    pub p95: String,
+    pub calls: u64,
+    pub href: String,
+}
+
+fn slow_fns(mode: Mode) -> Vec<SlowFn> {
+    let (mut stats, _) = super::traces_web::method_stats();
+    stats.retain(|m| !matches!(m.kind, "handler" | "middleware" | "job"));
+    stats.sort_by_key(|m| std::cmp::Reverse(m.p95()));
+    stats
+        .into_iter()
+        .take(5)
+        .map(|m| SlowFn {
+            name: m.name,
+            module: m.module,
+            p95: micros(m.p95()),
+            calls: m.calls,
+            href: format!("{}/traces?fn={}", mode.base, cookie::encode(m.name)),
+        })
+        .collect()
 }
 
 pub struct NPlusOneRow {
@@ -615,8 +700,8 @@ async fn overview(
             .take(8)
             .collect::<Vec<_>>(),
     );
-    let (findings, finding_total, high, medium) = if mode.ro {
-        (Vec::new(), 0, 0, 0)
+    let (findings, finding_total, brief) = if mode.ro {
+        (Vec::new(), 0, Vec::new())
     } else {
         let dismissed = dismissed(&headers);
         let all: Vec<FindingView> = all_findings(&state, &dismissed)
@@ -625,13 +710,12 @@ async fn overview(
             .filter(|f| !f.dismissed)
             .collect();
         let n = all.len();
-        let sev = |s: &str| all.iter().filter(|f| f.severity == s).count();
-        let (high, medium) = (sev("high"), sev("medium"));
-        (all.into_iter().take(3).collect(), n, high, medium)
+        let brief = all.iter().map(super::ai_home::finding_of).collect();
+        (all.into_iter().take(3).collect(), n, brief)
     };
-    let empty = lock(&HUB.http).is_empty();
     let cards = cards(mode);
-    let health = super::ai_web::health_view(&state, mode, &cards, high, medium).await;
+    let owner = cookie::get(&headers, super::ai_agent::OWNER_COOKIE);
+    let cc = super::ai_home::build(&state, mode, brief, owner.as_deref()).await;
     // "Since you were away": this browser's last visit (a cookie), then now.
     let (seen, seen_cookie) = super::ai_web::seen(&headers, state.config.is_production());
     let digest = super::ai_watch::digest(seen, Utc::now().timestamp());
@@ -642,8 +726,7 @@ async fn overview(
             "",
             Some(format!("{}/stream?view=overview", mode.base)),
             1,
-        )
-        .ai(&state.config, ai::Tab::Overview, None),
+        ),
         cards,
         panels: if mode.ro {
             Vec::new()
@@ -654,10 +737,10 @@ async fn overview(
         slow_sql,
         n_plus_one: n_plus_one_rows(5),
         traces,
+        slow_fns: slow_fns(mode),
         findings,
         finding_total,
-        empty,
-        health,
+        cc,
         digest,
         incidents: if mode.ro {
             Vec::new()
@@ -673,23 +756,31 @@ async fn overview(
 // Charts
 // ---------------------------------------------------------------------------------------------
 
-/// Every chart of a range.
-/// The charts' window: the last `range` (live), or a zoomed `from`..`to` within the last 24 hours.
+/// The charts' window: the last `range` (live), or a zoomed `from`..`to` within the history kept.
+/// Memory answers the short ranges; the history file the rest (`history::between`), merged so the
+/// hot/cold boundary has no seam.
 pub fn window(range: Range, from: Option<i64>, to: Option<i64>) -> (Window, bool) {
     let now = Utc::now().timestamp();
-    let series = lock(&HUB.series);
+    let oldest = now - super::history::HOUR_DAYS * 86_400;
     let zoom = match (from, to) {
-        (Some(f), Some(t)) if t - f >= 10 && f >= now - 86_400 && t <= now + 60 => Some((f, t)),
+        (Some(f), Some(t)) if t - f >= 10 && f >= oldest && t <= now + 60 => Some((f, t)),
         _ => None,
     };
-    let (from, to, samples, live) = match zoom {
-        Some((f, t)) => (f, t, series.between(f, t).0, false),
-        None => (now - range.seconds(), now, series.window(range, now), true),
+    let (from, to, slice, live) = match zoom {
+        Some((f, t)) => (f, t, super::history::between(f, t), false),
+        None => (
+            now - range.seconds(),
+            now,
+            super::history::window(range, now),
+            true,
+        ),
     };
     let w = Window {
-        marks: series.annotations(from, to),
-        demo: series.demo_until.is_some_and(|d| d > from),
-        samples: charts::downsample(&samples, 300),
+        marks: slice.marks,
+        demo: slice.demo,
+        samples: charts::downsample(&slice.samples, 300),
+        // Legends summarize every sample read, not the drawn (peak-preserving) points.
+        full: slice.samples,
         from,
         to,
     };
@@ -1086,208 +1177,6 @@ async fn requests_page(
 // Traces
 // ---------------------------------------------------------------------------------------------
 
-#[derive(Debug, Default, Deserialize)]
-struct TracesQuery {
-    route: Option<String>,
-    notable: Option<String>,
-    status: Option<String>,
-    /// Unix minute: the traces of that minute (a click on a chart).
-    minute: Option<i64>,
-}
-
-fn filtered_traces(q: &TracesQuery) -> Vec<Arc<Trace>> {
-    let notable = q.notable.as_deref() == Some("1");
-    lock(&HUB.traces)
-        .list(notable)
-        .into_iter()
-        .filter(|t| {
-            q.route
-                .as_deref()
-                .is_none_or(|r| r.is_empty() || t.route == r)
-        })
-        .filter(|t| {
-            q.minute
-                .is_none_or(|m| t.at.timestamp().div_euclid(60) == m)
-        })
-        .filter(|t| match q.status.as_deref() {
-            Some("5xx") => t.status >= 500,
-            Some("4xx") => (400..500).contains(&t.status),
-            Some("n1") => !t.n_plus_one.is_empty(),
-            _ => true,
-        })
-        .take(200)
-        .collect()
-}
-
-#[derive(Template)]
-#[template(path = "kernel/dashboard/_traces.html")]
-struct TracesFragment {
-    rows: Vec<TraceRow>,
-    base: &'static str,
-}
-
-#[derive(Template)]
-#[template(path = "kernel/dashboard/traces.html")]
-struct TracesPage {
-    chrome: Chrome,
-    d: Dash,
-    rows: Vec<TraceRow>,
-    base: &'static str,
-    filters: Vec<RangeLink>,
-    route: String,
-    kept: String,
-    /// "14:05 UTC" when filtered to one minute (a click on a chart).
-    minute: String,
-}
-
-async fn traces_page(
-    State(state): State<AppState>,
-    Extension(mode): Extension<Mode>,
-    Query(q): Query<TracesQuery>,
-    theme: ThemeSwitch,
-    flash: Option<Extension<RequestFlash>>,
-) -> Response {
-    let route = q.route.clone().unwrap_or_default();
-    let current = if q.notable.as_deref() == Some("1") {
-        "notable"
-    } else {
-        q.status.as_deref().unwrap_or("all")
-    };
-    let rq = if route.is_empty() {
-        String::new()
-    } else {
-        format!("&route={}", cookie::encode(&route))
-    };
-    let filters = [
-        ("All", "all", ""),
-        ("Notable", "notable", "notable=1"),
-        ("5xx", "5xx", "status=5xx"),
-        ("4xx", "4xx", "status=4xx"),
-        ("N+1", "n1", "status=n1"),
-    ]
-    .iter()
-    .map(|(label, key, qs)| RangeLink {
-        label,
-        href: format!("{}/traces?{qs}{rq}", mode.base),
-        current: *key == current,
-    })
-    .collect();
-    let (recent, notable) = lock(&HUB.traces).lens();
-    let live = format!(
-        "{}/stream?view=traces{}{}{}",
-        mode.base,
-        if q.notable.as_deref() == Some("1") {
-            "&notable=1"
-        } else {
-            ""
-        },
-        q.status
-            .as_deref()
-            .map(|s| format!("&status={}", cookie::encode(s)))
-            .unwrap_or_default(),
-        rq
-    );
-    ui::page(TracesPage {
-        chrome: chrome(&state, "Traces", "dashboard", flash, theme),
-        d: dash(mode, "/traces", Some(live), 2).ai(&state.config, ai::Tab::Traces, None),
-        rows: trace_rows(&filtered_traces(&q)),
-        base: mode.base,
-        filters,
-        route,
-        kept: format!("{recent} recent and {notable} notable kept"),
-        minute: q
-            .minute
-            .and_then(|m| chrono::DateTime::from_timestamp(m * 60, 0))
-            .map(|d| d.format("%H:%M UTC").to_string())
-            .unwrap_or_default(),
-    })
-}
-
-pub struct SqlLine {
-    pub fp: String,
-    pub sql: String,
-    pub dur: String,
-    pub at: String,
-    pub flagged: bool,
-}
-
-#[derive(Template)]
-#[template(path = "kernel/dashboard/trace.html")]
-struct TracePage {
-    chrome: Chrome,
-    d: Dash,
-    t: Arc<Trace>,
-    tone: &'static str,
-    dur: String,
-    when: String,
-    rows: Vec<WaterRow>,
-    ticks: Vec<(u64, String)>,
-    sql: Vec<SqlLine>,
-    sql_total: String,
-    n_plus_one: Vec<(String, u32, String)>,
-    base: &'static str,
-}
-
-async fn trace_page(
-    State(state): State<AppState>,
-    Extension(mode): Extension<Mode>,
-    Path(id): Path<String>,
-    theme: ThemeSwitch,
-    flash: Option<Extension<RequestFlash>>,
-) -> Response {
-    let found = id.parse::<u64>().ok().and_then(|id| {
-        lock(&HUB.traces)
-            .find(id)
-            .or_else(|| lock(&HUB.http).example(id))
-    });
-    let Some(t) = found else {
-        return back(
-            &format!("{}/traces", mode.base),
-            Flash::alert("That trace is no longer kept (the dashboard keeps the latest ones)."),
-        );
-    };
-    // SECURITY: the production view shows timings and normalized SQL, never log events or span
-    // fields (what the app logged: emails, ids, amounts) (test: the_production_trace_page_hides_events_and_fields)
-    let rows = super::trace::waterfall(&t, !mode.ro);
-    let ticks = (0..=4)
-        .map(|i| (i * 250, micros(t.dur_us * i / 4)))
-        .collect();
-    let mut sql: Vec<SqlLine> = t
-        .sql
-        .iter()
-        .map(|q| SqlLine {
-            fp: sql::hex(q.fp),
-            sql: q.sql.to_string(),
-            dur: micros(q.dur_us),
-            at: micros(q.start_us),
-            flagged: t.n_plus_one.iter().any(|(fp, _, _)| *fp == q.fp),
-        })
-        .collect();
-    sql.truncate(200);
-    ui::page(TracePage {
-        chrome: chrome(&state, "Trace", "dashboard", flash, theme),
-        d: dash(mode, "/traces", None, 0).ai(
-            &state.config,
-            ai::Tab::Traces,
-            Some(t.id.to_string()),
-        ),
-        tone: status_tone(t.status),
-        dur: micros(t.dur_us),
-        when: ui::utc(t.at),
-        rows,
-        ticks,
-        sql,
-        sql_total: micros(t.sql_us),
-        n_plus_one: t
-            .n_plus_one
-            .iter()
-            .map(|(fp, n, s)| (sql::hex(*fp), *n, s.to_string()))
-            .collect(),
-        base: mode.base,
-        t,
-    })
-}
-
 // ---------------------------------------------------------------------------------------------
 // SQL
 // ---------------------------------------------------------------------------------------------
@@ -1404,7 +1293,7 @@ struct SqlShowPage {
     q: SqlView,
     plan: Option<Vec<String>>,
     plan_error: Option<String>,
-    rows: Vec<TraceRow>,
+    list: String,
     backend: &'static str,
     base: &'static str,
 }
@@ -1433,7 +1322,7 @@ async fn sql_detail(
         .list(false)
         .into_iter()
         .filter(|t| t.sql.iter().any(|s| s.fp == fp))
-        .take(10)
+        .take(20)
         .collect();
     let (plan, plan_error) = match plan {
         Some(Ok(p)) => (Some(p), None),
@@ -1466,7 +1355,7 @@ async fn sql_detail(
         q,
         plan,
         plan_error,
-        rows: trace_rows(&traces),
+        list: super::traces_web::list_html(mode, &traces),
         backend,
         base: mode.base,
     })
@@ -1685,9 +1574,8 @@ struct StreamQuery {
     view: Option<String>,
     range: Option<String>,
     sort: Option<String>,
-    route: Option<String>,
-    notable: Option<String>,
-    status: Option<String>,
+    /// The traces explorer's own query string (its filters).
+    tq: Option<String>,
 }
 
 /// The fragments of a view, by `data-live` key.
@@ -1697,6 +1585,24 @@ fn fragments(mode: Mode, q: &StreamQuery) -> Vec<(&'static str, String)> {
         Some("overview") => {
             if let Ok(h) = (CardsFragment { cards: cards(mode) }).render() {
                 out.push(("cards", h));
+            }
+            if !mode.ro
+                && let Ok(h) = (IncidentsPanel {
+                    incidents: super::ai_web::incident_views(3),
+                    base: mode.base,
+                })
+                .render()
+            {
+                out.push(("incidents", h));
+            }
+        }
+        Some("insights") if !mode.ro => {
+            if let Ok(h) = (IncidentsBox {
+                incidents: super::ai_web::incident_views(super::ai_watch::INCIDENTS),
+            })
+            .render()
+            {
+                out.push(("incidents", h));
             }
         }
         Some("charts") => {
@@ -1721,18 +1627,7 @@ fn fragments(mode: Mode, q: &StreamQuery) -> Vec<(&'static str, String)> {
             }
         }
         Some("traces") => {
-            let tq = TracesQuery {
-                route: q.route.clone(),
-                notable: q.notable.clone(),
-                status: q.status.clone(),
-                minute: None,
-            };
-            if let Ok(h) = (TracesFragment {
-                rows: trace_rows(&filtered_traces(&tq)),
-                base: mode.base,
-            })
-            .render()
-            {
+            if let Some(h) = super::traces_web::live_fragment(mode, q.tq.as_deref()) {
                 out.push(("traces", h));
             }
         }
@@ -1808,6 +1703,8 @@ pub struct FindingView {
     pub guide: &'static str,
     pub guide_url: &'static str,
     pub href: String,
+    /// The trace its evidence points at (an N+1, a slow route): its waterfall opens inline.
+    pub trace: String,
     pub dismissed: bool,
 }
 
@@ -1842,6 +1739,12 @@ fn finding_view(f: insights::Finding, dismissed: &HashSet<String>) -> FindingVie
         fix: f.fix.replace('`', ""),
         guide: f.guide,
         guide_url: f.guide_url,
+        trace: f
+            .href
+            .strip_prefix("/dev/dashboard/traces/")
+            .filter(|id| id.bytes().all(|b| b.is_ascii_digit()))
+            .unwrap_or_default()
+            .to_owned(),
         href: f.href,
     }
 }
@@ -1911,7 +1814,13 @@ async fn insights_page(
         .collect();
     ui::page(InsightsPage {
         chrome: chrome(&state, "Insights", "dashboard", flash, theme),
-        d: dash(DEV, "/insights", None, 0).ai(&state.config, ai::Tab::Insights, None),
+        d: dash(
+            DEV,
+            "/insights",
+            Some("/dev/dashboard/stream?view=insights".into()),
+            2,
+        )
+        .ai(&state.config, ai::Tab::Insights, None),
         findings,
         hidden,
         counts,
@@ -1969,7 +1878,9 @@ async fn dismiss(
 async fn csp_report(body: axum::body::Bytes) -> StatusCode {
     // The global body limit applies; reports are small, and only the first 64 KB are read.
     let n = body.len().min(64 * 1024);
-    insights::record_csp(&body[..n]);
+    if insights::record_csp(&body[..n]) > 0 {
+        super::threats::csp_report();
+    }
     StatusCode::NO_CONTENT
 }
 
@@ -2101,18 +2012,18 @@ pub async fn route_findings(state: &AppState) -> Vec<insights::Finding> {
         href: href.to_owned(),
     };
     for r in &p.without_csrf {
-        out.push(f(format!("csrf-{r}"), "csrf", Severity::High, format!("{r} accepts cross-site requests"), "A cross-site request in an unused method reached the router instead of a 403 from the CSRF layer.".into(), "Mount the router inside the app's CsrfLayer (routes.rs); never exempt a route.", ".offrails/guides/security.md#csrf", "https://rustoffrails.org/docs/security#csrf", "/dev/dashboard/routes#problems"));
+        out.push(f(format!("csrf-{r}"), "csrf", Severity::High, format!("{r} accepts cross-site requests"), "A cross-site request in an unused method reached the router instead of a 403 from the CSRF layer.".into(), "Mount the router inside the app's CsrfLayer (routes.rs); never exempt a route.", ".offrails/guides/security.md#csrf", "https://rustoffrails.org/docs/guides/security#csrf", "/dev/dashboard/routes#problems"));
     }
     for r in p.ungated.iter().chain(&p.open_in_production) {
-        out.push(f(format!("gate-{r}"), "gate", Severity::High, format!("{r} has no gate"), "An /admin or /dev path that anyone may call, or an admin/login GET that answers 2xx anonymously with the production config.".into(), "Give it Access::Admin and the admin extractor (or Access::Dev and mount it only in development).", ".offrails/guides/security.md#admin--dev-surfaces", "https://rustoffrails.org/docs/security#admin--dev-surfaces", "/dev/dashboard/routes#problems"));
+        out.push(f(format!("gate-{r}"), "gate", Severity::High, format!("{r} has no gate"), "An /admin or /dev path that anyone may call, or an admin/login GET that answers 2xx anonymously with the production config.".into(), "Give it Access::Admin and the admin extractor (or Access::Dev and mount it only in development).", ".offrails/guides/security.md#admin--dev-surfaces", "https://rustoffrails.org/docs/guides/security#admin--dev-surfaces", "/dev/dashboard/routes#problems"));
     }
     for w in lock(&HUB.http).get_writes() {
-        out.push(f(format!("getwrite-{}-{}", w.route, w.sql), "get_write", Severity::Medium, format!("GET {} writes to the database", w.route), format!("{}× during a GET: {}", w.count, ui::truncate(&w.sql, 120)), "Safe methods never change state: move the write behind a POST (CSRF applies), or allow it in GET_WRITES_ALLOWED if it is a cache fill.", ".offrails/guides/security.md#csrf", "https://rustoffrails.org/docs/security#csrf", &format!("/dev/dashboard/traces/{}", w.trace)));
+        out.push(f(format!("getwrite-{}-{}", w.route, w.sql), "get_write", Severity::Medium, format!("GET {} writes to the database", w.route), format!("{}× during a GET: {}", w.count, ui::truncate(&w.sql, 120)), "Safe methods never change state: move the write behind a POST (CSRF applies), or allow it in GET_WRITES_ALLOWED if it is a cache fill.", ".offrails/guides/security.md#csrf", "https://rustoffrails.org/docs/guides/security#csrf", &format!("/dev/dashboard/traces/{}", w.trace)));
     }
     let routes = rx::table();
     for n in lock(&HUB.http).not_found_list().into_iter().take(10) {
         let near = rx::nearest(&n.path, &routes);
-        out.push(f(format!("404-{}", n.path), "not_found", if n.referrer.as_deref().is_some_and(|r| r.starts_with('/')) { Severity::Medium } else { Severity::Low }, format!("404: {}", n.path), format!("{}× {}{}", n.count, n.referrer.as_ref().map(|r| format!("from {r}")).unwrap_or_else(|| "with no referrer".into()), near.map(|r| format!("; did you mean {r}?")).unwrap_or_default()), "A link on this app points nowhere: fix the link (build it with a paths:: helper) or route the path.", ".offrails/guides/routing.md", "https://rustoffrails.org/docs/routing", "/dev/dashboard/routes#not-found"));
+        out.push(f(format!("404-{}", n.path), "not_found", if n.referrer.as_deref().is_some_and(|r| r.starts_with('/')) { Severity::Medium } else { Severity::Low }, format!("404: {}", n.path), format!("{}× {}{}", n.count, n.referrer.as_ref().map(|r| format!("from {r}")).unwrap_or_else(|| "with no referrer".into()), near.map(|r| format!("; did you mean {r}?")).unwrap_or_default()), "A link on this app points nowhere: fix the link (build it with a paths:: helper) or route the path.", ".offrails/guides/routing.md", "https://rustoffrails.org/docs/guides/routing", "/dev/dashboard/routes#not-found"));
     }
     for r in &p.missing_docs {
         out.push(f(
@@ -2123,7 +2034,7 @@ pub async fn route_findings(state: &AppState) -> Vec<insights::Finding> {
             "docs/routes.md is older than the route table.".into(),
             "Run `app routes` (it rewrites docs/routes.md).",
             ".offrails/guides/routing.md",
-            "https://rustoffrails.org/docs/routing",
+            "https://rustoffrails.org/docs/guides/routing",
             "/dev/dashboard/routes#problems",
         ));
     }
@@ -2136,7 +2047,7 @@ pub async fn route_findings(state: &AppState) -> Vec<insights::Finding> {
             format!("For example {}", p.untested.iter().take(4).cloned().collect::<Vec<_>>().join(", ")),
             "Every route gets an integration test that requests it (the route sweeps only check access).",
             ".offrails/guides/testing.md#writing-tests",
-            "https://rustoffrails.org/docs/testing#writing-tests",
+            "https://rustoffrails.org/docs/guides/testing#writing-tests",
             "/dev/dashboard/routes?problems=1",
         ));
     }
@@ -2164,7 +2075,7 @@ pub async fn route_findings(state: &AppState) -> Vec<insights::Finding> {
             ),
             "Click through them (or add them to a load-lab run) before calling a change done.",
             ".offrails/guides/dev-tools.md#for-agents",
-            "https://rustoffrails.org/docs/dev-tools#for-agents",
+            "https://rustoffrails.org/docs/guides/dev-tools#for-agents",
             "/dev/dashboard/routes",
         ));
     }
@@ -2181,7 +2092,7 @@ pub async fn route_findings(state: &AppState) -> Vec<insights::Finding> {
                     format!("{} server errors in {} requests", s.s5, s.count),
                     "Filter the live log by level=error; every 500 is logged with its request id.",
                     ".offrails/guides/errors-and-logging.md#response-mapping",
-                    "https://rustoffrails.org/docs/errors-and-logging#response-mapping",
+                    "https://rustoffrails.org/docs/guides/errors-and-logging#response-mapping",
                     "/dev/dashboard/logs?level=error",
                 ));
             }
@@ -3138,6 +3049,11 @@ struct LabPage {
     records: u64,
     max_rps: u32,
     max_secs: u32,
+    sims: Vec<(&'static str, lab::UpSim)>,
+    presets: &'static [(&'static str, &'static str, &'static str)],
+    attacks: &'static [(&'static str, &'static str, &'static str)],
+    attacking: bool,
+    traceparent: String,
 }
 
 async fn lab_page(
@@ -3172,6 +3088,11 @@ async fn lab_page(
         records,
         max_rps: lab::MAX_RPS,
         max_secs: lab::MAX_SECS,
+        sims: lab::UPSTREAMS.into_iter().zip(lab::sims()).collect(),
+        presets: &lab::PRESETS,
+        attacks: &lab::ATTACKS,
+        attacking: HUB.lab.attacking.load(std::sync::atomic::Ordering::Relaxed),
+        traceparent: lock(&HUB.lab.last_traceparent).clone().unwrap_or_default(),
     })
 }
 
@@ -3250,6 +3171,56 @@ async fn lab_scenario(State(state): State<AppState>, Form(f): Form<ScenarioForm>
     match http::quietly(lab::scenario(&state, s)).await {
         Ok(msg) => back(s.panel(), Flash::notice(msg)),
         Err(e) => back("/dev/dashboard/lab", Flash::alert(e)),
+    }
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+struct UpstreamsForm {
+    preset: String,
+    name: String,
+    latency_ms: u64,
+    jitter_ms: u64,
+    error_pct: u32,
+    hang_pct: u32,
+}
+
+/// `POST …/lab/upstreams`: a preset, or one simulated API's latency, jitter, errors and hangs.
+async fn lab_upstreams(Form(f): Form<UpstreamsForm>) -> Response {
+    let to = "/dev/dashboard/lab#lab-upstreams";
+    if !f.preset.is_empty() {
+        return match lab::PRESETS.iter().find(|(k, _, _)| *k == f.preset) {
+            Some((k, label, what)) if lab::preset(k) => back(
+                to,
+                Flash::notice(format!(
+                    "{label}: {what}. Run the Checkout fan-out to see it."
+                )),
+            ),
+            _ => back(to, Flash::alert("No such preset.")),
+        };
+    }
+    if lab::set_sim(&f.name, f.latency_ms, f.jitter_ms, f.error_pct, f.hang_pct) {
+        back(to, Flash::notice(format!("{} updated.", f.name)))
+    } else {
+        back(to, Flash::alert("No such simulated API."))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct AttackForm {
+    kind: String,
+}
+
+/// `POST …/lab/attack`: runs the attack simulator against this app's own address.
+async fn lab_attack(State(state): State<AppState>, Form(f): Form<AttackForm>) -> Response {
+    match lab::start_attack(&state, &f.kind) {
+        Ok(n) => back(
+            "/dev/dashboard/security",
+            Flash::notice(format!(
+                "Attack simulator: {n} requests on their way. Watch this page fill in (reload in a few seconds)."
+            )),
+        ),
+        Err(e) => back("/dev/dashboard/lab#lab-attack", Flash::alert(e)),
     }
 }
 

@@ -62,7 +62,7 @@
         : names.length === 2 ? `${names[0]} and ${names[1]} are typing…`
         : "Several people are typing…";
     };
-    setInterval(renderTyping, 1000);
+    const typingTimer = setInterval(renderTyping, 1000);
 
     // ---- presence
     const people = $("[data-presence]");
@@ -98,6 +98,7 @@
     const dotColors = Array.from(root.querySelectorAll("[data-status-colors] [data-state]"));
     const LABELS = { connecting: "Connecting…", open: "Live", reconnecting: "Reconnecting…", revoked: "Signed out" };
     io.onStatus((status, transport) => {
+      if (!root.isConnected) return; // a room this tab has left (the connection outlives it)
       statusText.textContent = status === "open" && transport !== "websocket" ? `Live (${transport})` : LABELS[status] ?? status;
       for (const c of dotColors) dot.classList.remove(...c.className.split(" "));
       const color = dotColors.find((c) => c.dataset.state === status);
@@ -143,11 +144,13 @@
       room.push("wave", { to: Number(li.dataset.key) }).then(() => toast(`You waved at ${name}`), (err) => showError(err.message));
     });
 
-    // Leaving the page through a boosted link: leave the topics, so presence updates for the others.
+    // Leaving the page through a boosted link (another room included): leave the topics before the
+    // next page joins its own, so presence updates for the others, and stop this page's timer.
     const leave = (e) => {
-      if (!e.detail.boosted || !root.isConnected) return;
+      if (!e.detail.boosted || !e.detail.shouldSwap || !root.isConnected || !e.detail.target?.contains(root)) return;
       room.leave();
       personal.leave();
+      clearInterval(typingTimer);
       document.removeEventListener("htmx:beforeSwap", leave);
     };
     document.addEventListener("htmx:beforeSwap", leave);

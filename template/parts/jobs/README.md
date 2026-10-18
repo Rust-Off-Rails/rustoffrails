@@ -16,11 +16,11 @@ A database-backed job queue for Rust off Rails apps, in the spirit of Elixir's *
 
 Extracted from Rust off Rails apps and rebuilt. Fixed on the way: a claim that could take more rows than asked on Postgres (the `UPDATE … WHERE id IN (SELECT … SKIP LOCKED LIMIT n)` pattern re-runs its subquery; caught by a test here), wake-ups lost while a producer was busy (`Notify::notify_waiters` → a `watch` channel), an abort handle registered after its task could finish, shutdown that left jobs `executing` for a minute, cron history found by string-matching JSON (now a `job_id` column), and node names that could reveal hosts (now synthetic). Added: rate limits, batches, progress, error details per attempt, discard/pause-all actions, error grouping by root cause and the CLI's `errors`/`cron` commands.
 
-Guide: [`.offrails/guides/jobs.md`](https://rustoffrails.org/docs/jobs) · [`.offrails/guides/jobs-dashboard.md`](https://rustoffrails.org/docs/jobs-dashboard) (the CLI). Depends on: nothing. The [jobs-dashboard](../jobs-dashboard/) sample adds `/admin/jobs`.
+Guide: [`.offrails/guides/jobs.md`](https://rustoffrails.org/docs/guides/jobs) · [`.offrails/guides/jobs-dashboard.md`](https://rustoffrails.org/docs/guides/jobs-dashboard) (the CLI). Depends on: nothing. The [jobs-dashboard](../jobs-dashboard/) sample adds `/admin/jobs`.
 
-## Screenshots
+## Screens
 
-The queue has no UI of its own; see [jobs-dashboard](../jobs-dashboard/README.md#screenshots). In a terminal:
+The queue has no UI of its own; see [jobs-dashboard](../jobs-dashboard/README.md#screens). In a terminal:
 
 ```
 $ app jobs stats
@@ -35,7 +35,7 @@ webhooks  running   3      30/1m  1      0          0          0          1     
 
 ## Install
 
-Through the samples MCP server: `get_sample jobs`. Or by hand, in the app root:
+By hand, in the app root:
 
 1. `cargo add croner`.
 2. Copy `files/` into the app, keeping the paths. In `tests/app/` files and the `main.rs` wiring, replace `offrails_host` with your crate name.

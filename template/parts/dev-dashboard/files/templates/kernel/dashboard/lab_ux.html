@@ -1,0 +1,31 @@
+{% extends "layouts/application.html" %}
+{% block content %}
+<section class="py-6" data-rum-lab{% if simulate %} data-lab-simulate{% endif %}>
+  <h1 class="text-2xl font-semibold tracking-tight">Lab: UX trouble</h1>
+  <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">Four ways a page frustrates people, for the dev dashboard's <a href="/dev/dashboard/frontend" hx-boost="false" class="underline">Frontend</a> tab: click each a few times, then look there. <a href="/dev/lab/ux?simulate=1" class="underline">Play it by itself</a>.</p>
+  <ul class="mt-6 grid gap-4" role="list">
+    <li class="rounded-md border border-gray-200 p-4 dark:border-gray-800">
+      <h2 class="font-semibold">A slow button</h2>
+      <p class="text-sm text-gray-600 dark:text-gray-400">Its request takes 1.4 s and it gives no feedback, so people click again.</p>
+      <button type="button" id="slow-report" class="mt-2 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white" hx-get="/dev/lab/ux/slow" hx-target="#slow-out" hx-sync="this:drop">Build the report</button>
+      <div id="slow-out" class="mt-2 text-sm" aria-live="polite"></div>
+    </li>
+    <li class="rounded-md border border-gray-200 p-4 dark:border-gray-800">
+      <h2 class="font-semibold">A dead button</h2>
+      <p class="text-sm text-gray-600 dark:text-gray-400">It looks like a button and does nothing.</p>
+      <button type="button" id="save-draft" class="mt-2 rounded-md border border-gray-400 px-3 py-1.5 text-sm">Save draft</button>
+    </li>
+    <li class="rounded-md border border-gray-200 p-4 dark:border-gray-800">
+      <h2 class="font-semibold">A button that throws</h2>
+      <p class="text-sm text-gray-600 dark:text-gray-400">Its handler throws a JavaScript error, so the click does nothing.</p>
+      <button type="button" id="apply-coupon" data-lab-throw class="mt-2 rounded-md border border-gray-400 px-3 py-1.5 text-sm">Apply coupon</button>
+    </li>
+    <li class="rounded-md border border-gray-200 p-4 dark:border-gray-800">
+      <h2 class="font-semibold">A widget that only works on a full load</h2>
+      <p class="text-sm text-gray-600 dark:text-gray-400">Its script waits for the page's load event. Follow this link (boosted: <code>hx-boost</code> swaps the body, and that event never comes again) and its "Show" button is dead; reload that page and it works.</p>
+      <a href="/dev/lab/ux/widget{% if simulate %}?simulate=1{% endif %}" id="to-widget" class="mt-2 inline-block underline">Open the widget</a>
+    </li>
+  </ul>
+</section>
+<script src="{{ script }}" defer></script>
+{% endblock %}

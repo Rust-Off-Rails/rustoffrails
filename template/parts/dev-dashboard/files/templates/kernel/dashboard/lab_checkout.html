@@ -1,0 +1,21 @@
+{% extends "layouts/application.html" %}
+{% block content %}
+<section class="py-6">
+  <h1 class="text-2xl font-semibold tracking-tight">Lab: checkout</h1>
+  <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">A checkout screen that calls four simulated APIs (inventory, pricing, payments, shipping) through <code>kernel::outbound</code>. Part of the dev dashboard's load lab; nothing is charged.</p>
+  <nav class="mt-4 flex flex-wrap gap-2" aria-label="Variant">
+    {% for (key, label, current) in modes %}<a href="/dev/lab/checkout?mode={{ key }}" class="rounded-md border px-3 py-1 text-sm {% if *current %}border-indigo-600 bg-indigo-600 text-white{% else %}border-gray-300 dark:border-gray-700{% endif %}"{% if *current %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
+  </nav>
+  {% if !serving %}
+  <p class="mt-6 rounded-md border border-amber-600 p-3 text-sm">The simulated APIs answer on this app's own address, which only exists while it serves (<code>bin/dev</code>).</p>
+  {% else %}
+  <div class="mt-6 overflow-x-auto"><table class="w-full text-sm">
+    <caption class="sr-only">The calls this checkout made</caption>
+    <thead><tr class="text-left"><th scope="col" class="py-1 pr-4">API</th><th scope="col" class="py-1 pr-4">Call</th><th scope="col" class="py-1 pr-4">Answer</th><th scope="col" class="py-1 text-right">Took</th></tr></thead>
+    <tbody>{% for c in calls %}<tr class="border-t border-gray-200 dark:border-gray-800"><td class="py-1 pr-4 font-medium">{{ c.service }}</td><td class="py-1 pr-4 font-mono">{{ c.what }}</td><td class="py-1 pr-4 {% if c.ok %}text-green-700 dark:text-green-400{% else %}text-red-700 dark:text-red-400{% endif %}">{{ c.outcome }}</td><td class="py-1 text-right tabular-nums">{{ c.dur }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <p class="mt-4 text-sm">The whole checkout took <strong>{{ total }}</strong>.{% if trace > 0 %} <a href="/dev/dashboard/traces/{{ trace }}" hx-boost="false" class="underline">Its waterfall</a>.{% endif %} <a href="/dev/dashboard/upstreams" hx-boost="false" class="underline">Upstreams</a> · <a href="/dev/dashboard/lab#lab-upstreams" hx-boost="false" class="underline">make an API slow or flaky</a></p>
+  <form class="mt-6" action="/dev/lab/checkout" method="get"><input type="hidden" name="mode" value="{{ mode }}"><button id="pay-button" class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">Pay $28.00</button></form>
+  {% endif %}
+</section>
+{% endblock %}

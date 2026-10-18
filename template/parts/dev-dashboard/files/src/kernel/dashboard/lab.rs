@@ -32,7 +32,7 @@ use crate::error::AppError;
 use crate::kernel::flash::RequestFlash;
 use crate::kernel::theme::ThemeSwitch;
 use crate::kernel::ui::{self, Chrome};
-use crate::routes::ROUTES;
+use crate::routes::{ROUTES, paths};
 use crate::state::AppState;
 
 /// The generator's hard caps.
@@ -171,6 +171,16 @@ pub fn demo_router() -> Router<AppState> {
         .route("/dev/lab/slow", get(slow))
         .route("/dev/lab/panic", get(panic))
         .route("/dev/lab/error", get(error))
+        .route("/dev/lab/checkout", get(checkout))
+        .route(
+            "/dev/lab/upstream/{name}/{action}",
+            get(upstream).post(upstream),
+        )
+        .route("/dev/lab/upstream/{name}/{action}/{id}", get(upstream_item))
+        .route("/dev/lab/sign-in", get(sign_in_form).post(sign_in))
+        .route("/dev/lab/ux", get(ux))
+        .route("/dev/lab/ux/widget", get(ux_widget))
+        .route("/dev/lab/ux/slow", get(ux_slow))
         .layer(ui::no_store())
 }
 
@@ -293,24 +303,9 @@ async fn orders_n_plus_one_body(
     theme: ThemeSwitch,
     flash: Option<Extension<RequestFlash>>,
 ) -> Result<Response, AppError> {
-    let (orders, counts) = async {
-        let orders = order::Entity::find()
-            .order_by_desc(order::Column::Id)
-            .limit(20)
-            .all(&state.db)
-            .await?;
-        let mut counts = Vec::with_capacity(orders.len());
-        for o in &orders {
-            let items = order_item::Entity::find()
-                .filter(order_item::Column::OrderId.eq(o.id))
-                .all(&state.db)
-                .await?;
-            counts.push((o.id, items.len()));
-        }
-        Ok::<_, DbErr>((orders, counts))
-    }
-    .instrument(tracing::info_span!("load_orders", n_plus_one = true))
-    .await?;
+    let (orders, counts) = load_orders_one_by_one(&state.db)
+        .instrument(tracing::info_span!("load_orders", n_plus_one = true))
+        .await?;
     Ok(render_orders(
         &state,
         "Lab: orders (N+1)",
@@ -320,6 +315,45 @@ async fn orders_n_plus_one_body(
         flash,
         theme,
     ))
+}
+
+/// Orders, and each order's item count.
+type OrdersAndCounts = (Vec<order::Model>, Vec<(i64, usize)>);
+
+/// The orders, then each order's items in a query of its own (the N+1). Instrumented the way the
+/// README shows ("Instrumenting your own methods"): the waterfall reads
+/// `load_orders_one_by_one → recent_orders → sql`, then `load_items ×20 → sql`, folded into one row.
+// GUIDE: .offrails/guides/errors-and-logging.md#logging
+#[tracing::instrument(level = "debug", skip_all)]
+async fn load_orders_one_by_one(db: &DatabaseConnection) -> Result<OrdersAndCounts, DbErr> {
+    let orders = recent_orders(db).await?;
+    let mut counts = Vec::with_capacity(orders.len());
+    for o in &orders {
+        counts.push((o.id, load_items(db, o.id).await?.len()));
+    }
+    Ok((orders, counts))
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+async fn recent_orders(db: &DatabaseConnection) -> Result<Vec<order::Model>, DbErr> {
+    order::Entity::find()
+        .order_by_desc(order::Column::Id)
+        .limit(20)
+        .all(db)
+        .await
+}
+
+// The order id is a field (it shows in the side panel); never a secret or personal data there.
+#[tracing::instrument(level = "debug", skip_all, fields(order_id))]
+async fn load_items(
+    db: &DatabaseConnection,
+    order_id: i64,
+) -> Result<Vec<order_item::Model>, DbErr> {
+    tracing::Span::current().record("order_id", order_id);
+    order_item::Entity::find()
+        .filter(order_item::Column::OrderId.eq(order_id))
+        .all(db)
+        .await
 }
 
 /// `GET /dev/lab/slow-query`: a recursive CTE that counts to `SLOW_QUERY_ROWS`, on either backend.
@@ -547,6 +581,14 @@ pub struct LabState {
     pub run: Mutex<Option<Arc<Run>>>,
     pub spiking: AtomicBool,
     pub spike_until: Mutex<Option<DateTime<Utc>>>,
+    /// The simulated APIs' behavior (the Upstreams control panel).
+    pub sims: Mutex<Option<[UpSim; 4]>>,
+    /// The last `traceparent` a simulated API received (proof of propagation).
+    pub last_traceparent: Mutex<Option<String>>,
+    /// The attack simulator is running.
+    pub attacking: AtomicBool,
+    /// The lab sign-in form's throttles: per account and per address, (failures, window start).
+    pub sign_in: Mutex<std::collections::HashMap<String, (u32, i64)>>,
 }
 
 impl LabState {
@@ -656,7 +698,7 @@ pub fn start(state: &AppState, label: &str, plan: Plan) -> Result<Arc<Run>, Stri
     };
     let r = Arc::new(Run::new(label, plan, &target));
     *slot = Some(r.clone());
-    lock(&HUB.series).annotate(super::series::Annotation {
+    let mark = super::series::Annotation {
         t: Utc::now().timestamp(),
         kind: "lab",
         label: format!(
@@ -664,7 +706,9 @@ pub fn start(state: &AppState, label: &str, plan: Plan) -> Result<Arc<Run>, Stri
             r.plan.rps, r.plan.secs
         ),
         demo: false,
-    });
+    };
+    super::history::record_mark(&mark);
+    lock(&HUB.series).annotate(mark);
     tokio::spawn(run(target, r.clone()));
     Ok(r)
 }
@@ -717,13 +761,15 @@ pub enum Scenario {
     MemorySpike,
     SlowEndpoint,
     ErrorBurst,
+    Checkout,
 }
 
 impl Scenario {
-    pub const ALL: [Scenario; 6] = [
+    pub const ALL: [Scenario; 7] = [
         Scenario::NPlusOne,
         Scenario::SlowQuery,
         Scenario::SlowEndpoint,
+        Scenario::Checkout,
         Scenario::ErrorBurst,
         Scenario::Panic,
         Scenario::MemorySpike,
@@ -741,6 +787,7 @@ impl Scenario {
             Scenario::MemorySpike => "memory-spike",
             Scenario::SlowEndpoint => "slow-endpoint",
             Scenario::ErrorBurst => "error-burst",
+            Scenario::Checkout => "checkout",
         }
     }
 
@@ -752,6 +799,7 @@ impl Scenario {
             Scenario::MemorySpike => "Memory spike",
             Scenario::SlowEndpoint => "Slow endpoint",
             Scenario::ErrorBurst => "Error burst",
+            Scenario::Checkout => "Checkout fan-out",
         }
     }
 
@@ -765,6 +813,9 @@ impl Scenario {
             Scenario::MemorySpike => "Holds 256 MiB for 8 seconds, then frees it.",
             Scenario::SlowEndpoint => "Four requests to an endpoint with a slow upstream call.",
             Scenario::ErrorBurst => "100 requests over 5 seconds answering 404, 422, 500 and 503.",
+            Scenario::Checkout => {
+                "Twelve checkouts, each calling four simulated APIs: one after another, concurrently, and with retries."
+            }
         }
     }
 
@@ -777,6 +828,7 @@ impl Scenario {
             Scenario::MemorySpike => "/dev/dashboard/charts?range=5m#chart-memory",
             Scenario::SlowEndpoint => "/dev/dashboard/traces?notable=1",
             Scenario::ErrorBurst => "/dev/dashboard/requests?sort=errors",
+            Scenario::Checkout => "/dev/dashboard/upstreams",
         }
     }
 
@@ -801,6 +853,15 @@ impl Scenario {
                 ],
                 20,
                 5,
+            )),
+            Scenario::Checkout => Some(p(
+                &[
+                    "/dev/lab/checkout?mode=sequential",
+                    "/dev/lab/checkout?mode=parallel",
+                    "/dev/lab/checkout?mode=retry",
+                ],
+                3,
+                4,
             )),
             Scenario::MemorySpike => None,
         }
@@ -827,6 +888,830 @@ pub async fn scenario(state: &AppState, s: Scenario) -> Result<String, String> {
                 Err("A memory spike is already running.".into())
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Checkout fan-out: a page that calls four simulated APIs (served by this app under
+// `/dev/lab/upstream/{name}`) through the outbound wrapper, one after another, concurrently, or
+// with retries; the Upstreams control panel sets how each API behaves.
+// ---------------------------------------------------------------------------------------------
+
+/// The simulated APIs, in the order the checkout calls them.
+pub const UPSTREAMS: [&str; 4] = ["inventory", "pricing", "payments", "shipping"];
+
+/// How one simulated API behaves.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UpSim {
+    /// Typical latency, and how much more it may take (uniform; a tenth of calls take 2× that).
+    pub latency_ms: u64,
+    pub jitter_ms: u64,
+    /// Percent of calls answered 503.
+    pub error_pct: u32,
+    /// Percent of calls that hang for `HANG` (past any sane timeout).
+    pub hang_pct: u32,
+}
+
+/// A hung call waits this long before answering.
+pub const HANG: Duration = Duration::from_secs(5);
+/// The retry variant's timeout for shipping.
+pub const RETRY_TIMEOUT: Duration = Duration::from_millis(800);
+
+pub const DEFAULT_SIMS: [UpSim; 4] = [
+    UpSim {
+        latency_ms: 40,
+        jitter_ms: 20,
+        error_pct: 0,
+        hang_pct: 0,
+    },
+    UpSim {
+        latency_ms: 60,
+        jitter_ms: 30,
+        error_pct: 0,
+        hang_pct: 0,
+    },
+    UpSim {
+        latency_ms: 120,
+        jitter_ms: 60,
+        error_pct: 0,
+        hang_pct: 0,
+    },
+    UpSim {
+        latency_ms: 80,
+        jitter_ms: 40,
+        error_pct: 0,
+        hang_pct: 0,
+    },
+];
+
+/// The control panel's presets: (key, label, what it does).
+pub const PRESETS: [(&str, &str, &str); 4] = [
+    (
+        "slow-payments",
+        "Make payments slow",
+        "payments at about 600 ms, p95 near 1.2 s",
+    ),
+    (
+        "flaky-shipping",
+        "Make shipping fail 20%",
+        "one shipping call in five answers 503",
+    ),
+    (
+        "timeouts",
+        "Add timeouts",
+        "shipping hangs on one call in four (the retry variant times out at 800 ms and retries)",
+    ),
+    ("reset", "Back to healthy", "every API fast and reliable"),
+];
+
+pub fn sims() -> [UpSim; 4] {
+    lock(&HUB.lab.sims).unwrap_or(DEFAULT_SIMS)
+}
+
+/// Applies a preset (or `reset`); `false` for an unknown one.
+pub fn preset(key: &str) -> bool {
+    let mut s = sims();
+    match key {
+        "slow-payments" => {
+            s[2] = UpSim {
+                latency_ms: 600,
+                jitter_ms: 650,
+                error_pct: 0,
+                hang_pct: 0,
+            }
+        }
+        "flaky-shipping" => {
+            s[3] = UpSim {
+                error_pct: 20,
+                ..s[3]
+            }
+        }
+        "timeouts" => {
+            s[3] = UpSim {
+                hang_pct: 25,
+                ..s[3]
+            }
+        }
+        "reset" => s = DEFAULT_SIMS,
+        _ => return false,
+    }
+    *lock(&HUB.lab.sims) = Some(s);
+    true
+}
+
+/// Sets one API's behavior from the panel's form (each value capped).
+pub fn set_sim(name: &str, latency_ms: u64, jitter_ms: u64, error_pct: u32, hang_pct: u32) -> bool {
+    let Some(i) = UPSTREAMS.iter().position(|u| *u == name) else {
+        return false;
+    };
+    let mut s = sims();
+    // INVARIANT: the simulated APIs stay within these caps whatever the form says
+    // (test: the_checkout_fan_out_traces_four_upstreams).
+    s[i] = UpSim {
+        latency_ms: latency_ms.min(5_000),
+        jitter_ms: jitter_ms.min(5_000),
+        error_pct: error_pct.min(100),
+        hang_pct: hang_pct.min(100),
+    };
+    *lock(&HUB.lab.sims) = Some(s);
+    true
+}
+
+#[derive(Deserialize)]
+struct UpPath {
+    name: String,
+    action: String,
+}
+
+#[derive(Deserialize)]
+struct UpItemPath {
+    name: String,
+    action: String,
+    id: String,
+}
+
+/// `GET|POST /dev/lab/upstream/{name}/{action}`: one simulated API answering after its latency,
+/// with its error and hang rates (the control panel's).
+async fn upstream(
+    axum::extract::Path(p): axum::extract::Path<UpPath>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    simulate(&p.name, &p.action, &headers).await
+}
+
+async fn upstream_item(
+    axum::extract::Path(p): axum::extract::Path<UpItemPath>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    let _ = &p.id;
+    simulate(&p.name, &p.action, &headers).await
+}
+
+async fn simulate(name: &str, action: &str, headers: &axum::http::HeaderMap) -> Response {
+    let Some(i) = UPSTREAMS.iter().position(|u| *u == name) else {
+        return (StatusCode::NOT_FOUND, "no such simulated API\n").into_response();
+    };
+    if let Some(tp) = headers.get("traceparent").and_then(|v| v.to_str().ok()) {
+        *lock(&HUB.lab.last_traceparent) = Some(crate::kernel::ui::truncate(tp, 60));
+    }
+    let sim = sims()[i];
+    let roll = rand::random_range(0..100_u32);
+    if roll < sim.hang_pct {
+        tokio::time::sleep(HANG).await;
+    }
+    let mut ms = sim.latency_ms + rand::random_range(0..=sim.jitter_ms);
+    if rand::random_range(0..10) == 0 {
+        ms += sim.jitter_ms;
+    }
+    tokio::time::sleep(Duration::from_millis(ms)).await;
+    if rand::random_range(0..100_u32) < sim.error_pct {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({ "error": "unavailable", "service": name })),
+        )
+            .into_response();
+    }
+    let body = match name {
+        "inventory" => serde_json::json!({ "sku": "SKU-MUG", "in_stock": 12 }),
+        "pricing" => serde_json::json!({ "total_cents": 2_800, "currency": "USD" }),
+        "payments" => serde_json::json!({ "charge": "ch_lab_0001", "status": "succeeded" }),
+        _ => serde_json::json!({ "carrier": "Lab Post", "cents": 499, "days": 3 }),
+    };
+    let _ = action;
+    axum::Json(body).into_response()
+}
+
+/// One call's result, for the page.
+pub struct CallView {
+    pub service: &'static str,
+    pub what: String,
+    pub outcome: String,
+    pub dur: String,
+    pub ok: bool,
+}
+
+#[derive(Template)]
+#[template(path = "kernel/dashboard/lab_checkout.html")]
+struct CheckoutPage {
+    ctx: crate::views::Ctx,
+    mode: &'static str,
+    modes: Vec<(&'static str, &'static str, bool)>,
+    calls: Vec<CallView>,
+    total: String,
+    trace: u64,
+    serving: bool,
+}
+
+#[derive(Deserialize, Default)]
+struct CheckoutQuery {
+    mode: Option<String>,
+}
+
+fn clients(base: &str) -> Option<[crate::kernel::outbound::Outbound; 4]> {
+    use crate::kernel::outbound::Outbound;
+    let mk =
+        |name: &'static str| Outbound::new(name, &format!("{base}/dev/lab/upstream/{name}")).ok();
+    Some([
+        mk("inventory")?.timeout(Duration::from_secs(2)),
+        // WHY no timeout: the naive variant's planted mistake ("Missing timeout").
+        mk("pricing")?,
+        mk("payments")?.timeout(Duration::from_secs(3)),
+        mk("shipping")?.timeout(Duration::from_secs(2)),
+    ])
+}
+
+type CallResult = Result<crate::kernel::outbound::Reply, crate::kernel::outbound::OutboundError>;
+
+fn view(service: &'static str, what: &str, r: &CallResult, started: Instant) -> CallView {
+    let (outcome, ok) = match r {
+        Ok(reply) => (reply.status.to_string(), reply.is_success()),
+        Err(e) => (e.to_string(), false),
+    };
+    CallView {
+        service,
+        what: what.to_owned(),
+        outcome,
+        dur: super::web::micros(started.elapsed().as_micros() as u64),
+        ok,
+    }
+}
+
+/// `GET /dev/lab/checkout?mode=sequential|parallel|retry`: the checkout screen.
+async fn checkout(
+    ctx: crate::views::Ctx,
+    Query(q): Query<CheckoutQuery>,
+) -> Result<Response, AppError> {
+    let mode: &'static str = match q.mode.as_deref() {
+        Some("parallel") => "parallel",
+        Some("retry") => "retry",
+        _ => "sequential",
+    };
+    checkout_body(ctx.titled("Lab: checkout"), mode)
+        .instrument(tracing::info_span!("handler", handler = "lab::checkout"))
+        .await
+}
+
+async fn checkout_body(ctx: crate::views::Ctx, mode: &'static str) -> Result<Response, AppError> {
+    let started = Instant::now();
+    let base = HUB.serving.get().cloned();
+    let mut calls = Vec::new();
+    if let Some(c) = base.as_deref().and_then(clients) {
+        let [inventory, pricing, payments, shipping] = &c;
+        let parcel = serde_json::json!({ "grams": 450, "to": "SE" });
+        match mode {
+            "sequential" => {
+                // The naive version: four calls one after another.
+                let t = Instant::now();
+                let r = inventory.get("/items/1042").send().await;
+                calls.push(view("inventory", "GET /items/{id}", &r, t));
+                let t = Instant::now();
+                let r = pricing.get("/quote").without_timeout().send().await;
+                calls.push(view("pricing", "GET /quote (no timeout)", &r, t));
+                let t = Instant::now();
+                let r = payments
+                    .post("/charge")
+                    .json(&serde_json::json!({ "cents": 2_800 }))
+                    .send()
+                    .await;
+                calls.push(view("payments", "POST /charge", &r, t));
+                let t = Instant::now();
+                let r = shipping.post("/rates").json(&parcel).send().await;
+                calls.push(view("shipping", "POST /rates", &r, t));
+            }
+            _ => {
+                // Independent calls together (tokio::join!); the charge needs the quote.
+                let t = Instant::now();
+                let ship = if mode == "retry" {
+                    shipping
+                        .post("/rates")
+                        .json(&parcel)
+                        .timeout(RETRY_TIMEOUT)
+                        .retries(2)
+                        .idempotent()
+                } else {
+                    shipping.post("/rates").json(&parcel)
+                };
+                let (inv, price, rates) = tokio::join!(
+                    inventory.get("/items/1042").send(),
+                    pricing.get("/quote").timeout(Duration::from_secs(2)).send(),
+                    ship.send(),
+                );
+                calls.push(view("inventory", "GET /items/{id}", &inv, t));
+                calls.push(view("pricing", "GET /quote", &price, t));
+                calls.push(view(
+                    "shipping",
+                    if mode == "retry" {
+                        "POST /rates (800 ms timeout, 2 retries)"
+                    } else {
+                        "POST /rates"
+                    },
+                    &rates,
+                    t,
+                ));
+                let t = Instant::now();
+                let r = payments
+                    .post("/charge")
+                    .json(&serde_json::json!({ "cents": 2_800 }))
+                    .send()
+                    .await;
+                calls.push(view("payments", "POST /charge", &r, t));
+            }
+        }
+    }
+    let trace = super::trace::current_ctx().map_or(0, |c| c.id);
+    let page = {
+        let _render =
+            tracing::info_span!("render", template = "kernel/dashboard/lab_checkout.html")
+                .entered();
+        CheckoutPage {
+            ctx,
+            mode,
+            modes: vec![
+                ("sequential", "One after another", mode == "sequential"),
+                (
+                    "parallel",
+                    "Concurrently (tokio::join!)",
+                    mode == "parallel",
+                ),
+                ("retry", "Concurrently, with retries", mode == "retry"),
+            ],
+            calls,
+            total: super::web::micros(started.elapsed().as_micros() as u64),
+            trace,
+            serving: base.is_some(),
+        }
+        .render()?
+    };
+    Ok(axum::response::Html(page).into_response())
+}
+
+// ---------------------------------------------------------------------------------------------
+// The lab's sign-in form: a stand-in for an auth sample, so the brute-force and credential
+// stuffing detectors can be demoed without one. It reports through the same hook auth-core's
+// optional wire uses.
+// ---------------------------------------------------------------------------------------------
+
+/// The lab form's own limits (development's rate limiter is lifted to 1,000).
+pub const LAB_ACCOUNT_LIMIT: u32 = 10;
+pub const LAB_IP_LIMIT: u32 = 20;
+const LAB_PASSWORD: &str = "lab-correct-horse";
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct SignInForm {
+    email: String,
+    password: String,
+}
+
+async fn sign_in_form() -> Response {
+    axum::response::Html(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Lab sign-in</title></head><body><main><h1>Lab sign-in</h1>\
+         <p>A stand-in for an auth sample: the attack simulator signs in here. Nothing is stored.</p>\
+         <form method=\"post\" action=\"/dev/lab/sign-in\"><label>Email <input name=\"email\" type=\"email\" autocomplete=\"off\"></label> \
+         <label>Password <input name=\"password\" type=\"password\" autocomplete=\"off\"></label> <button>Sign in</button></form></main></body></html>",
+    )
+    .into_response()
+}
+
+/// `POST /dev/lab/sign-in`: 422 for a wrong password, 429 past the lab's limits.
+async fn sign_in(
+    client: crate::controllers::application::ClientIp,
+    headers: axum::http::HeaderMap,
+    axum::Form(f): axum::Form<SignInForm>,
+) -> Response {
+    let ip = super::threats::lab_client(&headers).or_else(|| client.0.map(|i| i.to_string()));
+    let now = Utc::now().timestamp();
+    let account = f.email.trim().to_ascii_lowercase();
+    let over = |key: String, limit: u32| -> bool {
+        let mut map = lock(&HUB.lab.sign_in);
+        if map.len() >= 1_000 {
+            map.clear();
+        }
+        let e = map.entry(key).or_insert((0, now));
+        if now - e.1 > 60 {
+            *e = (0, now);
+        }
+        e.0 >= limit
+    };
+    if over(format!("ip:{}", ip.as_deref().unwrap_or("")), LAB_IP_LIMIT) {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            "lab: too many attempts from this address\n",
+        )
+            .into_response();
+    }
+    if over(format!("acct:{account}"), LAB_ACCOUNT_LIMIT) {
+        super::threats::auth_event_for("Throttled", &account, ip.as_deref());
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            "lab: this account is paused\n",
+        )
+            .into_response();
+    }
+    if f.password == LAB_PASSWORD {
+        super::threats::auth_event_for("SignedIn", &account, ip.as_deref());
+        return (StatusCode::OK, "lab: signed in (nothing is stored)\n").into_response();
+    }
+    {
+        let mut map = lock(&HUB.lab.sign_in);
+        for k in [
+            format!("ip:{}", ip.as_deref().unwrap_or("")),
+            format!("acct:{account}"),
+        ] {
+            map.entry(k).or_insert((0, now)).0 += 1;
+        }
+    }
+    super::threats::auth_event_for("SignInFailed", &account, ip.as_deref());
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "lab: try another email address or password\n",
+    )
+        .into_response()
+}
+
+// ---------------------------------------------------------------------------------------------
+// UX trouble: an app page with a slow button, a dead button, one that throws, and a link to a
+// widget whose script only runs on a full page load (the boosted-navigation bug).
+// ---------------------------------------------------------------------------------------------
+
+#[derive(Template)]
+#[template(path = "kernel/dashboard/lab_ux.html")]
+struct UxPage {
+    ctx: crate::views::Ctx,
+    script: String,
+    simulate: bool,
+}
+
+#[derive(Template)]
+#[template(path = "kernel/dashboard/lab_ux_widget.html")]
+struct UxWidgetPage {
+    ctx: crate::views::Ctx,
+    script: String,
+    widget: String,
+    simulate: bool,
+}
+
+#[derive(Deserialize, Default)]
+struct UxQuery {
+    simulate: Option<String>,
+}
+
+/// `GET /dev/lab/ux` (`?simulate=1`: the page plays the trouble by itself).
+async fn ux(
+    State(state): State<AppState>,
+    ctx: crate::views::Ctx,
+    Query(q): Query<UxQuery>,
+) -> Result<Response, AppError> {
+    Ok(axum::response::Html(
+        UxPage {
+            ctx: ctx.titled("Lab: UX trouble"),
+            script: state.assets.path("kernel/lab-ux.js"),
+            simulate: q.simulate.as_deref() == Some("1"),
+        }
+        .render()?,
+    )
+    .into_response())
+}
+
+/// `GET /dev/lab/ux/widget`: its "Show" button works on a full load, and does nothing after a
+/// boosted link (its script binds on DOMContentLoaded, which a boosted swap never fires).
+async fn ux_widget(
+    State(state): State<AppState>,
+    ctx: crate::views::Ctx,
+    Query(q): Query<UxQuery>,
+) -> Result<Response, AppError> {
+    Ok(axum::response::Html(
+        UxWidgetPage {
+            ctx: ctx.titled("Lab: a widget"),
+            script: state.assets.path("kernel/lab-ux.js"),
+            widget: state.assets.path("kernel/lab-widget.js"),
+            simulate: q.simulate.as_deref() == Some("1"),
+        }
+        .render()?,
+    )
+    .into_response())
+}
+
+/// `GET /dev/lab/ux/slow`: the slow button's request (1.4 s).
+async fn ux_slow() -> Response {
+    async {
+        tokio::time::sleep(Duration::from_millis(1_400)).await;
+    }
+    .instrument(tracing::info_span!(
+        "upstream_call",
+        service = "reports (simulated)"
+    ))
+    .await;
+    axum::response::Html("<p id=\"slow-result\">Report ready (it took 1.4 s).</p>").into_response()
+}
+
+// ---------------------------------------------------------------------------------------------
+// The attack simulator: hostile traffic against this app's own address, so every security
+// detector can be demoed and tested. Each request carries this process's secret, which lets it
+// claim a TEST-NET client address (192.0.2.x, 198.51.100.x, 203.0.113.x: never a real one).
+// ---------------------------------------------------------------------------------------------
+
+/// The simulator's runs: (key, label, what it sends).
+pub const ATTACKS: [(&str, &str, &str); 7] = [
+    (
+        "scanner",
+        "Scanner run",
+        "Nuclei-style probes for /.env, /wp-login.php, /.git/config…, TRACE and PROPFIND, and a 404 burst",
+    ),
+    (
+        "brute",
+        "Brute force",
+        "25 wrong passwords for one account on the lab sign-in form",
+    ),
+    (
+        "stuffing",
+        "Credential stuffing",
+        "30 accounts tried from one address, rotating user agents",
+    ),
+    (
+        "probes",
+        "Traversal and SQLi probes",
+        "../ and encoded variants, UNION SELECT, <script> in query strings",
+    ),
+    (
+        "csrf",
+        "CSRF-less POSTs",
+        "cross-site POSTs the CSRF layer refuses",
+    ),
+    (
+        "session",
+        "Stolen session",
+        "one session cookie from three addresses and user agents",
+    ),
+    (
+        "flood",
+        "Request flood",
+        "200 requests in a few seconds from one address",
+    ),
+];
+/// Requests per run, at most.
+pub const MAX_ATTACK: usize = 400;
+
+/// One simulated request.
+pub struct SimReq {
+    pub method: &'static str,
+    pub path: String,
+    pub ip: &'static str,
+    pub ua: &'static str,
+    pub headers: Vec<(&'static str, String)>,
+    pub form: Option<String>,
+}
+
+fn sim(method: &'static str, path: &str, ip: &'static str, ua: &'static str) -> SimReq {
+    SimReq {
+        method,
+        path: path.to_owned(),
+        ip,
+        ua,
+        headers: Vec::new(),
+        form: None,
+    }
+}
+
+/// What a run sends (paths only: the host is always this app's own address).
+pub fn attack_plan(kind: &str) -> Option<Vec<SimReq>> {
+    const NUCLEI: &str = "Mozilla/5.0 (compatible; Nuclei - Open-source project (github.com/projectdiscovery/nuclei))";
+    const BROWSER: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
+    let mut v = Vec::new();
+    match kind {
+        "scanner" => {
+            for p in [
+                "/.env",
+                "/.git/config",
+                "/wp-login.php",
+                "/wp-admin/",
+                "/xmlrpc.php",
+                "/phpmyadmin/",
+                "/server-status",
+                "/actuator/health",
+                "/cgi-bin/luci",
+                "/.aws/credentials",
+                "/config.php",
+                "/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php",
+                "/.DS_Store",
+                "/backup.zip",
+                "/.htpasswd",
+            ] {
+                v.push(sim("GET", p, "203.0.113.7", NUCLEI));
+            }
+            for n in 0..20 {
+                v.push(sim(
+                    "GET",
+                    &format!("/old-site/page-{n}.php"),
+                    "203.0.113.7",
+                    NUCLEI,
+                ));
+            }
+            v.push(sim("TRACE", "/", "203.0.113.7", NUCLEI));
+            v.push(sim("PROPFIND", "/", "203.0.113.7", NUCLEI));
+        }
+        "brute" => {
+            for n in 0..25 {
+                let mut r = sim(
+                    "POST",
+                    "/dev/lab/sign-in",
+                    "198.51.100.23",
+                    "python-requests/2.32.3",
+                );
+                r.form = Some(format!("email=victim%40example.com&password=guess{n}"));
+                v.push(r);
+            }
+        }
+        "stuffing" => {
+            const UAS: [&str; 6] = [
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0 Safari/537.36",
+                "Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0",
+                "curl/8.7.1",
+                "python-requests/2.32.3",
+                "Go-http-client/1.1",
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0) Version/18.0 Mobile Safari/604.1",
+            ];
+            for n in 0..30 {
+                let mut r = sim(
+                    "POST",
+                    "/dev/lab/sign-in",
+                    "203.0.113.50",
+                    UAS[n % UAS.len()],
+                );
+                r.form = Some(format!(
+                    "email=user{n}%40example.com&password=Summer2026%21"
+                ));
+                v.push(r);
+            }
+        }
+        "probes" => {
+            for p in [
+                "/static/..%2f..%2f..%2fetc%2fpasswd",
+                "/dev/lab/orders?file=../../../../etc/passwd",
+                "/dev/lab/orders?path=%252e%252e%252f%252e%252e%252fwin.ini",
+                "/dev/lab/orders?id=1%27%20OR%20%271%27%3D%271",
+                "/dev/lab/orders?q=1%20UNION%20SELECT%20password%20FROM%20users--",
+                "/dev/lab/orders?sort=sleep(5)",
+                "/?q=%3Cscript%3Ealert(document.cookie)%3C%2Fscript%3E",
+                "/?next=javascript:alert(1)",
+                "/dev/lab/orders?q=%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E",
+            ] {
+                v.push(sim(
+                    "GET",
+                    p,
+                    "192.0.2.66",
+                    "sqlmap/1.8.9#stable (https://sqlmap.org)",
+                ));
+            }
+        }
+        "csrf" => {
+            for _ in 0..10 {
+                let mut r = sim("POST", "/theme", "198.51.100.99", BROWSER);
+                r.headers
+                    .push(("origin", "https://evil.example".to_owned()));
+                r.headers.push(("sec-fetch-site", "cross-site".to_owned()));
+                r.form = Some("theme=dark&return_to=%2F".to_owned());
+                v.push(r);
+            }
+        }
+        "session" => {
+            let cookie = format!("lab_session=stolen-{:016x}", rand::random::<u64>());
+            for (ip, ua) in [
+                ("192.0.2.10", BROWSER),
+                (
+                    "192.0.2.11",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/129.0 Safari/537.36",
+                ),
+                ("192.0.2.12", "curl/8.7.1"),
+            ] {
+                for _ in 0..3 {
+                    let mut r = sim("GET", "/", ip, ua);
+                    r.headers.push(("cookie", cookie.clone()));
+                    v.push(r);
+                }
+            }
+        }
+        "flood" => {
+            for _ in 0..200 {
+                v.push(sim("GET", "/", "192.0.2.200", "Go-http-client/1.1"));
+            }
+        }
+        "all" => {
+            for (k, _, _) in ATTACKS {
+                v.extend(attack_plan(k)?);
+            }
+        }
+        _ => return None,
+    }
+    v.truncate(MAX_ATTACK);
+    Some(v)
+}
+
+/// Starts a run in the background (one at a time).
+pub fn start_attack(state: &AppState, kind: &str) -> Result<usize, String> {
+    let plan = attack_plan(kind).ok_or_else(|| format!("No attack named {kind:?}."))?;
+    if HUB.lab.attacking.swap(true, Ordering::SeqCst) {
+        return Err("An attack simulation is running; wait for it to finish.".into());
+    }
+    let target = match HUB.serving.get() {
+        Some(addr) => Target::Address(addr.clone()),
+        None => match crate::routes::router(state.clone()) {
+            Ok(r) => Target::InProcess(r),
+            Err(e) => {
+                HUB.lab.attacking.store(false, Ordering::SeqCst);
+                return Err(format!("no router: {e}"));
+            }
+        },
+    };
+    let n = plan.len();
+    let mark = super::series::Annotation {
+        t: Utc::now().timestamp(),
+        kind: "lab",
+        label: format!("attack simulator: {kind}, {n} requests"),
+        demo: false,
+    };
+    super::history::record_mark(&mark);
+    lock(&HUB.series).annotate(mark);
+    tokio::spawn(async move {
+        run_attack(target, plan).await;
+        HUB.lab.attacking.store(false, Ordering::SeqCst);
+    });
+    Ok(n)
+}
+
+/// Sends a plan's requests, 50 a second.
+pub async fn run_attack(target: Target, plan: Vec<SimReq>) {
+    let http = match &target {
+        Target::Address(base) => client(base).ok(),
+        Target::InProcess(_) => None,
+    };
+    let mut tick = tokio::time::interval(Duration::from_millis(20));
+    for r in plan {
+        tick.tick().await;
+        send_sim(&target, http.as_ref(), &r).await;
+    }
+}
+
+/// One simulated request; its status (0: it failed to send).
+pub async fn send_sim(target: &Target, http: Option<&reqwest::Client>, r: &SimReq) -> u16 {
+    let secret = super::threats::SIM_SECRET.as_str();
+    match (target, http) {
+        (Target::Address(base), Some(http)) => {
+            let Ok(method) = reqwest::Method::from_bytes(r.method.as_bytes()) else {
+                return 0;
+            };
+            let mut req = http
+                .request(method, format!("{base}{}", r.path))
+                .header("user-agent", r.ua)
+                .header(super::threats::SIM_HEADER, secret)
+                .header(super::threats::SIM_CLIENT, r.ip);
+            for (k, v) in &r.headers {
+                req = req.header(*k, v);
+            }
+            if let Some(f) = &r.form {
+                req = req
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .body(f.clone());
+            }
+            match req.send().await {
+                Ok(res) => {
+                    let s = res.status().as_u16();
+                    let _ = res.bytes().await;
+                    s
+                }
+                Err(_) => 0,
+            }
+        }
+        (Target::InProcess(router), _) => {
+            let mut b = Request::builder()
+                .method(r.method)
+                .uri(&r.path)
+                .header("user-agent", r.ua)
+                .header(super::threats::SIM_HEADER, secret)
+                .header(super::threats::SIM_CLIENT, r.ip);
+            for (k, v) in &r.headers {
+                b = b.header(*k, v);
+            }
+            let body = match &r.form {
+                Some(f) => {
+                    b = b.header("content-type", "application/x-www-form-urlencoded");
+                    Body::from(f.clone())
+                }
+                None => Body::empty(),
+            };
+            let Ok(req) = b.body(body) else {
+                return 0;
+            };
+            match router.clone().oneshot(req).await {
+                Ok(res) => {
+                    let s = res.status().as_u16();
+                    let _ = axum::body::to_bytes(res.into_body(), 1 << 20).await;
+                    s
+                }
+                Err(_) => 0,
+            }
+        }
+        _ => 0,
     }
 }
 

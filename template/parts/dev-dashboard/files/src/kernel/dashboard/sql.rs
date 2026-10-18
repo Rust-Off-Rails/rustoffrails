@@ -270,7 +270,7 @@ pub fn record(info: &sea_orm::metric::Info<'_>) {
     let id = fingerprint_id(&normalized);
     let sql: Arc<str> = Arc::from(normalized);
     let micros = info.elapsed.as_micros() as u64;
-    let req = http::current();
+    let req = super::trace::current_ctx();
     let route = req.as_ref().map_or("(background)", |r| r.route);
     {
         let mut t = lock(&HUB.tick);

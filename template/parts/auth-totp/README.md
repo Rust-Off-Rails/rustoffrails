@@ -15,11 +15,17 @@ Two-factor authentication with an authenticator app (TOTP, RFC 6238: HMAC-SHA-1,
 
 New in the samples (the originals had no second factor), built to the same standard. Compared with the usual add-ons (devise-two-factor, rotp-based Rails code, `nimble_totp` in Phoenix): replay protection, encrypted secrets, confirm-before-enable, trusted devices and step-up are all built in and tested rather than left to the app.
 
-Guides: [`.offrails/guides/auth.md`](https://rustoffrails.org/docs/auth), [`.offrails/guides/security.md`](https://rustoffrails.org/docs/security). Depends on: [auth-core](../auth-core/) and at least one sign-in method.
+Guides: [`.offrails/guides/auth.md`](https://rustoffrails.org/docs/guides/auth), [`.offrails/guides/security.md`](https://rustoffrails.org/docs/guides/security). Depends on: [auth-core](../auth-core/) and at least one sign-in method.
 
-## Screenshots
+## Screens
 
-![Set up two-factor (the fake demo key AAAA…), light, desktop](../../docs/screenshots/auth-totp/enrol-light-desktop.png)
+<a href="../../docs/screenshots/auth-totp/enrol-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/auth-totp/enrol-dark-desktop.png"><img src="../../docs/screenshots/auth-totp/enrol-light-desktop.png" alt="Set up two-factor: QR code and setup key (a fake demo key)" width="860"></picture></a>
+
+<table>
+<tr><td valign="top"><a href="../../docs/screenshots/auth-totp/recovery-codes-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/auth-totp/recovery-codes-dark-desktop.png"><img src="../../docs/screenshots/auth-totp/recovery-codes-light-desktop.png" alt="Ten recovery codes with download, print and copy" width="420"></picture></a><br><sub>Recovery codes</sub></td><td valign="top"><a href="../../docs/screenshots/auth-totp/challenge-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/auth-totp/challenge-dark-desktop.png"><img src="../../docs/screenshots/auth-totp/challenge-light-desktop.png" alt="The authenticator code step at sign-in" width="420"></picture></a><br><sub>The code step</sub></td></tr>
+</table>
+
+<sub>Light or dark follows your GitHub theme; click an image for full size.</sub>
 
 The QR code above holds the fixed, obviously fake demo key `AAAA AAAA …` that `app task auth_demo` seeds in development; real enrolments always get a random secret.
 
@@ -34,7 +40,7 @@ The QR code above holds the fixed, obviously fake demo key `AAAA AAAA …` that 
 
 ## Install
 
-Through the samples MCP server: `get_sample auth-totp`. By hand, in the app root, after [auth-core](../auth-core/) and a sign-in method:
+By hand, in the app root, after [auth-core](../auth-core/) and a sign-in method:
 
 1. `cargo add totp-rs --features otpauth`, `cargo add qrcode --no-default-features --features svg`, `cargo add aes-gcm` (never with versions; this sample was verified with totp-rs 6, qrcode 0.14, aes-gcm 0.11).
 2. Copy `files/` into the app, keeping the paths. Replace `offrails_host` with your crate name in the test file.

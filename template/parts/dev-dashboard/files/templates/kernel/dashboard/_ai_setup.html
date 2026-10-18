@@ -1,0 +1,31 @@
+{# How to turn Ask AI on: the panel's setup card and the command center's. No variables. APP: the providers and models you recommend. Model ids and prices from OpenRouter's public list (curl -s https://openrouter.ai/api/v1/models), checked 2026-10-17: each supports tools and tool_choice. #}
+<div class="ai-setup" role="note">
+  <h3><svg class="ai-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/></svg>Turn on the assistant</h3>
+  <p>Bring your own provider and key. Put one of these in <code>.env</code> and restart the server; everything else on this page already works without it.</p>
+  <div class="ai-providers">
+    <details class="ai-provider">
+      <summary>Anthropic</summary>
+      <pre class="code" tabindex="0">DASHBOARD_AI_PROVIDER=anthropic
+DASHBOARD_AI_API_KEY=…
+# DASHBOARD_AI_MODEL=claude-sonnet-5-5</pre>
+      <p class="hint"><code>claude-opus-5-5</code> deeper, <code>claude-haiku-5-5</code> cheaper.</p>
+    </details>
+    <details class="ai-provider" open>
+      <summary>OpenRouter <span class="ai-badge">cheap and fast</span></summary>
+      <pre class="code" tabindex="0">DASHBOARD_AI_PROVIDER=openai-compatible
+DASHBOARD_AI_BASE_URL=https://openrouter.ai/api/v1
+DASHBOARD_AI_API_KEY=sk-or-…
+DASHBOARD_AI_MODEL=deepseek/deepseek-v4.1-flash</pre>
+      <p class="hint">Or <code>openai/gpt-6-luna</code>, <code>z-ai/glm-5.3-flash</code>: cents per investigation (DeepSeek V4.1 Flash lists $0.04 per million input tokens). Check each model's data policy first.</p>
+    </details>
+    <details class="ai-provider">
+      <summary>A local model</summary>
+      <pre class="code" tabindex="0">DASHBOARD_AI_PROVIDER=openai-compatible
+DASHBOARD_AI_BASE_URL=http://localhost:11434/v1
+DASHBOARD_AI_MODEL=…
+DASHBOARD_AI_TOOLS=core</pre>
+      <p class="hint">Ollama or LM Studio (<code>http://localhost:1234/v1</code>): nothing leaves the machine.</p>
+    </details>
+  </div>
+  <p class="hint">It investigates with read-only tools over what the dashboard already redacted (SQL fingerprints, route patterns, names and types, allowlisted source files), shows every step, and never changes anything. You see the first request before anything is sent. The key is never shown, logged or stored. Budgets: <code>DASHBOARD_AI_DAILY_TOKENS</code>, or a dollar cap with <code>DASHBOARD_AI_DAILY_USD</code>.</p>
+</div>

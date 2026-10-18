@@ -14,11 +14,17 @@ Email + password accounts, done the way current guidance says (NIST SP 800-63B, 
 
 Extracted from Rust off Rails apps and improved: the originals had no password variant in production; this one is built to the same standard as their magic links, and goes past Rails 8's generator (no verification, no throttle per account, no strength or breach check), `phx.gen.auth` (no progressive delays, no strength meter, no pre-hijacking defense) and Devise's defaults (lockable/confirmable off by default, enumeration on by default).
 
-Guides: [`.offrails/guides/auth.md`](https://rustoffrails.org/docs/auth), [`.offrails/guides/security.md`](https://rustoffrails.org/docs/security). Depends on: [auth-core](../auth-core/).
+Guides: [`.offrails/guides/auth.md`](https://rustoffrails.org/docs/guides/auth), [`.offrails/guides/security.md`](https://rustoffrails.org/docs/guides/security). Depends on: [auth-core](../auth-core/).
 
-## Screenshots
+## Screens
 
-![Sign-up with the strength meter, light, desktop](../../docs/screenshots/auth-password/sign-up-strength-light-desktop.png)
+<a href="../../docs/screenshots/auth-password/sign-up-strength-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/auth-password/sign-up-strength-dark-desktop.png"><img src="../../docs/screenshots/auth-password/sign-up-strength-light-desktop.png" alt="Sign-up with the password strength meter" width="860"></picture></a>
+
+<table>
+<tr><td valign="top"><a href="../../docs/screenshots/auth-password/sign-up-errors-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/auth-password/sign-up-errors-dark-desktop.png"><img src="../../docs/screenshots/auth-password/sign-up-errors-light-desktop.png" alt="A refused common password" width="420"></picture></a><br><sub>A refused password</sub></td><td valign="top"><a href="../../docs/screenshots/auth-password/check-email-light-desktop.png"><picture><source media="(prefers-color-scheme: dark)" srcset="../../docs/screenshots/auth-password/check-email-dark-desktop.png"><img src="../../docs/screenshots/auth-password/check-email-light-desktop.png" alt="Check your email after sign-up" width="420"></picture></a><br><sub>Check your email</sub></td></tr>
+</table>
+
+<sub>Light or dark follows your GitHub theme; click an image for full size.</sub>
 
 | Screen | Light | Dark |
 |--------|-------|------|
@@ -34,7 +40,7 @@ Guides: [`.offrails/guides/auth.md`](https://rustoffrails.org/docs/auth), [`.off
 
 ## Install
 
-Through the samples MCP server: `get_sample auth-password`. By hand, in the app root (install [auth-core](../auth-core/) first, which brings dev-mailbox and mailer):
+By hand, in the app root (install [auth-core](../auth-core/) first, which brings dev-mailbox and mailer):
 
 1. `cargo add argon2` (never with a version; argon2 0.6 hashes with `hash_password(pw)`, no salt argument).
 2. Copy `files/` into the app, keeping the paths. Replace `offrails_host` with your crate name in the test file.

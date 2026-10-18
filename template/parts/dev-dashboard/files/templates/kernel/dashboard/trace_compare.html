@@ -1,0 +1,17 @@
+{% extends "kernel/dashboard/_layout.html" %}
+{% block dash %}
+<header class="dash-head"><h1>Compare <a class="mono" href="{{ base }}/traces/{{ ta.id }}">#{{ ta.id }}</a> and <a class="mono" href="{{ base }}/traces/{{ tb.id }}">#{{ tb.id }}</a></h1></header>
+<section class="panel" aria-labelledby="cmp-what">
+  <header><h2 id="cmp-what">What differs</h2></header>
+  <ul class="cmp-lines">{% for l in lines %}<li>{{ l }}</li>{% endfor %}</ul>
+  <div class="scroll" tabindex="0" role="region" aria-label="Table"><table class="data-table">
+    <caption class="visually-hidden">Spans and statements in each trace: counts and time, biggest change first</caption>
+    <thead><tr><th scope="col">Step</th><th scope="col" class="num">#{{ ta.id }}</th><th scope="col" class="num">#{{ tb.id }}</th><th scope="col" class="num">Change</th><th scope="col" class="num">Time #{{ ta.id }}</th><th scope="col" class="num">Time #{{ tb.id }}</th></tr></thead>
+    <tbody>{% for r in rows %}<tr><th scope="row"><span class="sw k-{{ r.kind }}" aria-hidden="true"></span> <span class="mono">{{ r.label }}</span></th><td class="num">{{ r.a }}</td><td class="num">{{ r.b }}</td><td class="num"><span class="badge tone-{{ r.tone }}">{{ r.delta }}</span></td><td class="num">{{ r.a_us }}</td><td class="num">{{ r.b_us }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+<div class="cmp-grid">
+  <section class="panel" aria-label="Trace {{ ta.id }}"><header><h2><span class="method m-{{ ta.method }}">{{ ta.method }}</span> <span class="mono">{{ ta.path }}</span></h2><span class="muted">#{{ ta.id }} · {{ a.total }}</span></header>{% let w = a %}{% include "kernel/dashboard/_waterfall.html" %}</section>
+  <section class="panel" aria-label="Trace {{ tb.id }}"><header><h2><span class="method m-{{ tb.method }}">{{ tb.method }}</span> <span class="mono">{{ tb.path }}</span></h2><span class="muted">#{{ tb.id }} · {{ b.total }}</span></header>{% let w = b %}{% include "kernel/dashboard/_waterfall.html" %}</section>
+</div>
+{% endblock %}

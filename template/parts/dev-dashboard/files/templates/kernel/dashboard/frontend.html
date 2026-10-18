@@ -1,0 +1,37 @@
+{% extends "kernel/dashboard/_layout.html" %}
+{% block dash %}
+<header class="dash-head">
+  <h1>Frontend <span class="muted">what people hit in the browser</span></h1>
+  <p class="sev-summary"><span class="badge tone-warn">{{ crate::kernel::dashboard::web::count(totals.0, "rage click", "rage clicks") }}</span> <span class="badge tone-warn">{{ crate::kernel::dashboard::web::count(totals.1, "dead click", "dead clicks") }}</span> <span class="badge tone-err">{{ crate::kernel::dashboard::web::count(totals.2, "error", "errors") }}</span></p>
+</header>
+<p class="hint">{% if on %}A small beacon on every app page (<code>static/dashboard-rum.js</code>, loaded once from the layout) reports clicks that went wrong, JavaScript and htmx errors, slow interactions and Web Vitals: {{ crate::kernel::dashboard::web::count(reports, "report", "reports") }} so far{% if dropped > 0 %}, {{ dropped }} dropped (caps){% endif %}. It never sends text, input values or query strings: elements are named by their id, <code>data-testid</code>, name, role or tag path.{% if production %} Production loads it on a sample of page views (<code>DASHBOARD_RUM_SAMPLE</code>).{% endif %}{% else %}The beacon is off: in production set <code>DASHBOARD_RUM=true</code> (and optionally <code>DASHBOARD_RUM_SAMPLE=0.1</code>); in development it is on unless <code>DASHBOARD_RUM=false</code>.{% endif %}{% if !d.ro %} The load lab's <a href="/dev/lab/ux" hx-boost="false">UX trouble page</a> plants each problem.{% endif %}</p>
+<section class="panel" aria-labelledby="fe-clicks-title">
+  <header><h2 id="fe-clicks-title">Clicks that went wrong</h2><span class="muted">rage: 3 or more clicks within 0.7 s · dead: nothing happened within 1 s · error: an error followed</span></header>
+  {% if clicks.is_empty() %}<p class="empty">None reported.</p>{% else %}
+  <div class="scroll" tabindex="0" role="region" aria-label="Clicks"><table class="data-table fe-table">
+    <caption class="visually-hidden">Rage, dead and error clicks by page and element</caption>
+    <thead><tr><th scope="col">Element</th><th scope="col">Kind</th><th scope="col">Page</th><th scope="col" class="num">Reports</th><th scope="col">Clicks</th><th scope="col" class="num">After hx-boost</th><th scope="col">Last</th><th scope="col">Evidence</th></tr></thead>
+    <tbody>{% for c in clicks %}<tr id="c-{{ c.id }}"><th scope="row" class="mono">{{ c.sel }}{% if !c.message.is_empty() %}<span class="sub">{{ c.message }}</span>{% endif %}</th><td><span class="badge tone-{% if c.kind == "dead" %}warn{% else %}err{% endif %}">{{ c.label }}</span></td><td class="mono small">{{ c.page }}</td><td class="num">{{ c.count }}</td><td class="barcell"><span class="num">{{ c.clicks }}</span><svg class="dbar heat" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect width="{{ c.heat }}" height="6" rx="2"/></svg></td><td class="num">{{ c.boosted }}</td><td class="muted small">{{ c.last }}</td><td class="small">{% if !c.trace.is_empty() %}<a href="{{ c.trace }}">trace</a>{% endif %}{% if d.ai_on %} <a href="{{ base }}/ai?tab=frontend&amp;q={{ "Why do people rage-click or dead-click this element, and how do I fix it?"|urlencode }}">Ask AI</a>{% endif %}</td></tr>{% endfor %}</tbody>
+  </table></div>{% endif %}
+</section>
+<section class="panel" aria-labelledby="fe-err-title">
+  <header><h2 id="fe-err-title">JavaScript and htmx errors</h2><span class="muted">grouped by message and source</span></header>
+  {% if errors.is_empty() %}<p class="empty">None reported.</p>{% else %}
+  <ul class="fe-errors" role="list">{% for e in errors %}
+    <li id="e-{{ e.id }}" class="fe-err">
+      <p><span class="badge tone-err">{{ e.kind }}</span> <strong class="mono">{{ e.message }}</strong> <span class="muted">×{{ e.count }}</span></p>
+      <p class="small muted">{% if !e.src.is_empty() %}at <span class="mono">{{ e.src }}</span> · {% endif %}first {{ e.first }}, last {{ e.last }}{% if e.boosted > 0 %} · {{ e.boosted }} after a boosted navigation{% endif %}{% if e.after_click > 0 %} · {{ e.after_click }} right after a click{% endif %} · pages: <span class="mono">{{ e.pages }}</span></p>
+      {% if !e.stack.is_empty() %}<details><summary>Stack</summary><pre class="code"><code>{{ e.stack }}</code></pre></details>{% endif %}
+      <p class="small">{% if !e.trace.is_empty() %}<a href="{{ e.trace }}">Its page's trace</a>{% endif %}{% if d.ai_on %} <a href="{{ base }}/ai?tab=frontend&amp;q={{ "Explain this JavaScript error and how to fix it"|urlencode }}">Ask AI</a>{% endif %}</p>
+    </li>{% endfor %}
+  </ul>{% endif %}
+</section>
+<section class="panel" id="vitals" aria-labelledby="fe-vitals-title">
+  <header><h2 id="fe-vitals-title">Web Vitals per page</h2><span class="muted">p75 · good LCP ≤ 2.5 s, INP ≤ 200 ms, CLS ≤ 0.1</span></header>
+  {% if vitals.is_empty() %}<p class="empty">None reported yet (they are sent when a page is hidden or left).</p>{% else %}
+  <div class="scroll" tabindex="0" role="region" aria-label="Web Vitals"><table class="data-table">
+    <thead><tr><th scope="col">Page</th><th scope="col" class="num">Views</th><th scope="col" class="num">LCP</th><th scope="col" class="num">INP</th><th scope="col" class="num">CLS</th><th scope="col">Slow interactions</th></tr></thead>
+    <tbody>{% for v in vitals %}<tr><th scope="row" class="mono">{{ v.route }}</th><td class="num">{{ v.views }}</td><td class="num"><span class="badge tone-{{ v.lcp.1 }}">{{ v.lcp.0 }}</span></td><td class="num"><span class="badge tone-{{ v.inp.1 }}">{{ v.inp.0 }}</span></td><td class="num"><span class="badge tone-{{ v.cls.1 }}">{{ v.cls.0 }}</span></td><td class="small">{% for (s, ms, n) in v.slow %}<span class="mono">{{ s }}</span> {{ ms }} ×{{ n }}{% if !loop.last %}<br>{% endif %}{% endfor %}</td></tr>{% endfor %}</tbody>
+  </table></div>{% endif %}
+</section>
+{% endblock %}
