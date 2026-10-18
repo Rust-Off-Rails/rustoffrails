@@ -266,6 +266,7 @@ prove_app() {
   pages=$(grep -c '^| `/' "$proof")
   shots=$(find docs/proof/screens -name '*.png' | wc -l | tr -d ' ')
   [ "$shots" -eq $((pages * 4)) ] || { echo "PROOF.md lists $pages pages but there are $shots screenshots" >&2; return 1; }
+  # shellcheck disable=SC2016 # literal backticks
   grep -q 'AC-home-1.*the_home_page_shows_the_app_name.*SQLite: passed.*`/` ok' "$proof" || { echo "AC-home-1 is not traced to its passing test and page" >&2; cat "$proof"; return 1; }
   grep -q 'screens/dev-components--mobile-dark.png' "$proof" || return 1
   grep -q '| no |' "$proof" || { echo "the second run compared nothing with the first" >&2; return 1; }
