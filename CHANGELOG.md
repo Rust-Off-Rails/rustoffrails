@@ -4,6 +4,23 @@ Each release section below has four parts, in this order: **What's new** (the gi
 
 Each entry lists convention changes and what an existing app must do about them. `/offrails:upgrade` reads this file, so write the **App migration** notes as instructions for an agent.
 
+## Unreleased
+
+### What's new
+
+- **Security review fixes** (template, tooling and guides): an unset `APP_ENV` now refuses to boot instead of defaulting to development; `APP_TRUSTED_PROXY_HOPS` picks which `X-Forwarded-For` hop is the client behind several proxies; `/static` marks a URL immutable only when its `?v=` is the file's current digest; `Cache::delete_prefix` is one escaped `LIKE` delete; `cargo offrails verify` names every skipped step in its verdict and never probes a local Postgres; `--pitch` is validated like the title; the Claude Code hook guards canonicalize paths and match `pkill` behind paths, quotes and subshells, and fail closed without jq.
+- **Guides corrected:** sea-orm-migration takes no lock, so exactly one process migrates per deploy; every proxy needs `APP_TRUSTED_PROXY=true`; blob downloads are `no-store`; API tokens die with a password reset and expire by default; webhook routes verify signatures; search escapes `LIKE` wildcards; the realtime guide says plainly that its signals/streams design is a spec the parts do not implement yet.
+
+### Breaking changes
+
+- **`APP_ENV` is required.** `app …` fails with `APP_ENV is not set` when neither the environment nor `.env` sets it. Every server already sets `APP_ENV=production` (the Dockerfile does); locally `bin/setup` writes `APP_ENV=development` to `.env`. CI scripts that ran the binary without it must set it.
+- `Config` gains `trusted_proxy_hops: u8` (default 1); `Config::boot_warnings` no longer warns about an unset `APP_ENV`, and `env_defaulted` is always `false`.
+
+### Upgrading
+
+- Add `trusted_proxy_hops: 1` to any hand-built `Config` literal (`Config::test()` has it). Set `APP_TRUSTED_PROXY_HOPS` where more than one proxy appends to `X-Forwarded-For`.
+- Replace the `an_unset_app_env_warns_at_boot` unit test with `an_unset_app_env_refuses_to_boot` in `tests/app/kernel_test.rs` (config.md shows it).
+
 ## 0.7.2 (2026-10-18)
 
 ### What's new

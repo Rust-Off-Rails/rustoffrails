@@ -47,7 +47,8 @@ pub struct Config {
     pub smtp_url: Option<String>,     // SMTP_URL: production delivery (ignored in development unless MAILER=smtp)
     pub mailer: Option<String>,       // MAILER = smtp | local | log: overrides the per-environment default (mailers.md)
     pub mail_from: String,            // MAIL_FROM, default "<App> <no-reply@localhost>"
-    pub trusted_proxy: bool,          // APP_TRUSTED_PROXY: trust the rightmost X-Forwarded-For hop (rate limiting)
+    pub trusted_proxy: bool,          // APP_TRUSTED_PROXY: read the client IP from X-Forwarded-For (required behind any proxy; rate limiting)
+    pub trusted_proxy_hops: u8,       // APP_TRUSTED_PROXY_HOPS (default 1): how many proxies append to the header; the client is that many hops from the right
     pub log_format: LogFormat,        // LOG_FORMAT = pretty | json (default: json in production)
     pub revision: Option<String>,     // APP_REVISION: git sha of the build, shown on /dev/system
     pub tls: Option<TlsFiles>, // APP_TLS_CERT + APP_TLS_KEY (PEM paths): `serve` speaks HTTPS + h2 itself (deployment.md#direct-tls-optional); both or neither, one alone fails the boot.
@@ -55,7 +56,7 @@ pub struct Config {
                                // The development APP_URL default follows it: https://localhost:{PORT} when set (CSRF compares origins).
     pub bind: IpAddr,                 // APP_BIND: the address `serve` listens on. Default 127.0.0.1 in development (this machine only), 0.0.0.0 otherwise (security.md#development-is-this-machine-only)
     pub allowed_hosts: Vec<String>,   // APP_ALLOWED_HOSTS: extra Host names development answers (a tunnel, a LAN name); ".example.com" = its subdomains too
-    pub env_defaulted: bool,          // APP_ENV was unset (so this runs as development): `main` logs `boot_warnings()` at every boot
+    pub env_defaulted: bool,          // always false: an unset APP_ENV refuses to boot (kept for parts that read it)
     // apps with an API (api.md):
     // pub cors_origins: Vec<String>, // APP_CORS_ORIGINS: exact origins, comma-separated; `*` fails at boot (config::parse_cors_origins)
     // added with the first attachment field (storage.md):
@@ -108,29 +109,30 @@ pub fn parse_allowed_hosts(raw: Option<&str>) -> Vec<String> {
 }
 
 impl Config {
-    /// Loud warnings `main` logs right after logging starts.
-    // SECURITY: an unset APP_ENV means development (so `cargo run` just works), and development
-    // mounts /dev without a login; on a server that is a missing setting, so it is said at every
-    // boot (test: an_unset_app_env_warns_at_boot).
+    /// Loud warnings `main` logs right after logging starts (parts add theirs here).
     pub fn boot_warnings(&self) -> Vec<String> {
-        let mut warnings = Vec::new();
-        if self.env_defaulted {
-            warnings.push(
-                "APP_ENV is not set, so this runs as DEVELOPMENT: /dev tools are mounted without a \
-                 login and errors show details. Set APP_ENV=production on every server (the \
-                 Dockerfile does); locally, APP_ENV=development in .env silences this."
-                    .to_owned(),
-            );
-        }
-        warnings
+        Vec::new()
     }
 }
 ```
 
-In `from_env`, after the development `dotenvy::dotenv().ok()` (so `APP_ENV=development` in `.env`, which `bin/setup` writes, counts as set):
+`APP_ENV` is **required**. `from_env` reads it; when it is unset it loads `.env` (bin/setup writes `APP_ENV=development` there) and reads again; still unset is an error naming the fix, never a default:
 
 ```rust
-let env_defaulted = std::env::var("APP_ENV").map_or(true, |v| v.trim().is_empty());
+// SECURITY: an unset APP_ENV is an error, never a default. Development mounts /dev tools
+// without a login, so "forgot to set it on a server" must not silently become development
+// (test: an_unset_app_env_refuses_to_boot).
+if get_env().is_none() {
+    dotenvy::dotenv().ok();
+}
+let env = match get_env().as_deref() {
+    Some("development") => AppEnv::Development,
+    Some("test") => AppEnv::Test,
+    Some("production") => AppEnv::Production,
+    Some(other) => anyhow::bail!("invalid APP_ENV: {other} (development | test | production)"),
+    None => anyhow::bail!("APP_ENV is not set. Locally: APP_ENV=development in .env (bin/setup creates it \
+                           from .env.example). On every server: APP_ENV=production (the Dockerfile sets it)."),
+};
 // … with the other settings; a bad value joins the one "invalid env vars" message:
 let bind = bind_address(env, get("APP_BIND").as_deref()).unwrap_or_else(|problem| {
     invalid.push(problem);
@@ -139,16 +141,17 @@ let bind = bind_address(env, get("APP_BIND").as_deref()).unwrap_or_else(|problem
 let allowed_hosts = parse_allowed_hosts(get("APP_ALLOWED_HOSTS").as_deref());
 ```
 
-`Config::test()` sets `bind: IpAddr::V4(Ipv4Addr::LOCALHOST)`, `allowed_hosts: Vec::new()`, `env_defaulted: false`; the hand-written `Debug` prints all three (none is a secret). `main` runs `for w in config.boot_warnings() { tracing::warn!("{w}"); }` right after `init_tracing`, and `serve` binds `SocketAddr::new(config.bind, config.port)` (and `APP_DEV_HTTP_PORT` on the same `config.bind`). The unit tests, in `config.rs`:
+`Config::test()` sets `bind: IpAddr::V4(Ipv4Addr::LOCALHOST)`, `allowed_hosts: Vec::new()`, `env_defaulted: false`; the hand-written `Debug` prints all three (none is a secret). `main` runs `for w in config.boot_warnings() { tracing::warn!("{w}"); }` right after `init_tracing` (`app routes` returns before `from_env`: the route table needs no config), and `serve` binds `SocketAddr::new(config.bind, config.port)` (and `APP_DEV_HTTP_PORT` on the same `config.bind`). The boot test lives in `tests/app/kernel_test.rs` (an integration test, where `CARGO_BIN_EXE_offrails_app` exists), the rest in `config.rs`:
 
 ```rust
+/// Runs the binary in a directory with no `.env`, so the fallback has nothing to load.
 #[test]
-fn an_unset_app_env_warns_at_boot() {
-    assert!(Config::test().boot_warnings().is_empty());
-    let unset = Config { env: AppEnv::Development, env_defaulted: true, ..Config::test() };
-    let warnings = unset.boot_warnings();
-    assert_eq!(warnings.len(), 1);
-    assert!(warnings[0].contains("APP_ENV is not set") && warnings[0].to_lowercase().contains("runs as development"));
+fn an_unset_app_env_refuses_to_boot() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_offrails_app"))
+        .arg("db").arg("status").env_remove("APP_ENV").current_dir(dir.path()).output().unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("APP_ENV is not set"));
 }
 
 #[test]
@@ -170,10 +173,10 @@ fn development_binds_loopback_unless_told_otherwise() {
 - **Read env vars only in `config.rs`.** Nowhere else calls `std::env::var` (the AWS keys read by `object_store`'s `from_env()` are the one sanctioned exception).
 - `Config` lives in `AppState` (`state.config`), wrapped in `Arc` if it gets large.
 - **Fail fast in production.** Missing `DATABASE_URL`, `APP_URL`, or `SMTP_URL` (when email is enabled) aborts boot with: `missing required env vars: APP_URL, SMTP_URL (see .env.example)`.
-- Development has defaults for everything, so `cargo run` works with no `.env`:
+- Development has defaults for everything except `APP_ENV` itself, so `cargo run` works once `.env` says `APP_ENV=development` (`bin/setup` writes it):
   - `DATABASE_URL=sqlite://storage/development.sqlite3?mode=rwc`
   - `APP_URL=http://localhost:{PORT}`: it follows `PORT` (`config::dev_app_url(port)`), so emailed links and the CSRF origin check still work when you run on another port. Parse `PORT` before `APP_URL`.
-- `APP_ENV` unset means `development`, **and says so at every boot** (`boot_warnings`, above): on a server an unset `APP_ENV` is a missing setting that mounts `/dev`. The Dockerfile sets `APP_ENV=production`, and so must every deploy config. `TestApp` builds `Config` directly (`Config::test()`) and never reads the environment.
+- `APP_ENV` unset **refuses to boot** with a message naming the fix (above): on a server an unset `APP_ENV` is a missing setting that would mount `/dev` and `/admin/jobs` without a login, and a default is not a gate. The Dockerfile sets `APP_ENV=production`, and so must every deploy config. `TestApp` builds `Config` directly (`Config::test()`) and never reads the environment.
 - `serve` listens on `APP_BIND`: **127.0.0.1 in development**, 0.0.0.0 in production (the container's interface, behind the platform's proxy). A dev container, or a phone on your LAN, needs `APP_BIND=0.0.0.0` **and** its host name in `APP_ALLOWED_HOSTS` ([security](security.md#development-is-this-machine-only)).
 
 ### Runtime threads (`APP_WORKER_THREADS`, `APP_BLOCKING_THREADS`)
@@ -208,7 +211,7 @@ This file is the documentation for every variable. One line each, grouped, with 
 
 ```sh
 # --- core ---
-# Unset APP_ENV means development (and a loud warning at boot): set it on every server.
+# Required. development | test | production; an unset APP_ENV refuses to boot (development mounts /dev with no login).
 APP_ENV=development
 PORT=3000
 # APP_URL=https://myapp.example.com   # required in production; in development it follows PORT (http://localhost:{PORT}), so leave it unset
@@ -218,7 +221,8 @@ DATABASE_POOL=10
 # APP_BIND=0.0.0.0             # development listens on 127.0.0.1 only (its /dev tools have no login); a dev container opts in here. Production default: 0.0.0.0
 # APP_ALLOWED_HOSTS=dev.example.com,.lan.example   # development answers only localhost and APP_URL's host (DNS rebinding); add a tunnel or LAN name ('.' = subdomains too)
 APP_INLINE_WORKER=true
-# APP_TRUSTED_PROXY=true       # behind Fly, Kamal-proxy, Render: trust the rightmost X-Forwarded-For hop
+# APP_TRUSTED_PROXY=true       # behind Fly, Render or any proxy: read the client IP from X-Forwarded-For (REQUIRED behind any proxy, or every user shares one rate-limit key)
+# APP_TRUSTED_PROXY_HOPS=1     # proxies that append to X-Forwarded-For before the app: 1 = one platform proxy (Fly, Render), 2 = Cloudflare → Caddy → app
 # --- realtime (channels.md) ---
 # APP_NODE=web-1               # this process's name on /dev/sockets and in the cluster (default <hostname>:<pid>)
 # APP_CLUSTER=true             # Postgres only: share rooms and presence across nodes; refused at boot on SQLite
@@ -267,7 +271,7 @@ When you add an env var: update `Config`, `.env.example`, and the deploy config.
 ## Gotchas agents get wrong
 
 - Reading `std::env::var("X")` deep inside a handler. Add a `Config` field instead.
-- Calling `dotenvy::dotenv()` unconditionally, so a stray `.env` in a production image overrides real config. Only call it when `APP_ENV` is unset or `development`.
+- Calling `dotenvy::dotenv()` when `APP_ENV` is already set, so a stray `.env` in a production image overrides real config. Only call it when `APP_ENV` is unset (to find it) or `development`.
 - Trailing slash on `APP_URL`, which produces `//` in email links. Normalize it in `from_env`.
 - Committing real values to `.env.example`. Only dev defaults and placeholders go there.
 - Deriving the product name from `env!("CARGO_PKG_NAME")`. Renaming the crate (for example, to avoid a binary-name clash with another app on the same machine) then renames the product in every page title. Use `config::APP_NAME`.
