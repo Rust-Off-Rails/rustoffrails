@@ -44,6 +44,7 @@ pub const MAX_STACKS: usize = 1_500;
 /// Distinct function names kept.
 const MAX_NAMES: usize = 50_000;
 /// Frames kept per stack (the innermost).
+#[cfg(unix)]
 const MAX_DEPTH: usize = 64;
 
 /// One minute of samples: each distinct stack (root first, interned names) and how many times.
