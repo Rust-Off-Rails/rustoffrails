@@ -1,0 +1,7 @@
+{% import "components/ui.html" as ui %}
+{#- GET /dev/components/modal: what ui::modal_link loads into #modal-root. autoshow = true: it
+    opens itself, and leaves the page when closed. -#}
+{% call ui::modal("loaded-modal", "Loaded with htmx", true) %}
+  <p class="text-sm text-gray-700 dark:text-gray-300">This dialog came from the server (<code>hx-get</code>), opened itself, and is removed when it closes.</p>
+  <div class="mt-6 flex justify-end">{% call ui::modal_close("Close") %}{% endcall %}</div>
+{% endcall %}

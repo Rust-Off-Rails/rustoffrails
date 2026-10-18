@@ -1,0 +1,28 @@
+# brand.toml: the app's look, in one file. After editing it, run `cargo offrails brand`: it renders
+# assets/brand.css (the Tailwind theme the components use, light and dark), src/brand.rs (the name
+# and colors for Rust and email), static/favicon.svg and the icons, and the social card
+# (assets/brand/og.svg, static/og.png). It refuses colors that fail WCAG AA contrast, and says
+# which pair and what would pass. GUIDE: .offrails/guides/views.md#brand
+
+name = "Offrails App"
+tagline = "A new Rust off Rails app."
+
+[colors]
+primary = "#4f46e5"   # buttons, links, focus rings, the favicon tile (exactly this on buttons)
+accent = "#0d9488"    # badges, highlights, the social card's bar
+neutral = "gray"      # surfaces, text and borders: gray | slate | zinc | neutral | stone, or a hex to tint with
+# on_primary = "#ffffff"   # text on primary buttons; default: white or near-black, whichever passes
+
+[fonts]
+# CSS font stacks. Self-host web fonts in static/fonts/ (the CSP blocks font CDNs).
+sans = "ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji'"
+heading = ""          # "" = the sans stack
+mono = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+
+[shape]
+radius = "0.375rem"   # controls and badges; cards and dialogs use larger steps of it. "0" = square
+
+[logo]
+mark = ""             # the favicon's text mark, 1-2 characters ("" = the name's first letter)
+svg = ""              # or a square SVG file (e.g. "assets/brand/logo.svg"), drawn on the tile instead
+tile = true           # draw the mark on a primary rounded tile (false: the SVG as it is)

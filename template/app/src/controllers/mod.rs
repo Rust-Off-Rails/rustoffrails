@@ -3,6 +3,7 @@
 pub mod application;
 pub mod dev;
 pub mod errors;
+pub mod gallery;
 pub mod health;
 pub mod home;
 pub mod meta;

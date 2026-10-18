@@ -317,6 +317,20 @@ pub fn run(fw: &Path, o: &NewOptions) -> Result<()> {
         )?;
     }
 
+    // brand.toml carries the new name: the theme CSS, src/brand.rs, the favicon set and the card
+    // (after the parts: the mailer's layout takes the brand's email colors).
+    if app.join("brand.toml").is_file() {
+        crate::brand::run(
+            app,
+            &crate::brand::Options {
+                check: false,
+                images: true,
+                init: false,
+                quiet: true,
+            },
+        )?;
+    }
+
     if o.parts.is_empty() && util::have("cargo") {
         // The new crate name sorts differently in `use` lists, and a pitch rewraps a line.
         if util::run(app, "cargo", &["fmt", "--all"]).is_err() {
@@ -346,8 +360,7 @@ pub fn run(fw: &Path, o: &NewOptions) -> Result<()> {
         "  bin/setup && bin/dev                       # Windows: see .offrails/template/README.md#windows"
     );
     println!(
-        "  bash .offrails/tools/brand/render.sh \"{}\" \"#4f46e5\" \"<pitch>\" static   # the app's own favicon and social card",
-        o.title
+        "  edit brand.toml, then cargo offrails brand   # colors, fonts, radius, logo: theme, favicon set, social card"
     );
     if o.mode != "htmx" {
         println!(

@@ -16,3 +16,11 @@
 | GET | `/dev/introspect.json` | `dev::introspect` | dev |
 | GET | `/dev/reload` | `dev::reload` | dev |
 | POST | `/dev/migrations` | `migrations::run` | dev |
+| GET | `/dev/components` | `gallery::index` | dev |
+| POST | `/dev/components` | `gallery::submit` | dev |
+| GET | `/dev/components/modal` | `gallery::modal` | dev |
+| GET | `/dev/layouts/sidebar` | `gallery::sidebar` | dev |
+| GET | `/dev/layouts/marketing` | `gallery::marketing` | dev |
+| GET | `/dev/layouts/auth` | `gallery::auth` | dev |
+| POST | `/dev/layouts/auth` | `gallery::auth_submit` | dev |
+| GET | `/dev/layouts/docs` | `gallery::docs` | dev |

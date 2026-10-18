@@ -1,0 +1,13 @@
+{% extends "layouts/auth.html" %}
+{% import "components/ui.html" as ui %}
+{% block content %}
+<h1 class="text-xl font-semibold tracking-tight">Sign in</h1>
+<p class="muted mt-1">layouts/auth.html: the centered card. Submit to see its error state.</p>
+<form class="mt-6" method="post" action="{{ crate::routes::paths::dev_layout("auth") }}" novalidate>
+  {% call ui::field(errors, "email", "Email", email, "email", autocomplete = "email", required = true) %}{% endcall %}
+  {% call ui::field(errors, "password", "Password", "", "password", autocomplete = "current-password", required = true) %}{% endcall %}
+  {% call ui::checkbox(errors, "remember", "Keep me signed in") %}{% endcall %}
+  <div class="mt-6">{% call ui::button("Sign in") %}{% endcall %}</div>
+</form>
+{% endblock %}
+{% block card_footer %}No account? <a class="link" href="{{ crate::routes::paths::dev_layout("marketing") }}">See the landing page</a>{% endblock %}

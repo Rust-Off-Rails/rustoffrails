@@ -1,7 +1,7 @@
 <header class="border-b border-gray-200 dark:border-gray-800">
-  <nav class="mx-auto flex max-w-3xl items-center justify-between px-4 py-3" aria-label="Main">
-    <a href="{{ paths::root() }}" class="text-lg font-semibold tracking-tight text-gray-900 dark:text-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">{{ crate::config::APP_NAME }}</a>
-    <div class="flex items-center gap-4 text-sm">
+  <nav class="mx-auto flex max-w-3xl items-center justify-between gap-4 px-4 py-3" aria-label="Main">
+    {% include "shared/_brand.html" %}
+    <div class="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-sm">
       {# samples: nav links #}
     </div>
   </nav>

@@ -1,0 +1,14 @@
+{#- The layout's overlay slots (static/components.js): where htmx-loaded modals land, the confirm
+    dialog every data-confirm and hx-confirm asks in, and the toast corner. Every layout includes it. -#}
+<div id="modal-root"></div>
+<dialog class="modal max-w-md" id="confirm-dialog" aria-labelledby="confirm-dialog-title">
+  <form method="dialog" hx-boost="false" class="px-5 py-4">
+    <h2 class="text-base font-semibold" id="confirm-dialog-title">Are you sure?</h2>
+    <p class="mt-2 text-sm text-gray-700 dark:text-gray-300" data-confirm-message></p>
+    <div class="mt-6 flex flex-wrap justify-end gap-3">
+      <button class="btn-secondary" value="cancel" autofocus>Cancel</button>
+      <button class="btn-danger" value="ok">Confirm</button>
+    </div>
+  </form>
+</dialog>
+<div id="toasts" class="pointer-events-none fixed inset-x-4 bottom-4 z-40 flex flex-col items-end gap-2 sm:left-auto sm:w-96" aria-live="polite"></div>

@@ -8,7 +8,8 @@
 //! gitleaks, the no-unwrap lint, `routes` against docs/routes.md, the TS checks when there is a
 //! `web/`, and the browser smokes when `BASE` names a running app: the kernel pages, axe when the
 //! app has a scenario, and every page after a boosted link (`smoke-boosted.mjs`; "skip: no Chrome"
-//! without a browser).
+//! without a browser), then (`polish_steps`) `brand --check`, the component smoke and `prove`
+//! (docs/proof/PROOF.md) when `BASE` is set.
 //!
 //! Each step writes `target/verify/<step>.log`; the summary prints one line per step and the
 //! tail of each failure. Exit status: 0 all green, 1 something failed, 2 usage.
@@ -427,7 +428,46 @@ fn plan(
             "set BASE=<the URL bin/dev printed> to run it".into(),
         )),
     }
+    polish_steps(app, &mut steps, &mut skipped);
     (steps, skipped)
+}
+
+/// `--full`: the brand is rendered from brand.toml, the component kit's overlays work in a real
+/// browser, and `prove` writes docs/proof/PROOF.md (screenshots and checks of every page) when
+/// `BASE` names the running app. Each runs this binary or Node directly, no cargo.
+fn polish_steps(app: &Path, steps: &mut Vec<Step>, skipped: &mut Vec<Done>) {
+    let me = std::env::current_exe()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| "offrails-gen".into());
+    if app.join("brand.toml").is_file() {
+        steps.push(Step::new("brand", &me, &["brand", "--check"]));
+    }
+    let base = std::env::var("BASE").unwrap_or_default();
+    let tools = app.join(".offrails").join("tools").join("browser-smoke");
+    if base.is_empty() || !tools.join("prove.mjs").is_file() {
+        skipped.push(Done {
+            name: "prove",
+            outcome: Outcome::Skipped(
+                "set BASE=<the URL bin/dev printed> to screenshot and check every page (docs/proof/PROOF.md)".into(),
+            ),
+            took: Duration::ZERO,
+            note: String::new(),
+        });
+        return;
+    }
+    let gallery = fs::read_to_string(app.join("docs").join("routes.md"))
+        .is_ok_and(|r| r.contains("`/dev/components`"));
+    if gallery && tools.join("smoke-components.mjs").is_file() && util::have("node") {
+        steps.push(
+            Step::new(
+                "browser smoke (components)",
+                "node",
+                &[".offrails/tools/browser-smoke/smoke-components.mjs"],
+            )
+            .skip_on(SKIP_EXIT),
+        );
+    }
+    steps.push(Step::new("prove", &me, &["prove"]).skip_on(SKIP_EXIT));
 }
 
 /// Runs the steps, each as soon as everything it waits for has passed.
@@ -846,6 +886,31 @@ mod tests {
         assert!(matches!(by("broken").outcome, Outcome::Failed(_)));
         assert!(matches!(by("after broken").outcome, Outcome::Skipped(_)));
         assert!(matches!(by("independent").outcome, Outcome::Passed));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn full_checks_the_brand_and_proves_only_with_a_base() {
+        let dir = std::env::temp_dir().join(format!("offrails-verify-p-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let (mut steps, mut skipped) = (Vec::new(), Vec::new());
+        polish_steps(&dir, &mut steps, &mut skipped);
+        assert!(
+            steps.iter().all(|s| s.name != "brand"),
+            "no brand.toml, no brand step"
+        );
+        fs::write(dir.join("brand.toml"), "name = \"X\"\n").unwrap();
+        let (mut steps, mut skipped2) = (Vec::new(), Vec::new());
+        polish_steps(&dir, &mut steps, &mut skipped2);
+        let brand = steps
+            .iter()
+            .find(|s| s.name == "brand")
+            .expect("a brand step");
+        assert_eq!(brand.args, ["brand", "--check"]);
+        if std::env::var("BASE").is_err() {
+            assert!(skipped.iter().chain(&skipped2).any(|d| d.name == "prove"));
+            assert!(steps.iter().all(|s| s.name != "prove"));
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 

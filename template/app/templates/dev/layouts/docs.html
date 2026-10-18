@@ -1,0 +1,21 @@
+{% extends "layouts/docs.html" %}
+{% block toc %}
+<a class="toc-link" href="#overview">Overview</a>
+<a class="toc-link" href="#install">Install</a>
+<a class="toc-link" href="#usage">Usage</a>
+<a class="toc-link" href="#faq">Questions</a>
+{% endblock %}
+{% block content %}
+<h1 class="text-3xl font-semibold tracking-tight">Docs layout</h1>
+<p>layouts/docs.html: the top nav, a table of contents beside the text (above it on a phone), and the text at a readable width. Headings with ids are the anchors the contents link to.</p>
+<h2 id="overview">Overview</h2>
+<p>Each page extends <code>layouts/docs.html</code>, fills <code>toc</code> with <code>.toc-link</code> anchors and writes its article in <code>content</code>. Markdown rendered with <code>helpers::markdown_trusted</code> gets heading ids for free.</p>
+<h2 id="install">Install</h2>
+<p>Nothing to install: the layout is a template in the app. Copy this page to start one of your own.</p>
+<h3 id="install-requirements">Requirements</h3>
+<p>The app layout's head: the CSS, htmx, app.js and components.js, loaded once for every page.</p>
+<h2 id="usage">Usage</h2>
+<p>Long code lines scroll inside their block, never the page: <code>cargo offrails prove</code> fails a page that scrolls sideways at 390 pixels.</p>
+<h2 id="faq">Questions</h2>
+<p>Why a separate layout? Docs need a measure of about 70 characters and a contents list that stays in view; an app page needs neither.</p>
+{% endblock %}

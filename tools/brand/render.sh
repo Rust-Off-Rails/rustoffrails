@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SUPERSEDED in 0.7.3 by brand.toml + `cargo offrails brand` (guides/views.md#brand), which renders these
+# files and the theme CSS from one file with contrast checks; `new` runs it. Kept for apps without a
+# brand.toml (`cargo offrails brand --init` writes one).
+#
 # Day-one brand assets for any app with pages (generators/new.md step 5, guides/views.md#meta-favicon-and-social-cards).
 # Writes, into <static dir>:
 #   favicon.svg            the app's initial on its accent color (editable SVG, the source of truth)

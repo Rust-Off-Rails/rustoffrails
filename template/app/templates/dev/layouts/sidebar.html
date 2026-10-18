@@ -1,0 +1,23 @@
+{% extends "layouts/sidebar.html" %}
+{% import "components/ui.html" as ui %}
+{% block sidebar %}
+<a class="nav-link" href="{{ crate::routes::paths::root() }}">Home</a>
+<a class="nav-link" href="{{ crate::routes::paths::dev_layout("sidebar") }}" aria-current="page">Dashboard</a>
+<a class="nav-link" href="{{ crate::routes::paths::dev_components() }}">Components</a>
+<a class="nav-link" href="{{ crate::routes::paths::dev_layout("docs") }}">Docs</a>
+{% endblock %}
+{% block content %}
+{% call ui::page_header("Dashboard", "layouts/sidebar.html: a sidebar that folds behind Menu on a phone.") %}
+  {% call ui::button("New book", "primary", "md", "button", icon = "plus") %}{% endcall %}
+{% endcall %}
+<div class="grid gap-4 sm:grid-cols-3">
+  {% call ui::stat("Readers", "1,284", "+12%", "up") %}{% endcall %}
+  {% call ui::stat("Finished", "312", "-3%", "down") %}{% endcall %}
+  {% call ui::stat("Reviews", "98") %}{% endcall %}
+</div>
+<div class="mt-6">
+  {% call ui::table("Recent books", [("", "Title"), ("", "Author"), ("", "Year")]) %}
+    {% for row in rows %}<tr><td class="font-medium">{{ row.title }}</td><td>{{ row.author }}</td><td>{{ row.year }}</td></tr>{% endfor %}
+  {% endcall %}
+</div>
+{% endblock %}

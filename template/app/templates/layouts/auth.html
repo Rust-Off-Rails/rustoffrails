@@ -1,0 +1,17 @@
+{#- The centered card: sign in, sign up, reset, confirm. Blocks: content (inside the card),
+    card_footer (under it: "No account? Sign up").
+      {% extends "layouts/auth.html" %}
+    GUIDE: .offrails/guides/views.md#layouts -#}
+{% extends "layouts/application.html" %}
+{% block body %}
+<main id="main" class="flex min-h-screen flex-col items-center justify-center bg-gray-50 dark:bg-gray-950 px-4 py-12">
+  <div class="mb-6">{% include "shared/_brand.html" %}</div>
+  <div class="w-full max-w-sm">
+    {% include "shared/_notices.html" %}
+    <div class="card px-5 py-6 sm:px-8 sm:py-8">
+      {% block content %}{% endblock %}
+    </div>
+    <div class="mt-6 text-center text-sm text-gray-600 dark:text-gray-400">{% block card_footer %}{% endblock %}</div>
+  </div>
+</main>
+{% endblock %}

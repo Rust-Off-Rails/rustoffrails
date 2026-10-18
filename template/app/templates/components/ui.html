@@ -1,0 +1,314 @@
+{#- templates/components/ui.html: the component kit. One import per template, then a few words per
+    component instead of a class list:
+      {% import "components/ui.html" as ui %}
+      {% call ui::button("Save") %}{% endcall %}
+      {% call ui::field(errors, "title", "Title", params.title) %}{% endcall %}
+      {% call ui::card("Recent") %}<p>…</p>{% endcall %}
+    Every macro needs its {% endcall %}; a body between them goes where the macro says (caller).
+    Styles are the component classes in assets/app.css (light + dark, brand colors); behaviors are
+    static/components.js (delegated, so they survive boosted links). Every component in every
+    state: /dev/components. The signatures, as one table: .offrails/guides/views.md#components -#}
+
+{#- ---- icons: the sprite is components/_icons.html, in every layout ----------------------------- #}
+{% macro icon(name, size = "size-4") -%}
+<svg class="{{ size }} shrink-0" aria-hidden="true" focusable="false"><use href="#i-{{ name }}"></use></svg>
+{%- endmacro %}
+
+{#- ---- buttons ------------------------------------------------------------------------------------
+    variant: primary | secondary | danger | ghost. size: sm | md | lg. #}
+{% macro button(label, variant = "primary", size = "md", type = "submit", name = "", value = "", confirm = "", icon = "", disabled = false) -%}
+<button type="{{ type }}" class="{% if variant == "secondary" %}btn-secondary{% else if variant == "danger" %}btn-danger{% else if variant == "ghost" %}btn-ghost{% else %}btn{% endif %}{% if size == "sm" %} btn-sm{% else if size == "lg" %} btn-lg{% endif %}"{% if !name.is_empty() %} name="{{ name }}" value="{{ value }}"{% endif %}{% if !confirm.is_empty() %} data-confirm="{{ confirm }}"{% endif %}{% if disabled %} disabled{% endif %}>
+  {%- if !icon.is_empty() %}{% call icon(icon) %}{% endcall %}{% endif %}{{ label -}}
+</button>
+{%- endmacro %}
+
+{#- A link that looks like a button (navigation, never a change: changes are POST forms). #}
+{% macro link_button(label, href, variant = "primary", size = "md", icon = "") -%}
+<a href="{{ href }}" class="{% if variant == "secondary" %}btn-secondary{% else if variant == "danger" %}btn-danger{% else if variant == "ghost" %}btn-ghost{% else %}btn{% endif %}{% if size == "sm" %} btn-sm{% else if size == "lg" %} btn-lg{% endif %}">
+  {%- if !icon.is_empty() %}{% call icon(icon) %}{% endcall %}{% endif %}{{ label -}}
+</a>
+{%- endmacro %}
+
+{#- A square icon-only button; `label` is its accessible name. `toggle`: the id of an element it
+    shows and hides (data-toggle, static/app.js). #}
+{% macro icon_button(icon, label, variant = "ghost", toggle = "", type = "button") -%}
+<button type="{{ type }}" class="{% if variant == "secondary" %}btn-secondary{% else if variant == "primary" %}btn{% else %}btn-ghost{% endif %} btn-icon" aria-label="{{ label }}" title="{{ label }}"{% if !toggle.is_empty() %} data-toggle="{{ toggle }}" aria-controls="{{ toggle }}" aria-expanded="false"{% endif %}>
+  {%- call icon(icon, "size-5") %}{% endcall -%}
+</button>
+{%- endmacro %}
+
+{#- A POST form with one button (delete, archive…), confirmed in the layout's dialog first. #}
+{% macro confirm_button(label, action, message, variant = "danger", size = "md") -%}
+<form method="post" action="{{ action }}" class="inline" data-confirm="{{ message }}">
+  {%- call button(label, variant, size) %}{% endcall -%}
+</form>
+{%- endmacro %}
+
+{#- ---- forms ------------------------------------------------------------------------------------
+    `errors` is the page's models::Errors; `value` is what the person typed (params), so a 422
+    re-render keeps it. The input's id is its name. type: text | email | password | number | url |
+    tel | date | datetime-local | search (a password is never echoed back). #}
+{% macro field(errors, name, label, value = "", type = "text", hint = "", required = false, autocomplete = "", placeholder = "") -%}
+{%- let errs = errors.on(name) -%}
+<div class="mt-4 first:mt-0">
+  <label class="label" for="{{ name }}">{{ label }}{% if required %} <span aria-hidden="true">*</span>{% endif %}</label>
+  <input class="input" id="{{ name }}" name="{{ name }}" type="{{ type }}"{% if type != "password" %} value="{{ value }}"{% endif %}{% if required %} required{% endif %}{% if !autocomplete.is_empty() %} autocomplete="{{ autocomplete }}"{% endif %}{% if !placeholder.is_empty() %} placeholder="{{ placeholder }}"{% endif %}{% if !errs.is_empty() %} aria-invalid="true"{% endif %}{% if !hint.is_empty() || !errs.is_empty() %} aria-describedby="{% if !hint.is_empty() %}{{ name }}-hint{% if !errs.is_empty() %} {% endif %}{% endif %}{% if !errs.is_empty() %}{{ name }}-error{% endif %}"{% endif %}>
+  {%- if !hint.is_empty() %}<p class="hint" id="{{ name }}-hint">{{ hint }}</p>{% endif %}
+  {%- if !errs.is_empty() %}<p class="field-error" id="{{ name }}-error">{% for msg in errs %}{{ label }} {{ msg }}{% if !loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro textarea(errors, name, label, value = "", rows = 4, hint = "", required = false) -%}
+{%- let errs = errors.on(name) -%}
+<div class="mt-4 first:mt-0">
+  <label class="label" for="{{ name }}">{{ label }}{% if required %} <span aria-hidden="true">*</span>{% endif %}</label>
+  <textarea class="input" id="{{ name }}" name="{{ name }}" rows="{{ rows }}"{% if required %} required{% endif %}{% if !errs.is_empty() %} aria-invalid="true"{% endif %}{% if !hint.is_empty() || !errs.is_empty() %} aria-describedby="{% if !hint.is_empty() %}{{ name }}-hint{% if !errs.is_empty() %} {% endif %}{% endif %}{% if !errs.is_empty() %}{{ name }}-error{% endif %}"{% endif %}>{{ value }}</textarea>
+  {%- if !hint.is_empty() %}<p class="hint" id="{{ name }}-hint">{{ hint }}</p>{% endif %}
+  {%- if !errs.is_empty() %}<p class="field-error" id="{{ name }}-error">{% for msg in errs %}{{ label }} {{ msg }}{% if !loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
+</div>
+{%- endmacro %}
+
+{#- `options`: (value, label) pairs. `blank`: a first, empty option's text ("" = none). #}
+{% macro select(errors, name, label, options, selected = "", hint = "", required = false, blank = "") -%}
+{%- let errs = errors.on(name) -%}
+<div class="mt-4 first:mt-0">
+  <label class="label" for="{{ name }}">{{ label }}{% if required %} <span aria-hidden="true">*</span>{% endif %}</label>
+  <select class="input" id="{{ name }}" name="{{ name }}"{% if required %} required{% endif %}{% if !errs.is_empty() %} aria-invalid="true"{% endif %}{% if !hint.is_empty() || !errs.is_empty() %} aria-describedby="{% if !hint.is_empty() %}{{ name }}-hint{% if !errs.is_empty() %} {% endif %}{% endif %}{% if !errs.is_empty() %}{{ name }}-error{% endif %}"{% endif %}>
+    {%- if !blank.is_empty() %}<option value="">{{ blank }}</option>{% endif %}
+    {%- for (v, l) in options %}<option value="{{ v }}"{% if crate::views::helpers::same(v, selected) %} selected{% endif %}>{{ l }}</option>{% endfor -%}
+  </select>
+  {%- if !hint.is_empty() %}<p class="hint" id="{{ name }}-hint">{{ hint }}</p>{% endif %}
+  {%- if !errs.is_empty() %}<p class="field-error" id="{{ name }}-error">{% for msg in errs %}{{ label }} {{ msg }}{% if !loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro checkbox(errors, name, label, checked = false, value = "true", hint = "") -%}
+{%- let errs = errors.on(name) -%}
+<div class="mt-4 first:mt-0">
+  <label class="choice" for="{{ name }}"><input class="check" type="checkbox" id="{{ name }}" name="{{ name }}" value="{{ value }}"{% if checked %} checked{% endif %}{% if !errs.is_empty() %} aria-invalid="true"{% endif %}{% if !hint.is_empty() || !errs.is_empty() %} aria-describedby="{% if !hint.is_empty() %}{{ name }}-hint{% if !errs.is_empty() %} {% endif %}{% endif %}{% if !errs.is_empty() %}{{ name }}-error{% endif %}"{% endif %}><span>{{ label }}</span></label>
+  {%- if !hint.is_empty() %}<p class="hint ml-6" id="{{ name }}-hint">{{ hint }}</p>{% endif %}
+  {%- if !errs.is_empty() %}<p class="field-error ml-6" id="{{ name }}-error">{% for msg in errs %}{{ label }} {{ msg }}{% if !loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
+</div>
+{%- endmacro %}
+
+{#- `options`: (value, label) pairs; one is `selected`. #}
+{% macro radios(errors, name, label, options, selected = "", hint = "") -%}
+{%- let errs = errors.on(name) -%}
+<fieldset class="mt-4 first:mt-0"{% if !hint.is_empty() || !errs.is_empty() %} aria-describedby="{% if !hint.is_empty() %}{{ name }}-hint{% if !errs.is_empty() %} {% endif %}{% endif %}{% if !errs.is_empty() %}{{ name }}-error{% endif %}"{% endif %}>
+  <legend class="label">{{ label }}</legend>
+  <div class="mt-2 space-y-2">
+    {%- for (v, l) in options %}
+    <label class="choice"><input class="check rounded-full" type="radio" name="{{ name }}" value="{{ v }}"{% if crate::views::helpers::same(v, selected) %} checked{% endif %}{% if !errs.is_empty() %} aria-invalid="true"{% endif %}><span>{{ l }}</span></label>
+    {%- endfor %}
+  </div>
+  {%- if !hint.is_empty() %}<p class="hint" id="{{ name }}-hint">{{ hint }}</p>{% endif %}
+  {%- if !errs.is_empty() %}<p class="field-error" id="{{ name }}-error">{% for msg in errs %}{{ label }} {{ msg }}{% if !loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
+</fieldset>
+{%- endmacro %}
+
+{#- The submit button and a Cancel link. A body adds more buttons after them. #}
+{% macro form_actions(submit = "Save", cancel_href = "", cancel = "Cancel") -%}
+<div class="form-actions">
+  {%- call button(submit) %}{% endcall %}
+  {%- if !cancel_href.is_empty() %}{% call link_button(cancel, cancel_href, "secondary") %}{% endcall %}{% endif %}
+  {{- caller() -}}
+</div>
+{%- endmacro %}
+
+{#- ---- feedback -----------------------------------------------------------------------------------
+    tone: info | success | warning | danger. #}
+{% macro alert(tone = "info", title = "", dismissible = false) -%}
+<div class="alert {% if tone == "success" %}alert-success{% else if tone == "warning" %}alert-warning{% else if tone == "danger" %}alert-danger{% else %}alert-info{% endif %}" role="{% if tone == "danger" || tone == "warning" %}alert{% else %}status{% endif %}"{% if dismissible %} data-dismissible{% endif %}>
+  {%- call icon(crate::views::helpers::tone_icon(tone), "size-5 mt-0.5") %}{% endcall %}
+  <div class="min-w-0 flex-1">
+    {%- if !title.is_empty() %}<p class="font-medium">{{ title }}</p>{% endif %}
+    <div{% if !title.is_empty() %} class="mt-1"{% endif %}>{{ caller() }}</div>
+  </div>
+  {%- if dismissible %}<button type="button" class="-m-1 rounded-md p-1 hover:bg-gray-900/10 dark:hover:bg-white/10" data-dismiss aria-label="Dismiss">{% call icon("x") %}{% endcall %}</button>{% endif %}
+</div>
+{%- endmacro %}
+
+{#- The flash from the redirect (ctx.flash): a notice or an alert. #}
+{% macro flash(flash) -%}
+{%- if let Some(f) = flash %}
+<div class="mb-6">{% if f.is_alert() %}{% call alert("danger", "", true) %}{{ f.message }}{% endcall %}{% else %}{% call alert("success", "", true) %}{{ f.message }}{% endcall %}{% endif %}</div>
+{%- endif %}
+{%- endmacro %}
+
+{#- A toast in the layout's #toasts corner; gone after `timeout` ms (0 = stays until dismissed).
+    From an htmx response, send `toast_oob` instead: it lands in #toasts from any swap. #}
+{% macro toast(message, tone = "success", timeout = 6000) -%}
+<div class="toast" role="status" data-dismissible{% if timeout > 0 %} data-toast-timeout="{{ timeout }}"{% endif %}>
+  <span class="{% if tone == "danger" %}text-red-700 dark:text-red-300{% else if tone == "warning" %}text-amber-700 dark:text-amber-300{% else if tone == "info" %}text-primary-700 dark:text-primary-300{% else %}text-green-700 dark:text-green-300{% endif %}">{% call icon(crate::views::helpers::tone_icon(tone), "size-5") %}{% endcall %}</span>
+  <p class="min-w-0 flex-1">{{ message }}</p>
+  <button type="button" class="-m-1 rounded-md p-1 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800" data-dismiss aria-label="Dismiss">{% call icon("x") %}{% endcall %}</button>
+</div>
+{%- endmacro %}
+{% macro toast_oob(message, tone = "success", timeout = 6000) -%}
+<div id="toasts" hx-swap-oob="beforeend">{% call toast(message, tone, timeout) %}{% endcall %}</div>
+{%- endmacro %}
+
+{#- ---- data display ----------------------------------------------------------------------------- #}
+{% macro card(title = "", subtitle = "") -%}
+<section class="card"{% if !title.is_empty() %} aria-label="{{ title }}"{% endif %}>
+  {%- if !title.is_empty() %}
+  <div class="card-header">
+    <h2 class="text-base font-semibold">{{ title }}</h2>
+    {%- if !subtitle.is_empty() %}<p class="muted mt-0.5">{{ subtitle }}</p>{% endif %}
+  </div>
+  {%- endif %}
+  <div class="card-body">{{ caller() }}</div>
+</section>
+{%- endmacro %}
+
+{#- tone: neutral | primary | accent | success | warning | danger. #}
+{% macro badge(label, tone = "neutral") -%}
+<span class="badge{% if tone == "primary" %} badge-primary{% else if tone == "accent" %} badge-accent{% else if tone == "success" %} badge-success{% else if tone == "warning" %} badge-warning{% else if tone == "danger" %} badge-danger{% endif %}">{{ label }}</span>
+{%- endmacro %}
+
+{#- A number with its label; `delta` ("+12%") is shown in green (trend "up") or red ("down"). #}
+{% macro stat(label, value, delta = "", trend = "") -%}
+<div class="card card-body">
+  <p class="muted">{{ label }}</p>
+  <p class="mt-1 text-2xl font-semibold tracking-tight">{{ value }}</p>
+  {%- if !delta.is_empty() %}<p class="mt-1 text-sm {% if trend == "down" %}text-red-700 dark:text-red-300{% else if trend == "up" %}text-green-700 dark:text-green-300{% else %}text-gray-600 dark:text-gray-400{% endif %}">{% if trend == "up" %}<span class="sr-only">Up </span>{% else if trend == "down" %}<span class="sr-only">Down </span>{% endif %}{{ delta }}</p>{% endif %}
+</div>
+{%- endmacro %}
+
+{#- `columns`: (key, label) pairs; a non-empty key makes the header a sort link to
+    `{base}sort=<key>&dir=<asc|desc>` (`base`: the URL up to and including its ? or &). The body
+    is the <tr> rows; `empty` shows `empty_message` instead. #}
+{% macro table(caption, columns, empty = false, empty_message = "Nothing here yet.", sort = "", dir = "asc", base = "?") -%}
+<div class="table-wrap">
+  <table class="table">
+    <caption>{{ caption }}</caption>
+    <thead>
+      <tr>
+        {%- for (key, label) in columns %}
+        <th scope="col"{% if !key.is_empty() %} aria-sort="{% if crate::views::helpers::same(key, sort) %}{% if dir == "desc" %}descending{% else %}ascending{% endif %}{% else %}none{% endif %}"{% endif %}>
+          {%- if key.is_empty() %}{{ label }}{% else %}<a class="sort-link" href="{{ base }}sort={{ key }}&amp;dir={% if crate::views::helpers::same(key, sort) && dir == "asc" %}desc{% else %}asc{% endif %}">{{ label }}{% if crate::views::helpers::same(key, sort) %}{% if dir == "desc" %}{% call icon("arrow-down", "size-3.5") %}{% endcall %}{% else %}{% call icon("arrow-up", "size-3.5") %}{% endcall %}{% endif %}{% else %}{% call icon("arrows-up-down", "size-3.5 opacity-50") %}{% endcall %}{% endif %}</a>{% endif -%}
+        </th>
+        {%- endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {%- if empty %}
+      <tr><td colspan="{{ columns.len() }}" class="py-8 text-center">{{ empty_message }}</td></tr>
+      {%- else %}{{ caller() }}{% endif %}
+    </tbody>
+  </table>
+</div>
+{%- endmacro %}
+
+{#- Page links for `page` of `pages` (any integer types), to `{base}page=<n>`. #}
+{% macro pagination(page, pages, base = "?") -%}
+{%- let p = crate::views::helpers::Pager::new(page, pages) -%}
+{%- if p.pages > 1 %}
+<nav class="mt-6 flex flex-wrap items-center gap-1" aria-label="Pagination">
+  {%- if let Some(prev) = p.prev %}<a class="page-link" href="{{ base }}page={{ prev }}" rel="prev">{% call icon("chevron-left") %}{% endcall %}<span class="sr-only">Previous page</span></a>{% endif %}
+  {%- for slot in p.window %}{% if let Some(n) = slot %}<a class="page-link" href="{{ base }}page={{ n }}"{% if *n == p.page %} aria-current="page"{% endif %}>{{ n }}</a>{% else %}<span class="page-gap" aria-hidden="true">…</span>{% endif %}{% endfor %}
+  {%- if let Some(next) = p.next %}<a class="page-link" href="{{ base }}page={{ next }}" rel="next"><span class="sr-only">Next page</span>{% call icon("chevron-right") %}{% endcall %}</a>{% endif %}
+</nav>
+{%- endif %}
+{%- endmacro %}
+
+{#- An empty list's placeholder, with an optional call to action. #}
+{% macro empty_state(title, message = "", action_label = "", action_href = "", icon = "inbox") -%}
+<div class="rounded-lg border border-dashed border-gray-300 dark:border-gray-700 px-6 py-10 text-center">
+  <span class="mx-auto flex size-10 items-center justify-center rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">{% call icon(icon, "size-5") %}{% endcall %}</span>
+  <h3 class="mt-3 text-sm font-semibold">{{ title }}</h3>
+  {%- if !message.is_empty() %}<p class="muted mt-1">{{ message }}</p>{% endif %}
+  {%- if !action_label.is_empty() %}<div class="mt-4">{% call link_button(action_label, action_href, "primary", "md", "plus") %}{% endcall %}</div>{% endif %}
+</div>
+{%- endmacro %}
+
+{#- A round image, or the name's initials when there is no `src`. size: sm | md | lg. #}
+{% macro avatar(name, src = "", size = "md") -%}
+{%- if src.is_empty() %}
+<span class="inline-flex shrink-0 items-center justify-center rounded-full bg-primary-100 dark:bg-primary-950 font-medium text-primary-800 dark:text-primary-200 {% if size == "sm" %}size-6 text-xs{% else if size == "lg" %}size-12 text-base{% else %}size-9 text-sm{% endif %}" role="img" aria-label="{{ name }}">{{ crate::views::helpers::initials(name) }}</span>
+{%- else %}
+<img class="shrink-0 rounded-full object-cover {% if size == "sm" %}size-6{% else if size == "lg" %}size-12{% else %}size-9{% endif %}" src="{{ src }}" alt="{{ name }}">
+{%- endif %}
+{%- endmacro %}
+
+{#- ---- navigation ----------------------------------------------------------------------------- #}
+{#- `items`: (label, href) pairs, the last one the current page. #}
+{% macro breadcrumbs(items) -%}
+<nav aria-label="Breadcrumb" class="mb-4">
+  <ol class="flex flex-wrap items-center gap-1 text-sm text-gray-600 dark:text-gray-400">
+    {%- for (label, href) in items %}
+    <li class="flex items-center gap-1">
+      {%- if !loop.first %}{% call icon("chevron-right", "size-3.5") %}{% endcall %}{% endif %}
+      {%- if loop.last %}<span aria-current="page" class="font-medium text-gray-900 dark:text-gray-100">{{ label }}</span>{% else %}<a class="hover:text-gray-900 dark:hover:text-white hover:underline" href="{{ href }}">{{ label }}</a>{% endif -%}
+    </li>
+    {%- endfor %}
+  </ol>
+</nav>
+{%- endmacro %}
+
+{#- A page's title row; the body holds its actions (buttons). #}
+{% macro page_header(title, subtitle = "") -%}
+<div class="mb-6 flex flex-wrap items-end justify-between gap-4">
+  <div class="min-w-0">
+    <h1 class="text-2xl font-semibold tracking-tight">{{ title }}</h1>
+    {%- if !subtitle.is_empty() %}<p class="muted mt-1">{{ subtitle }}</p>{% endif %}
+  </div>
+  <div class="flex flex-wrap items-center gap-2">{{ caller() }}</div>
+</div>
+{%- endmacro %}
+
+{#- Server-side tabs: links, `items` (label, href), the one at `current` (an href) marked. #}
+{% macro nav_tabs(items, current, label = "Sections") -%}
+<nav class="tabs" aria-label="{{ label }}">
+  {%- for (l, href) in items %}<a class="tab" href="{{ href }}"{% if crate::views::helpers::same(href, current) %} aria-current="page"{% endif %}>{{ l }}</a>{% endfor -%}
+</nav>
+{%- endmacro %}
+
+{#- Client-side tabs: `items` (key, label); the panels are the body, each one
+    {% call ui::tab_panel(id, key, selected) %}…{% endcall %}. #}
+{% macro tabs(id, items, selected, label = "Sections") -%}
+<div class="tabs" role="tablist" aria-label="{{ label }}" data-tabs>
+  {%- for (key, l) in items %}<button type="button" class="tab" role="tab" id="{{ id }}-tab-{{ key }}" aria-controls="{{ id }}-{{ key }}" aria-selected="{% if crate::views::helpers::same(key, selected) %}true{% else %}false{% endif %}" tabindex="{% if crate::views::helpers::same(key, selected) %}0{% else %}-1{% endif %}">{{ l }}</button>{% endfor -%}
+</div>
+{{ caller() }}
+{%- endmacro %}
+{% macro tab_panel(id, key, selected) -%}
+<div class="pt-4" role="tabpanel" id="{{ id }}-{{ key }}" aria-labelledby="{{ id }}-tab-{{ key }}" tabindex="0"{% if !crate::views::helpers::same(key, selected) %} hidden{% endif %}>{{ caller() }}</div>
+{%- endmacro %}
+
+{#- A menu under a button; the body is its items ({% call ui::menu_item(…) %}). Works without
+    JS (<details>); components.js closes it on a click outside, on Esc and after a choice. #}
+{% macro dropdown(label, variant = "secondary", size = "md") -%}
+<details class="relative inline-block" data-dropdown>
+  <summary class="{% if variant == "primary" %}btn{% else if variant == "ghost" %}btn-ghost{% else %}btn-secondary{% endif %}{% if size == "sm" %} btn-sm{% endif %} cursor-pointer list-none" data-js="dropdown">{{ label }}{% call icon("chevron-down") %}{% endcall %}</summary>
+  <div class="menu" role="menu">{{ caller() }}</div>
+</details>
+{%- endmacro %}
+{% macro menu_item(label, href) -%}
+<a class="menu-item" role="menuitem" href="{{ href }}">{{ label }}</a>
+{%- endmacro %}
+
+{#- ---- overlays -------------------------------------------------------------------------------
+    A modal dialog: native <dialog> opened with showModal() (the page behind is inert, focus stays
+    inside, Esc closes, focus returns to the opener). Open one on the page with
+    modal_button(label, id); load one with htmx with modal_link(label, url): that URL answers
+    the modal alone, with autoshow = true, and it opens itself and leaves when closed. #}
+{% macro modal(id, title, autoshow = false) -%}
+<dialog class="modal" id="{{ id }}" aria-labelledby="{{ id }}-title"{% if autoshow %} data-modal-autoshow data-modal-remove{% endif %}>
+  <div class="flex items-start justify-between gap-4 border-b border-gray-200 dark:border-gray-800 px-5 py-4">
+    <h2 class="text-base font-semibold" id="{{ id }}-title">{{ title }}</h2>
+    <button type="button" class="-m-1 rounded-md p-1 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800" data-modal-close aria-label="Close">{% call icon("x", "size-5") %}{% endcall %}</button>
+  </div>
+  <div class="px-5 py-4">{{ caller() }}</div>
+</dialog>
+{%- endmacro %}
+{% macro modal_button(label, target, variant = "secondary") -%}
+<button type="button" class="{% if variant == "primary" %}btn{% else if variant == "danger" %}btn-danger{% else %}btn-secondary{% endif %}" data-modal-open="{{ target }}" aria-haspopup="dialog">{{ label }}</button>
+{%- endmacro %}
+{% macro modal_link(label, url, variant = "secondary") -%}
+<button type="button" class="{% if variant == "primary" %}btn{% else %}btn-secondary{% endif %}" hx-get="{{ url }}" hx-target="#modal-root" hx-swap="innerHTML" aria-haspopup="dialog">{{ label }}</button>
+{%- endmacro %}
+{#- A button that closes the modal it is in (Cancel). #}
+{% macro modal_close(label = "Cancel") -%}
+<button type="button" class="btn-secondary" data-modal-close>{{ label }}</button>
+{%- endmacro %}

@@ -1,0 +1,25 @@
+{#- The app layout with a sidebar: dashboards, admin areas, anything with many sections. On a phone
+    the sidebar folds behind a Menu button (data-toggle, static/app.js).
+    Blocks: content; sidebar (its links, default shared/_sidebar.html).
+      {% extends "layouts/sidebar.html" %}
+    GUIDE: .offrails/guides/views.md#layouts -#}
+{% extends "layouts/application.html" %}
+{% import "components/ui.html" as ui %}
+{% block body %}
+<div class="min-h-screen md:flex">
+  <header class="flex items-center justify-between gap-4 border-b border-gray-200 dark:border-gray-800 px-4 py-3 md:hidden">
+    {% include "shared/_brand.html" %}
+    {% call ui::icon_button("menu", "Menu", "ghost", "sidebar") %}{% endcall %}
+  </header>
+  <aside id="sidebar" class="hidden border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 md:block md:w-64 md:shrink-0 md:border-b-0 md:border-r">
+    <div class="hidden px-5 py-4 md:block">{% include "shared/_brand.html" %}</div>
+    <nav class="flex flex-col gap-1 px-3 py-3 md:pt-0" aria-label="Main">
+      {% block sidebar %}{% include "shared/_sidebar.html" %}{% endblock %}
+    </nav>
+  </aside>
+  <main id="main" class="min-w-0 flex-1 px-4 py-6 sm:px-8 sm:py-8">
+    {% include "shared/_notices.html" %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+{% endblock %}
