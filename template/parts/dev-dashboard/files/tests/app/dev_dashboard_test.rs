@@ -893,8 +893,16 @@ async fn the_middleware_overhead_is_small() {
     println!(
         "dashboard middleware overhead: {overhead_us:.1} µs per request (median; on {on} ns, off {off} ns)"
     );
-    // A debug build is ~10x slower than release (where it measures a few µs; see the README).
-    let limit = if cfg!(debug_assertions) { 50.0 } else { 10.0 };
+    // A debug build is ~10x slower than release (where it measures a few µs; see the README), and
+    // a shared CI runner under a parallel test run is another ~7x slower again (measured: 7.6 µs on
+    // an M2, 54 µs on a GitHub runner, recording ~3.6x a bare request on both). So in debug the
+    // limit scales with this machine's bare request: a regression to a lock or a sync write still
+    // fails by orders of magnitude.
+    let limit = if cfg!(debug_assertions) {
+        f64::max(50.0, 4.0 * off as f64 / 1000.0)
+    } else {
+        10.0
+    };
     assert!(
         overhead_us < limit,
         "the middleware adds {overhead_us:.1} µs per request (limit {limit})"
