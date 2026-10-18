@@ -19,6 +19,8 @@ jobs:
           node-version: 24
       - name: Plugin manifests, skills and hooks validate
         run: npx -y @anthropic-ai/claude-code@2.1.296 plugin validate . --strict
+      - name: The boosted-navigation smoke catches a button that is dead after a boosted link (the runner's Chrome)
+        run: node tools/browser-smoke/selftest-boosted.mjs
   secrets:
     runs-on: ubuntu-latest
     steps:
@@ -32,7 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: shellcheck (installer, offrails command, offrails-check, generators' wrappers, release + CI scripts)
-        run: shellcheck -s sh install.sh tools/offrails tools/offrails-check tools/new-app.sh tools/sync-parts.sh tools/release/release.sh tools/ci/test-install.sh tools/ci/test-offrails-check.sh tools/ci/test-template.sh tools/ci/memory-budget.sh
+        run: shellcheck -s sh install.sh tools/offrails tools/offrails-check tools/new-app.sh tools/sync-parts.sh tools/release/release.sh tools/ci/test-install.sh tools/ci/test-offrails-check.sh tools/ci/test-template.sh tools/ci/memory-budget.sh tools/browser-smoke/run.sh
       - name: offrails-check passes a complete app and fails each broken fixture with its message
         run: sh tools/ci/test-offrails-check.sh
       - name: Install into this runner and clean containers (ubuntu:24.04, debian:trixie-slim)

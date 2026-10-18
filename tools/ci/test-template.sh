@@ -8,8 +8,10 @@
 #
 #   gen          offrails-gen's own tests and clippy
 #   bare         `new` with no parts: `cargo offrails verify` (fmt, clippy, tests on SQLite + Postgres),
-#                the no-unwrap lint, offrails-check, memory budget
-#   all          `new --parts all` (every part, so every sample's anchors are proven on the template)
+#                the no-unwrap lint, offrails-check, memory budget, and the boosted-navigation
+#                browser smoke against the served app (skipped, and said so, without Chrome)
+#   all          `new --parts all` (every part, so every sample's anchors are proven on the template;
+#                the browser smoke signs in as the demo account too)
 #   incremental  `new` bare, then `add-part` one part at a time into the generated app, then every
 #                add-part again (must change nothing), then the same gates as `all`
 #   generators   `cargo offrails generate` every kind into a bare app (--public: a references chain, a
@@ -33,7 +35,7 @@ targets=""
 for arg in "$@"; do
   case "$arg" in
     --no-postgres) postgres=0 ;;
-    -h | --help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "test-template: unknown option $arg" >&2; exit 2 ;;
     *) targets="$targets $arg" ;;
   esac
@@ -90,7 +92,46 @@ verify() {
   [ -z "$unknown" ] || { echo "flaky, and not a known samples flake: $unknown" >&2; return 1; }
 }
 
+# The boosted-navigation browser smoke (.offrails/tools/browser-smoke/smoke-boosted.mjs) against the
+# app served in development on port $1 (its own SQLite file, the demo account when auth is in).
+# The server is stopped by its PID. No Chrome (exit 77): a skip, recorded for the summary.
+boosted_smoke() {
+  port=$1
+  db="sqlite://storage/browser-smoke.sqlite3?mode=rwc"
+  log="target/browser-smoke-server.log"
+  APP_ENV=development PORT=$port DATABASE_URL=$db cargo run -q -- db migrate >"$log" 2>&1 || { tail -20 "$log"; return 1; }
+  if grep -q '"auth_demo"' src/tasks/mod.rs 2>/dev/null; then
+    APP_ENV=development PORT=$port DATABASE_URL=$db cargo run -q -- task auth_demo >>"$log" 2>&1 || { tail -20 "$log"; return 1; }
+  fi
+  APP_ENV=development PORT=$port DATABASE_URL=$db cargo run -q -- serve >>"$log" 2>&1 &
+  server=$!
+  up=0
+  i=0
+  while [ "$i" -lt 180 ]; do
+    if curl -fsS "http://localhost:$port/up" >/dev/null 2>&1; then up=1; break; fi
+    kill -0 "$server" 2>/dev/null || break
+    sleep 1
+    i=$((i + 1))
+  done
+  if [ "$up" = 1 ]; then
+    BASE="http://localhost:$port" node .offrails/tools/browser-smoke/smoke-boosted.mjs
+    status=$?
+  else
+    echo "the app did not answer /up on port $port:" >&2
+    tail -20 "$log" >&2
+    status=1
+  fi
+  kill "$server" 2>/dev/null
+  wait "$server" 2>/dev/null
+  if [ "$status" = 77 ]; then
+    echo "skip: no Chrome" > "$work/$name/browser-smoke-skipped"
+    return 0
+  fi
+  return "$status"
+}
+
 # The Definition of Done on a generated app. $1: memory budget in MiB (none: skip that step).
+# $2: a port for the boosted-navigation browser smoke (none: skip it).
 gates() {
   step "anchors stand alone" anchors_alone || return 1
   step "tailwind" sh -c 'bin/setup-tailwind >/dev/null' || return 1
@@ -100,6 +141,13 @@ gates() {
   step "offrails-check" sh .offrails/tools/offrails-check || return 1
   if [ "$1" != none ]; then
     step "memory budget" sh "$root/tools/ci/memory-budget.sh" . "$1" || return 1
+  fi
+  if [ "${2:-none}" != none ]; then
+    if command -v node >/dev/null 2>&1; then
+      step "browser smoke (boosted navigation)" boosted_smoke "$2" || return 1
+    else
+      echo "skip: no Node" > "$work/$name/browser-smoke-skipped"
+    fi
   fi
 }
 
@@ -159,12 +207,12 @@ run_one() {
     bare)
       fresh bare_app
       (cd "$work/$name" && gen new bare_app bare_app "Bare App") || return 1
-      gates 24 || return 1
+      gates 24 3911 || return 1
       ;;
     all)
       fresh all_app
       (cd "$work/$name" && gen new all_app all_app "All Parts" --parts all) || return 1
-      gates 32 || return 1
+      gates 32 3912 || return 1
       ;;
     incremental)
       fresh inc_app
@@ -261,6 +309,7 @@ for t in $targets; do
   if [ "$postgres" = 1 ]; then dbs="SQLite + Postgres"; else dbs="SQLite only (Postgres skipped)"; fi
   [ "$t" = gen ] && dbs="no database"
   [ "$t" = update-part ] && dbs="no tests run"
+  if [ -f "$work/$t/browser-smoke-skipped" ]; then dbs="$dbs; browser smoke SKIPPED: $(cat "$work/$t/browser-smoke-skipped")"; fi
   summary="$summary
 $result $t ($dbs)"
 done

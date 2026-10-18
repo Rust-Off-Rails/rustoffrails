@@ -253,3 +253,80 @@ async fn robots_and_sitemap_are_absolute_and_exclude_private_pages() {
         .assert_contains(&format!("<loc>{base}/</loc>"))
         .assert_not_contains("/dev");
 }
+
+/// Every file under `dir` (recursively) with extension `ext`.
+fn files_with_extension(dir: &std::path::Path, ext: &str, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            files_with_extension(&path, ext, out);
+        } else if path.extension().is_some_and(|e| e == ext) {
+            out.push(path);
+        }
+    }
+}
+
+/// The app layout boosts every link (`hx-boost="true"`): a boosted click swaps `<body>` and runs
+/// nothing in the next page's `<head>`. So no page that extends the app layout loads a script or
+/// a stylesheet in its `{% block head %}`; they load from the layout (`samples: app head`), where
+/// every page has them (guides/frontend-htmx.md#boosted-navigation). The browser check is
+/// `.offrails/tools/browser-smoke/smoke-boosted.mjs`.
+#[test]
+fn app_pages_load_no_scripts_or_stylesheets_in_their_head_block() {
+    let mut files = Vec::new();
+    files_with_extension(std::path::Path::new("templates"), "html", &mut files);
+    let mut found = Vec::new();
+    for path in files {
+        let source = std::fs::read_to_string(&path).expect("a readable template");
+        if !source.contains(r#"{% extends "layouts/application.html" %}"#) {
+            continue;
+        }
+        let Some(start) = source.find("{% block head %}") else {
+            continue;
+        };
+        let head = &source[start..];
+        let head = &head[..head.find("{% endblock").unwrap_or(head.len())];
+        if head.contains("<script") || head.contains("stylesheet") {
+            found.push(path.display().to_string());
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "a boosted link never runs these: load them from the layout (samples: app head): {found:?}"
+    );
+}
+
+/// A script that binds on `DOMContentLoaded` (or `load`) binds once, on the first full load: after
+/// a boosted link the new page's elements are never bound. Bind by delegation on `document`, or
+/// also start on `htmx:load` for the elements a swap brings (guides/frontend-htmx.md#boosted-navigation).
+#[test]
+fn page_scripts_never_bind_only_on_dom_content_loaded() {
+    let mut files = Vec::new();
+    files_with_extension(std::path::Path::new("static"), "js", &mut files);
+    let mut found = Vec::new();
+    for path in files {
+        if path.components().any(|c| c.as_os_str() == "vendor") {
+            continue;
+        }
+        let source = std::fs::read_to_string(&path).expect("a readable script");
+        let code: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let on_load = code.contains("DOMContentLoaded")
+            || code.contains("window.onload")
+            || code.contains(r#"addEventListener("load""#);
+        if on_load && !code.contains("htmx:load") {
+            found.push(path.display().to_string());
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "these bind on DOMContentLoaded/load only, so a boosted link leaves the next page dead: \
+         delegate on document, or also start on htmx:load: {found:?}"
+    );
+}

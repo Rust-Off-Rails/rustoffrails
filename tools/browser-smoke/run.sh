@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # Optional real-browser smoke for the kernel UIs (/dev, /dev/mailbox, /admin/jobs), for when the
 # chrome-devtools MCP can't attach (profile lock) or in a script. Needs Node + an installed Chrome
 # on the dev machine only: puppeteer-core and axe-core go to a cache dir, nothing is added to the
@@ -11,8 +11,14 @@
 #   SCENARIO=tests/e2e/live-tabs.scenario.mjs BASE=https://localhost:3000 TABS=12 \
 #     bash .offrails/tools/browser-smoke/run.sh live-tabs                                 # N tabs, one change
 #   CHROME=/usr/bin/google-chrome BASE=… bash .offrails/tools/browser-smoke/run.sh   # Linux
-set -euo pipefail
+#   BASE=… sh .offrails/tools/browser-smoke/run.sh boosted   # every page after a boosted link (from the
+#                                                       app root; no install: Node >= 18 + Chrome)
+set -eu
 here="$(cd "$(dirname "$0")" && pwd)"
+# The boosted smoke has no dependencies: run it in place (it reads docs/routes.md from here).
+if [ "${1:-}" = boosted ]; then
+  exec node "$here/smoke-boosted.mjs"
+fi
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/offrails/browser-smoke"
 version="25.13.0"      # puppeteer-core, verified 2026-10-12
 axe_version="4.13.0"   # axe-core, verified 2026-10-13
@@ -34,7 +40,7 @@ case "${1:-dev-tools}" in
   live-tabs) script=smoke-live-tabs.mjs ;;
   login) script=smoke-login.mjs ;;
   a11y) script=smoke-a11y.mjs ;;
-  *) echo "unknown smoke '$1' (dev-tools | live-tabs | login | a11y)" >&2; exit 2 ;;
+  *) echo "unknown smoke '$1' (dev-tools | live-tabs | login | a11y | boosted)" >&2; exit 2 ;;
 esac
 cp "$here/lib.mjs" "$here/$script" "$cache/"
 exec node "$cache/$script"

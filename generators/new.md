@@ -147,7 +147,7 @@ Shared files carry one-line comments where a part inserts its wiring: `// sample
 | `src/views/mod.rs`, `src/models/mod.rs`, `src/tasks/mod.rs` | `view mods`, `ctx fields` (end of `Ctx`); `model mods`, `model aliases`; `task mods`, `tasks` (in the task `match`) |
 | `src/main.rs` | `cli commands` (end of the `Command` enum), `cli dispatch` (the first line in the `match`: rustfmt pulls a comment after a last arm ending in `}` onto that brace), `serve start` (in `serve`, after state is built), `serve stop` (in the shutdown future), `tracing layers` (the layer list in `init_tracing`) |
 | `migration/src/lib.rs` | `migration mods`, `migrations` (end of the `vec![…]`, after the last `Box::new`) |
-| `templates/layouts/application.html`, `templates/shared/_nav.html` | `dev footer links`; `nav links` |
+| `templates/layouts/application.html`, `templates/shared/_nav.html` | `app head` (in `<head>`, after `app.js`: a part's scripts and stylesheets, loaded on every page because boosted links run nothing in a page's head block), `dev footer links`; `nav links` |
 | `templates/kernel/layout.html` | `kernel head` (last line inside `<head>`), `kernel main` (first line inside `<main>`, before the content block) |
 | `tests/app/main.rs`, `support.rs`, `factories.rs` | `test mods`; `test support` (end of `impl TestApp`); `factories` |
 | `tests/app/security_test.rs`, `kernel_web_test.rs`, `theme_switch_test.rs` | `router sources`; `no-store paths`; `kernel pages` |

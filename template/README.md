@@ -96,7 +96,7 @@ cargo run -- serve                                          # one terminal (no a
 bin\tailwindcss.exe -i assets/app.css -o static/app.css --watch   # another
 ```
 
-Known gaps on Windows: `bin/setup`, `bin/dev` and `bin/dev-cert` (sh), `sh .offrails/tools/offrails-check` (sh: run it in Git Bash), `tools/ci/memory-budget.sh` (uses `ps`), and the browser smokes. Postgres is proven on Linux.
+Known gaps on Windows: `bin/setup`, `bin/dev` and `bin/dev-cert` (sh), `sh .offrails/tools/offrails-check` (sh: run it in Git Bash), `tools/ci/memory-budget.sh` (uses `ps`), and the puppeteer browser smokes (`run.sh`; `smoke-boosted.mjs` is plain Node and finds Chrome or Edge under `Program Files`). Postgres is proven on Linux.
 
 ## Keeping the template, the parts and the guides in sync
 

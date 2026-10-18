@@ -27,6 +27,9 @@
   <script src="{{ ctx.assets.htmx }}" defer></script>
   <script src="{{ ctx.assets.app_js }}" defer></script>
   {% if ctx.dev %}<script src="{{ ctx.assets.dev_reload_js }}" defer></script>{% endif %}
+  {# A part's scripts and stylesheets for app pages load here, on every page, never in a page's
+     head block: a boosted link swaps only <body>, so a script a page adds to <head> never runs. #}
+  {# samples: app head #}
   {% block head %}{% endblock %}
 </head>
 <body hx-boost="true" class="min-h-screen bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100 antialiased">

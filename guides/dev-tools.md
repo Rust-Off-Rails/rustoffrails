@@ -500,6 +500,12 @@ HTTP tests can't see boosted navigation, `<head>` swaps, the back/forward cache 
    SCENARIO=tests/e2e/smoke.scenario.mjs BASE=… bash .offrails/tools/browser-smoke/run.sh a11y
    ```
 
+6. **Every page after a boosted link** (every htmx app): each GET page in `docs/routes.md` on a full load, then reached through a boosted link from `/`; the same buttons must react, with no console errors, and no page may load its own scripts in `<head>`. Signed out, then signed in as the demo account. No npm install (Node ≥ 18 and the installed Chrome); `verify --full` runs it when `BASE` is set ([testing](testing.md#browser-smoke-boosted-navigation)):
+
+   ```sh
+   BASE=<the URL bin/dev printed> node .offrails/tools/browser-smoke/smoke-boosted.mjs   # from the app root
+   ```
+
 **Every smoke launches Chrome without certificate overrides** and starts with a preflight: an untrusted HTTPS certificate fails it with the explanation above, before any check runs. Verified in the reference app: against a forced self-signed certificate (`DEV_CERT_SELF_SIGNED=1`) `login` and `live-tabs` fail at the preflight; against the plain-HTTP fallback and against a trusted certificate both pass, and `live-tabs` reaches 12/12 tabs over h2.
 
 **Why it lives in `.offrails/tools/` and not in the app:** htmx-mode apps have no Node toolchain or `package.json`, and this check isn't part of the Definition of Done or CI. So `run.sh` installs `puppeteer-core` (pinned, verified 2026-10-12: 25.13.0, which needs **Node ≥ 22.12**; Node 24 LTS recommended) and `axe-core` (4.13.0) once into `~/.cache/offrails/browser-smoke` and runs a copy of the script from there. The app's dependency tree, lockfiles and stack rules are untouched, and inertia/spa apps use the same script. It's optional tooling for agents and humans; the guaranteed checks remain the Rust tests above. Verified against the bookshelf app: 11/11 checks pass. Removing `hx-boost="false"` from the dev link, or omitting `includeIndicatorStyles:false`, makes it fail.
