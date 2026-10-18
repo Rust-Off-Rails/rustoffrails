@@ -564,6 +564,18 @@ async fn connect(path: &Path, writable: bool) -> anyhow::Result<DatabaseConnecti
         .min_connections(1)
         .sqlx_logging(false);
     let db = Database::connect(opts).await?;
+    // WHY close on failure: dropping the pool closes its connection later, in the background;
+    // until then Windows refuses to move the file aside (os error 32).
+    if let Err(e) = check_and_migrate(&db, writable).await {
+        let _ = db.close().await;
+        return Err(e);
+    }
+    restrict(path);
+    Ok(db)
+}
+
+/// The file is SQLite, undamaged, with this dashboard's layout (created when writable).
+async fn check_and_migrate(db: &DatabaseConnection, writable: bool) -> anyhow::Result<()> {
     let stmt = |sql: &str| Statement::from_string(DbBackend::Sqlite, sql.to_owned());
     // WHY a small page cache: reads are a few chunks at a time, writes append; SQLite's default
     // (2 MB) would be most of what the history saves in memory.
@@ -611,8 +623,7 @@ async fn connect(path: &Path, writable: bool) -> anyhow::Result<DatabaseConnecti
             version.as_deref().unwrap_or("none")
         );
     }
-    restrict(path);
-    Ok(db)
+    Ok(())
 }
 
 struct Store {
