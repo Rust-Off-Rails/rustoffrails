@@ -4,7 +4,9 @@
     a theme for this view; the kit's source is templates/components/ui.html. -#}
 {% block body %}
 <div class="wide-nav">{% include "shared/_nav.html" %}</div>
-<main id="main" class="mx-auto max-w-6xl px-4 py-8">
+{#- w-full: in an app whose <body> is a flex column (a sticky footer), mx-auto alone shrinks main to
+    its content, and the table's min-content then makes the page scroll sideways at 390 px. -#}
+<main id="main" class="mx-auto w-full max-w-6xl px-4 py-8">
   {% include "shared/_notices.html" %}
   {% call ui::breadcrumbs([("Home", "/"), ("Components", "")]) %}{% endcall %}
   {% call ui::page_header("Components", "templates/components/ui.html: one import, a few words per component. Light and dark, in the brand from brand.toml.") %}

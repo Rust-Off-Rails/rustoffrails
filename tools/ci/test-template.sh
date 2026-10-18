@@ -213,6 +213,10 @@ TEST
 // The a11y smoke's pages (test-template.sh prove).
 export const a11yPaths = ["/", "/dev/components"];
 SCENARIO
+  # A sticky-footer layout, as apps often make it (<body> a flex column, <main> grows): pages that
+  # replace the body block (/dev/components, /dev/layouts/*) must not scroll sideways in it at 390 px.
+  perl -pi -e 's/<body hx-boost="true" class="min-h-screen /<body hx-boost="true" class="flex min-h-screen flex-col /; s/<main id="main" class="mx-auto max-w-3xl /<main id="main" class="mx-auto w-full max-w-3xl flex-1 /' templates/layouts/application.html
+  grep -q 'class="flex min-h-screen flex-col ' templates/layouts/application.html && grep -q 'w-full max-w-3xl flex-1' templates/layouts/application.html || { echo "proof_fixture: the layout edit did not apply" >&2; return 1; }
   krate=$(awk -F'"' '/^name = /{ print $2; exit }' Cargo.toml)
   perl -pi -e "s/APP_CRATE/$krate/g" tests/app/proof_fixture_test.rs
   printf 'mod proof_fixture_test;\n' >> tests/app/main.rs
@@ -287,6 +291,10 @@ prove_app() {
   # shellcheck disable=SC2016 # literal backticks
   grep -q 'AC-home-1.*the_home_page_shows_the_app_name.*SQLite: passed.*`/` ok' "$proof" || { echo "AC-home-1 is not traced to its passing test and page" >&2; cat "$proof"; return 1; }
   grep -q 'screens/dev-components--mobile-dark.png' "$proof" || return 1
+  # The gallery and the layout pages were checked at 390 px (in the sticky-footer layout) and passed.
+  for p in /dev/components /dev/layouts/sidebar /dev/layouts/marketing /dev/layouts/auth /dev/layouts/docs; do
+    grep -q "^| \`$p\` | [^|]* | ok | " "$proof" || { echo "PROOF.md: $p is not ok" >&2; grep -F "$p" "$proof" >&2; return 1; }
+  done
   grep -q '| no |' "$proof" || { echo "the second run compared nothing with the first" >&2; return 1; }
   git check-ignore -q docs/proof/screens/home--desktop-light.png || { echo "screenshots are not git-ignored" >&2; return 1; }
   cp "$proof" "$work/$name/PROOF-$port.md"
