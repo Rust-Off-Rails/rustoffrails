@@ -89,7 +89,8 @@ mod tests {
         }
         .render()
         .unwrap();
-        assert!(per.contains("href=\"/notes?per=10&amp;page=2\""), "{per}");
+        // Askama escapes the `&` in an attribute as `&#38;` (the browser reads it as `&`).
+        assert!(per.contains("href=\"/notes?per=10&#38;page=2\""), "{per}");
         let none = Probe {
             pager: PageLinks::new("/notes", Page::new(1, 25), false),
         }
