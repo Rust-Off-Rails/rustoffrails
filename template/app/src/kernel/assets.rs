@@ -19,6 +19,8 @@ pub struct Assets {
     pub htmx: String,
     pub htmx_sse: String,
     pub app_js: String,
+    /// The component kit's behaviors (templates/components/ui.html).
+    pub components_js: String,
     pub admin_css: String,
     pub admin_js: String,
     pub dev_reload_js: String,
@@ -34,6 +36,7 @@ pub const ASSET_KEYS: &[&str] = &[
     "vendor/htmx-2.",
     "vendor/htmx-ext-sse-",
     "app.js",
+    "components.js",
     "kernel/admin.css",
     "kernel/admin.js",
     "dev-reload.js",
@@ -80,11 +83,12 @@ impl AssetCatalog {
             htmx: p(1),
             htmx_sse: p(2),
             app_js: p(3),
-            admin_css: p(4),
-            admin_js: p(5),
-            dev_reload_js: p(6),
-            favicon_svg: p(7),
-            apple_touch_icon: p(8),
+            components_js: p(4),
+            admin_css: p(5),
+            admin_js: p(6),
+            dev_reload_js: p(7),
+            favicon_svg: p(8),
+            apple_touch_icon: p(9),
         }
     }
 

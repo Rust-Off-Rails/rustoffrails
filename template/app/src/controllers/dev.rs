@@ -10,7 +10,7 @@ use chrono::Utc;
 use serde::Deserialize;
 
 use crate::config::Config;
-use crate::controllers::migrations;
+use crate::controllers::{gallery, migrations};
 use crate::error::AppError;
 use crate::kernel::flash::RequestFlash;
 use crate::kernel::theme::ThemeSwitch;
@@ -29,6 +29,16 @@ pub fn router() -> Router<AppState> {
         .route("/dev/introspect.json", get(introspect))
         .route("/dev/reload", get(reload))
         .route("/dev/migrations", post(migrations::run))
+        // The component gallery and the layout demos (views.md#components).
+        .route("/dev/components", get(gallery::index).post(gallery::submit))
+        .route("/dev/components/modal", get(gallery::modal))
+        .route("/dev/layouts/sidebar", get(gallery::sidebar))
+        .route("/dev/layouts/marketing", get(gallery::marketing))
+        .route(
+            "/dev/layouts/auth",
+            get(gallery::auth).post(gallery::auth_submit),
+        )
+        .route("/dev/layouts/docs", get(gallery::docs))
         // samples: dev routes
         .layer(ui::no_store())
 }
@@ -81,6 +91,12 @@ async fn index(
     let pending = migrations::pending(&state.db).await?.len();
     let tiles = vec![
         // samples: dev tiles
+        Tile {
+            title: "Components",
+            href: "/dev/components",
+            description: "Every component and layout, light and dark: the brand at a glance.",
+            figure: "brand.toml".to_owned(),
+        },
         Tile {
             title: "Routes",
             href: "/dev/routes",

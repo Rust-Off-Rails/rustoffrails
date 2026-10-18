@@ -36,6 +36,8 @@ cargo offrails parts                          # parts: installed or available, w
 cargo offrails add <name>… [--dry-run]        # add parts (dependencies first); re-running is a no-op (alias add-part)
 cargo offrails update-part <name>… --framework <newer> [--dry-run]   # 3-way merge of a newer part, conflicts marked
 cargo offrails verify [--fast|--full]         # the Definition of Done in parallel
+cargo offrails brand [--check]                # brand.toml → theme CSS, src/brand.rs, favicon set, social card (WCAG AA checked)
+BASE=… cargo offrails prove [--strict]        # screenshots + checks of every page → docs/proof/PROOF.md (the app must be running)
 ```
 
 Verified (reference app): `Migrator::up(&db, None)`, `Migrator::down(&db, Some(steps))`, `Migrator::fresh(&db)` and `Migrator::get_migration_with_status(&db)` from `sea-orm-migration` 2.0.4. `main` parses the CLI, loads `Config::from_env()`, initializes tracing, then connects. `routes` and `db console` run before connecting.

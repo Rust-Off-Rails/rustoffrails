@@ -17,41 +17,93 @@ const GRAYS: &[&str] = &["slate", "gray", "zinc", "neutral", "stone"];
 fn templates_pair_every_light_tone_with_a_dark_partner() {
     let mut problems = Vec::new();
     for (at, tokens) in class_lists(true) {
-        let fixed_surface = tokens.iter().any(|t| is_fixed_surface(t))
-            && !tokens.iter().any(|t| t.starts_with("dark:bg-"));
-        for token in &tokens {
-            let (variants, utility) = split_variants(token);
-            if variants.contains("dark:") {
-                continue;
-            }
-            let has = |what: &str| {
-                let partner = format!("dark:{variants}{what}");
-                tokens.iter().any(|t| t.starts_with(&partner))
-            };
-            if is_light_surface(utility) && !has("bg-") {
-                problems.push(format!(
-                    "{at}: `{token}` needs a `dark:{variants}bg-*` partner (rule a: a light surface stays light while the body turns dark)"
-                ));
-            }
-            if fixed_surface {
-                continue; // its own mid/dark background in both schemes: text on it doesn't flip
-            }
-            if is_dark_text(utility) && !has("text-") {
-                problems.push(format!(
-                    "{at}: `{token}` needs a `dark:{variants}text-*` partner (rule b: dark text on a surface that turns dark)"
-                ));
-            } else if is_faint_text(utility) && !has("text-") {
-                problems.push(format!(
-                    "{at}: `{token}` needs a `dark:{variants}text-*` partner (rule c: a faint tone fails contrast on a dark surface)"
-                ));
-            }
-        }
+        problems.extend(dark_partner_problems(&at, &tokens));
     }
     assert!(
         problems.is_empty(),
         "colors that break one scheme (palette: .offrails/guides/views.md#dark-mode):\n{}",
         problems.join("\n")
     );
+}
+
+/// The same rules on rendered pages: every class list the component macros produce, in every
+/// state the gallery and the layout demos show (macro arguments pick classes the template source
+/// only holds as branches).
+#[tokio::test]
+async fn the_component_gallery_and_layouts_render_every_tone_with_its_dark_partner() {
+    let app = crate::support::TestApp::with_config(offrails_app::config::Config {
+        env: offrails_app::config::AppEnv::Development,
+        ..offrails_app::config::Config::test()
+    })
+    .await;
+    let css = std::fs::read_to_string(CSS_BUILT).ok();
+    let mut problems = Vec::new();
+    for path in [
+        "/dev/components",
+        "/dev/components?theme=dark&sort=year&dir=desc&page=5",
+        "/dev/components/modal",
+        "/dev/layouts/sidebar",
+        "/dev/layouts/marketing",
+        "/dev/layouts/auth",
+        "/dev/layouts/docs",
+    ] {
+        let page = app.get(path).await;
+        page.assert_ok();
+        for (n, list) in page.body.split("class=\"").skip(1).enumerate() {
+            let tokens: Vec<String> = list
+                .split('"')
+                .next()
+                .unwrap_or_default()
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect();
+            let at = format!("{path} class list {n}");
+            problems.extend(dark_partner_problems(&at, &tokens));
+            if let Some(css) = &css {
+                for t in &tokens {
+                    if !has_selector(css, t) && !["errors"].contains(&t.as_str()) {
+                        problems.push(format!("{at}: `{t}` has no rule in {CSS_BUILT}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// One class list against the three rules.
+fn dark_partner_problems(at: &str, tokens: &[String]) -> Vec<String> {
+    let mut problems = Vec::new();
+    let fixed_surface = tokens.iter().any(|t| is_fixed_surface(t))
+        && !tokens.iter().any(|t| t.starts_with("dark:bg-"));
+    for token in tokens {
+        let (variants, utility) = split_variants(token);
+        if variants.contains("dark:") {
+            continue;
+        }
+        let has = |what: &str| {
+            let partner = format!("dark:{variants}{what}");
+            tokens.iter().any(|t| t.starts_with(&partner))
+        };
+        if is_light_surface(utility) && !has("bg-") {
+            problems.push(format!(
+                "{at}: `{token}` needs a `dark:{variants}bg-*` partner (rule a: a light surface stays light while the body turns dark)"
+            ));
+        }
+        if fixed_surface {
+            continue; // its own mid/dark background in both schemes: text on it doesn't flip
+        }
+        if is_dark_text(utility) && !has("text-") {
+            problems.push(format!(
+                "{at}: `{token}` needs a `dark:{variants}text-*` partner (rule b: dark text on a surface that turns dark)"
+            ));
+        } else if is_faint_text(utility) && !has("text-") {
+            problems.push(format!(
+                "{at}: `{token}` needs a `dark:{variants}text-*` partner (rule c: a faint tone fails contrast on a dark surface)"
+            ));
+        }
+    }
+    problems
 }
 
 #[test]

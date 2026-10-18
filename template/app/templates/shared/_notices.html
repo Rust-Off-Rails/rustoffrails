@@ -1,0 +1,3 @@
+{#- First in every layout's <main>: the development CSS banner, then the flash. -#}
+{% if let Some(problem) = ctx.css_warning %}<p role="alert">{{ problem }}</p>{% endif %}
+{% include "shared/_flash.html" %}

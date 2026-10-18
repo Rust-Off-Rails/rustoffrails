@@ -23,6 +23,11 @@
 #                part, in dependency order (resource twice: as notes and --as article), the gates on
 #                both databases, re-adding each (a no-op), then `snippet remove` of all of it in
 #                reverse: the app must be byte-for-byte what it was
+#   prove        `cargo offrails prove` on the bare app and the app with every part, each served in
+#                development with a fixture feature whose acceptance criteria cite request tests:
+#                PROOF.md says PROVEN, has every screenshot and maps each criterion to its passing
+#                tests and pages; a second run diffs against the first; the component smoke passes
+#                (both skipped, and said so, without Node or Chrome)
 #   update-part  a synthetic newer part (a changed file and a changed wire) merged into an app: a
 #                clean merge with an app edit elsewhere, then a conflict with an app edit on the
 #                same line (markers, exit 1, nothing else touched)
@@ -39,12 +44,12 @@ targets=""
 for arg in "$@"; do
   case "$arg" in
     --no-postgres) postgres=0 ;;
-    -h | --help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "test-template: unknown option $arg" >&2; exit 2 ;;
     *) targets="$targets $arg" ;;
   esac
 done
-[ -n "$targets" ] || targets="gen bare all incremental generators snippets update-part"
+[ -n "$targets" ] || targets="gen bare all incremental generators snippets prove update-part"
 if [ "$postgres" = 1 ] && [ -z "${TEST_DATABASE_URL:-}" ]; then
   echo "test-template: TEST_DATABASE_URL is not set (--no-postgres skips the Postgres runs)" >&2
   exit 2
@@ -160,6 +165,114 @@ gates() {
   fi
 }
 
+# A feature whose criteria cite tests, so PROOF.md has something to trace (prove target).
+proof_fixture() {
+  mkdir -p product/features
+  cat > product/features/home.md <<'SPEC'
+# Feature: home
+
+## Acceptance criteria
+
+- [x] AC-home-1: The home page shows the app's name (`/`)
+- [x] AC-home-2: The component gallery renders every component in development
+
+## Security (agent-written threat model)
+
+| STRIDE | Threat | Control | Test |
+|--------|--------|---------|------|
+| Spoofing | n/a: no accounts on these pages | — | — |
+| Tampering | n/a: read-only pages | — | — |
+| Repudiation | n/a: nothing to trace | — | — |
+| Information disclosure | the gallery in production | mounted in development only | `the_gallery_exists_in_development_only` |
+| Denial of service | n/a: static pages | — | — |
+| Elevation of privilege | n/a: no roles | — | — |
+SPEC
+  cat > tests/app/proof_fixture_test.rs <<'TEST'
+use crate::support::TestApp;
+
+/// AC-home-1
+#[tokio::test]
+async fn the_home_page_shows_the_app_name() {
+    TestApp::new().await.get("/").await.assert_ok();
+}
+
+/// AC-home-2
+#[tokio::test]
+async fn the_gallery_renders_in_development() {
+    let app = TestApp::with_config(APP_CRATE::config::Config {
+        env: APP_CRATE::config::AppEnv::Development,
+        ..APP_CRATE::config::Config::test()
+    })
+    .await;
+    app.get(&APP_CRATE::routes::paths::dev_components()).await.assert_ok();
+}
+TEST
+  krate=$(awk -F'"' '/^name = /{ print $2; exit }' Cargo.toml)
+  perl -pi -e "s/APP_CRATE/$krate/g" tests/app/proof_fixture_test.rs
+  printf 'mod proof_fixture_test;\n' >> tests/app/main.rs
+  cargo fmt --all
+}
+
+# prove_app <port>: serve the app in development (the demo account when auth is in), run the
+# component smoke and `cargo offrails prove` twice, check PROOF.md, stop the server by its PID.
+prove_app() {
+  port=$1
+  db="sqlite://storage/prove.sqlite3?mode=rwc"
+  log="target/prove-server.log"
+  APP_ENV=development PORT=$port DATABASE_URL=$db cargo run -q -- db migrate >"$log" 2>&1 || { tail -20 "$log"; return 1; }
+  if grep -q '"auth_demo"' src/tasks/mod.rs 2>/dev/null; then
+    APP_ENV=development PORT=$port DATABASE_URL=$db cargo run -q -- task auth_demo >>"$log" 2>&1 || { tail -20 "$log"; return 1; }
+  fi
+  APP_ENV=development PORT=$port DATABASE_URL=$db cargo run -q -- serve >>"$log" 2>&1 &
+  server=$!
+  up=0
+  i=0
+  while [ "$i" -lt 180 ]; do
+    if curl -fsS "http://localhost:$port/up" >/dev/null 2>&1; then up=1; break; fi
+    kill -0 "$server" 2>/dev/null || break
+    sleep 1
+    i=$((i + 1))
+  done
+  status=0
+  if [ "$up" != 1 ]; then
+    echo "the app did not answer /up on port $port:" >&2
+    tail -20 "$log" >&2
+    status=1
+  fi
+  base="http://localhost:$port"
+  if [ "$status" = 0 ]; then
+    BASE=$base node .offrails/tools/browser-smoke/smoke-components.mjs || status=$?
+  fi
+  if [ "$status" = 0 ]; then
+    t0=$(date +%s)
+    BASE=$base cargo offrails prove || status=$?
+    t1=$(date +%s)
+  fi
+  if [ "$status" = 0 ]; then
+    BASE=$base cargo offrails prove > target/prove-second.log 2>&1 || status=$?
+    t2=$(date +%s)
+    tail -3 target/prove-second.log
+    echo "prove timings: first run $((t1 - t0)) s, second run $((t2 - t1)) s" | tee "$work/$name/prove-timings-$port.txt"
+  fi
+  kill "$server" 2>/dev/null
+  wait "$server" 2>/dev/null
+  if [ "$status" = 77 ]; then
+    echo "skip: no Chrome or Node" > "$work/$name/browser-smoke-skipped"
+    return 0
+  fi
+  [ "$status" = 0 ] || return "$status"
+  proof=docs/proof/PROOF.md
+  grep -q '^\*\*Result: PROVEN\.\*\*' "$proof" || { cat "$proof"; return 1; }
+  pages=$(grep -c '^| `/' "$proof")
+  shots=$(find docs/proof/screens -name '*.png' | wc -l | tr -d ' ')
+  [ "$shots" -eq $((pages * 4)) ] || { echo "PROOF.md lists $pages pages but there are $shots screenshots" >&2; return 1; }
+  grep -q 'AC-home-1.*the_home_page_shows_the_app_name.*SQLite: passed.*`/` ok' "$proof" || { echo "AC-home-1 is not traced to its passing test and page" >&2; cat "$proof"; return 1; }
+  grep -q 'screens/dev-components--mobile-dark.png' "$proof" || return 1
+  grep -q '| no |' "$proof" || { echo "the second run compared nothing with the first" >&2; return 1; }
+  git check-ignore -q docs/proof/screens/home--desktop-light.png || { echo "screenshots are not git-ignored" >&2; return 1; }
+  cp "$proof" "$work/$name/PROOF-$port.md"
+}
+
 commit_all() {
   # shellcheck disable=SC2016 # $0 is the inner shell's
   step "commit: $1" sh -c 'git add -A && git -c user.name=ci -c user.email=ci@example.invalid commit -qm "$0" --allow-empty' "$1"
@@ -242,6 +355,13 @@ snippets_round() {
 fresh() {
   app="$work/$name/$1"
   rm -rf "${work:?}/${name:?}"
+  mkdir -p "$work/$name"
+}
+
+# fresh without clearing the target's other apps (a target that builds two).
+fresh_keep() {
+  app="$work/$name/$1"
+  rm -rf "${work:?}/${name:?}/${1:?}"
   mkdir -p "$work/$name"
 }
 
@@ -336,6 +456,32 @@ GENS
       done
       snippets_round snip_bare || return 1
       snippets_round snip_all --parts all || return 1
+      ;;
+    prove)
+      if command -v node >/dev/null 2>&1; then
+        app="$root"
+        step "prove's pixel diff (selftest)" node tools/browser-smoke/selftest-prove.mjs || return 1
+      fi
+      for kind in bare all; do
+        if [ "$kind" = bare ]; then
+          fresh_keep prove_bare
+          (cd "$work/$name" && gen new prove_bare prove_bare "Prove Bare") || return 1
+          port=3913
+        else
+          fresh_keep prove_all
+          (cd "$work/$name" && gen new prove_all prove_all "Prove All" --parts all) || return 1
+          port=3914
+        fi
+        step "fixture feature" proof_fixture || return 1
+        step "tailwind" sh -c 'bin/setup-tailwind >/dev/null' || return 1
+        step "verify (the suites PROOF.md reports)" verify || return 1
+        step "offrails-check" sh .offrails/tools/offrails-check || return 1
+        if command -v node >/dev/null 2>&1; then
+          step "prove (screenshots, checks, PROOF.md; twice)" prove_app "$port" || return 1
+        else
+          echo "skip: no Node" > "$work/$name/browser-smoke-skipped"
+        fi
+      done
       ;;
     update-part)
       fresh up_app

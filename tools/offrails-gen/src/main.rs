@@ -8,6 +8,8 @@
 //!   cargo offrails add mailer [more parts…] [--dry-run] [--force] [--offline] [--no-fmt]   (alias: add-part)
 //!   cargo offrails update-part <part>… [--dry-run]   3-way merge of a newer part into the app
 //!   cargo offrails verify [--fast|--full]      the Definition of Done, in parallel
+//!   cargo offrails brand [--check]             brand.toml → theme CSS, favicon set, social card
+//!   cargo offrails prove [--strict]            screenshots + checks of every page → docs/proof/PROOF.md
 //!
 //! Before the app exists, from the framework (`$FW`: the plugin root, ~/.offrails/current or a checkout):
 //!   cargo run -q --manifest-path "$FW/tools/offrails-gen/Cargo.toml" --target-dir <dir>/target/offrails-gen -- \
@@ -15,10 +17,12 @@
 //!
 //! Exit status: 0 done, 1 refused or failed (nothing half-applied), 2 usage.
 
+mod brand;
 mod generate;
 mod merge;
 mod newapp;
 mod parts;
+mod prove;
 mod update_part;
 mod util;
 mod verify;
@@ -48,6 +52,12 @@ const USAGE: &str = "usage:
   offrails-gen vendor --framework <newer framework> [--app <dir>]   re-copy a framework into <app>/.offrails/
   offrails-gen verify [--fast|--full] [--no-postgres] [--test-threads <n>] [--app <dir>]
                    the Definition of Done in parallel: --fast while iterating, --full once at the end
+  offrails-gen brand [--check] [--no-images] [--init] [--app <dir>]
+                   brand.toml → assets/brand.css (theme, light + dark, WCAG AA checked), src/brand.rs,
+                   the favicon set and the social card; --check: fail if they are stale
+  offrails-gen prove [--strict] [--commit-screenshots] [--app <dir>]   (needs BASE=<the running app>)
+                   every page in docs/routes.md: screenshots (desktop + mobile, light + dark), console,
+                   CSP, axe, links, overflow, a visual diff; writes docs/proof/PROOF.md
 
 In an app: cargo offrails <command> … (the alias in .cargo/config.toml). Docs: .offrails/template/README.md";
 
@@ -416,6 +426,32 @@ fn real_main() -> Result<()> {
                     full: args.flag("--full"),
                     postgres: !args.flag("--no-postgres"),
                     test_threads,
+                },
+            )
+        }
+        "brand" => {
+            args.reject_unknown(&["--app", "--check", "--no-images", "--init"])?;
+            let app = args.app()?;
+            brand::run(
+                &app,
+                &brand::Options {
+                    check: args.flag("--check"),
+                    images: !args.flag("--no-images"),
+                    init: args.flag("--init"),
+                    quiet: false,
+                },
+            )
+        }
+        "prove" => {
+            args.reject_unknown(&["--app", "--strict", "--commit-screenshots", "--framework"])?;
+            let app = args.app()?;
+            let fw = framework_for(Some(&app), &args)?;
+            prove::run(
+                &fw,
+                &app,
+                &prove::Options {
+                    strict: args.flag("--strict"),
+                    commit_screenshots: args.flag("--commit-screenshots"),
                 },
             )
         }

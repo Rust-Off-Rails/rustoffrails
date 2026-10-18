@@ -1,3 +1,4 @@
+pub mod brand;
 pub mod config;
 pub mod controllers;
 pub mod error;

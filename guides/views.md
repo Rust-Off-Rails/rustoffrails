@@ -5,6 +5,7 @@
 > - No DB calls from views; `|safe` only on helper output (ammonia); render with `.render()?` + `Html`, never `askama_axum`.
 > - Every app with pages ships meta, favicon and social cards, and dark mode via `prefers-color-scheme` (an optional cookie toggle).
 > - Askama 0.16 passes fields by reference (`*book.id` for `Copy` args) and escapes with numeric entities.
+> - **Look:** `brand.toml` + `cargo offrails brand` (colors, fonts, radius, logo, favicon set, social card; WCAG AA checked). **Layout:** `{% extends "layouts/<application|sidebar|marketing|auth|docs>.html" %}`. **Components:** `{% import "components/ui.html" as ui %}`, then the [table below](#components); see them all at `/dev/components`.
 >
 > Read the rest when writing templates, forms, layouts, helpers, meta tags, or dark mode.
 
@@ -101,6 +102,87 @@ Verified with askama 0.16.1:
 - A partial that htmx also swaps on its own gets a standalone struct (`PostPartial { post }`) with the same field names.
 - Shared partials: `templates/shared/_flash.html`, `_errors.html`, `_nav.html`, `_pagination.html`.
 
+## Brand
+
+`brand.toml` at the app root is the app's look in one file: `name`, `tagline`, `[colors]` `primary` (exactly this on buttons), `accent`, `neutral` (`gray | slate | zinc | neutral | stone`, or a hex to tint grays with), optional `on_primary`; `[fonts]` `sans`, `heading`, `mono` (CSS stacks; self-host web fonts, the CSP blocks font CDNs); `[shape]` `radius`; `[logo]` `mark` (1–2 characters, default the name's initial) or `svg` (a square SVG file) and `tile`. After editing it:
+
+```sh
+cargo offrails brand            # renders everything below; `new` runs it; --check: fail if stale (verify --full runs that)
+```
+
+| Output | What it is |
+|---|---|
+| `assets/brand.css` | Tailwind `@theme`: `primary-*`, `accent-*` (50–950, generated in OKLCH), `gray-*` (the neutral), `indigo-*` (= primary, so parts and older templates follow the brand), `on-primary`, `primary-hover`, `--font-sans/heading/mono`, `--radius-*`; semantic `--brand-*` tokens for light and dark. `assets/app.css` imports it |
+| `src/brand.rs` | `NAME` (= `config::APP_NAME`), `TAGLINE`, `PRIMARY`, `THEME_COLOR` (the theme-color meta), `brand::email::*` (the email layout's inline colors; brand points the mailer part's header at them) |
+| `static/favicon.svg`, `favicon.ico`, `apple-touch-icon.png`, `icon-512.png` | the mark on a primary tile |
+| `assets/brand/og.svg`, `static/og.png` | the 1200×630 social card |
+
+**Contrast is checked before anything is written:** every text/surface pair the components use (body, muted, links, badges, button text and its hover; light and dark) must reach WCAG AA 4.5:1, or `brand` refuses with the pair, its ratio and a color that passes. The scales are built so that the shades holding text pass on their surfaces whatever the base color (a yellow brand gets dark button text and a darkened 700). **PNGs** are rasterized with the installed Chrome/Chromium/Edge (headless) or `rsvg-convert`; with neither, the SVGs are current, the PNGs keep their old look and `brand` says so (re-run where a browser is installed). In templates, use `primary-*`/`accent-*` for brand color, `gray-*` for the neutral; never a raw hex.
+
+## Layouts
+
+`templates/layouts/application.html` is the shell every layout extends: the `<head>` (one set of scripts for every page, so [boosted links](frontend-htmx.md#boosted-navigation) keep working; parts add theirs at `samples: app head`), the skip link, the icon sprite, the overlay slots (htmx modals, the confirm dialog, toasts) and the development footer. Its `{% block body %}` is the top-nav layout; the others replace that block. A page picks one with `{% extends %}` and fills `content` (plus the blocks below). Each is responsive (no sideways scroll at 360 px), has dark mode, a skip link to `<main id="main">` and landmarks; see each at `/dev/layouts/<name>`.
+
+| Layout | `{% extends … %}` | For | Blocks besides `content` |
+|---|---|---|---|
+| Top nav (default) | `layouts/application.html` | most pages | `head` (avoid: boosted links never run it) |
+| Sidebar | `layouts/sidebar.html` | dashboards, admin, many sections; folds behind **Menu** on a phone | `sidebar` (links, `.nav-link` + `aria-current="page"`; default `shared/_sidebar.html`, anchor `samples: sidebar links`) |
+| Marketing | `layouts/marketing.html` | landing and pricing pages | `hero`, `nav` (`.nav-link`s), `cta`, `footer_links` |
+| Auth card | `layouts/auth.html` | sign in, sign up, reset, confirm | `card_footer` |
+| Docs | `layouts/docs.html` | documentation, help | `toc` (`.toc-link` anchors); `content` is the article (`.prose-doc`) |
+
+## Components
+
+`templates/components/ui.html` is the kit: Askama macros that say in a few words what would otherwise be a class list, with the right markup (labels, `aria-invalid`, `aria-describedby`, `aria-current`, `aria-sort`), both themes and the brand's colors. Import it once per template and call each macro with `{% call %}…{% endcall %}` (the `endcall` is required; a body between them goes where the table says **body**). Arguments are positional or `name = value`; the ones with `=` have defaults.
+
+```html
+{% extends "layouts/application.html" %}
+{% import "components/ui.html" as ui %}
+{% block content %}
+{% call ui::page_header("Books") %}{% call ui::link_button("New book", paths::new_book(), icon = "plus") %}{% endcall %}{% endcall %}
+<form method="post" action="{{ paths::books() }}">
+  {% call ui::field(errors, "title", "Title", params.title, required = true) %}{% endcall %}
+  {% call ui::select(errors, "status", "Status", statuses, params.status) %}{% endcall %}
+  {% call ui::form_actions("Save", paths::books()) %}{% endcall %}
+</form>
+{% endblock %}
+```
+
+| Macro | Arguments (defaults) | Notes |
+|---|---|---|
+| `button` | `label, variant="primary", size="md", type="submit", name="", value="", confirm="", icon="", disabled=false` | variant `primary\|secondary\|danger\|ghost`; size `sm\|md\|lg`; `confirm` asks in the confirm dialog |
+| `link_button` | `label, href, variant="primary", size="md", icon=""` | navigation only; changes are POST forms |
+| `icon_button` | `icon, label, variant="ghost", toggle="", type="button"` | `label` is the accessible name; `toggle` = id it shows/hides |
+| `confirm_button` | `label, action, message, variant="danger", size="md"` | a one-button POST form, confirmed first |
+| `icon` | `name, size="size-4"` | sprite `components/_icons.html`: x menu chevron-down/left/right check check-circle info alert x-circle plus search arrow-up/down arrows-up-down inbox home user settings book chart |
+| `field` | `errors, name, label, value="", type="text", hint="", required=false, autocomplete="", placeholder=""` | `value` = params (kept on 422; a password never is); id = name |
+| `textarea` | `errors, name, label, value="", rows=4, hint="", required=false` | |
+| `select` | `errors, name, label, options, selected="", hint="", required=false, blank=""` | `options`: (value, label) pairs; `blank`: an empty first option |
+| `checkbox` | `errors, name, label, checked=false, value="true", hint=""` | |
+| `radios` | `errors, name, label, options, selected="", hint=""` | a fieldset with a legend |
+| `form_actions` | `submit="Save", cancel_href="", cancel="Cancel"` | **body**: more buttons |
+| `alert` | `tone="info", title="", dismissible=false` | tone `info\|success\|warning\|danger`; **body**: the message |
+| `flash` | `flash` | `ctx.flash` as a dismissible alert |
+| `toast` / `toast_oob` | `message, tone="success", timeout=6000` | `toast_oob` from an htmx response lands in the layout's `#toasts`; `timeout=0` stays |
+| `card` | `title="", subtitle=""` | **body**: the card's content |
+| `badge` | `label, tone="neutral"` | tone `neutral\|primary\|accent\|success\|warning\|danger` |
+| `stat` | `label, value, delta="", trend=""` | trend `up\|down` colors the delta |
+| `table` | `caption, columns, empty=false, empty_message="Nothing here yet.", sort="", dir="asc", base="?"` | `columns`: (key, label), a key makes a sort link `{base}sort=key&dir=…`; **body**: the `<tr>` rows |
+| `pagination` | `page, pages, base="?"` | any integer types; links `{base}page=n`, gaps as … |
+| `empty_state` | `title, message="", action_label="", action_href="", icon="inbox"` | |
+| `avatar` | `name, src="", size="md"` | initials without `src`; size `sm\|md\|lg` |
+| `breadcrumbs` | `items` | (label, href) pairs, the last is the current page |
+| `page_header` | `title, subtitle=""` | **body**: the actions |
+| `nav_tabs` | `items, current, label="Sections"` | links: (label, href); `current` is an href |
+| `tabs` / `tab_panel` | `id, items, selected, label="Sections"` / `id, key, selected` | client-side; items (key, label); **body** of `tabs`: one `tab_panel` per key |
+| `dropdown` / `menu_item` | `label, variant="secondary", size="md"` / `label, href` | `<details>` menu; **body**: `menu_item`s |
+| `modal` | `id, title, autoshow=false` | native `<dialog>`: inert page behind, focus kept inside, Esc closes, focus returns; **body**: content |
+| `modal_button` / `modal_link` / `modal_close` | `label, target, variant="secondary"` / `label, url, variant="secondary"` / `label="Cancel"` | open a modal on the page; load one with htmx (`url` answers `ui::modal(…, autoshow = true)`); close the current one |
+
+For anything the macros don't cover, the same look is a few class names (`assets/app.css`, light + dark built in): `.btn` `.btn-secondary` `.btn-danger` `.btn-ghost` `.btn-sm` `.btn-lg` `.btn-icon` `.link` · `.label` `.input` `.hint` `.field-error` `.check` `.choice` `.form-actions` · `.card` `.card-header` `.card-body` `.card-footer` `.muted` · `.badge(-tone)` · `.alert` `.alert-<tone>` · `.table-wrap` `.table` · `.tabs` `.tab` · `.page-link` · `.menu` `.menu-item` · `.nav-link` `.toc-link` `.prose-doc`. The behaviors live in `static/components.js` (delegated, so they survive boosted links): `data-dropdown`, `[data-tabs]`, `data-modal-open|close`, `data-confirm` (forms and submit buttons) and `hx-confirm` (both ask in `#confirm-dialog`), `data-dismiss`, `data-toast-timeout`; `data-toggle` (show/hide, `aria-expanded` kept in step) is in `app.js`.
+
+**Rules.** Build pages from the kit; a class list longer than eight utilities on a `<button>`, `<input>`, `<select>`, `<textarea>` or a button-like `<a>` in an app template is an `offrails-check` warning (`[classes]`; end a deliberate one's line with `{# offrails-check: classes ok #}`). `/dev/components` shows every component in every state (`?theme=light|dark` pins one); `theme_test` renders it and the layout demos and checks every class list for its `dark:` partner and its CSS rule, and `.offrails/tools/browser-smoke/smoke-components.mjs` drives the modals, the confirm dialog and the 422 form in a real browser.
+
 ## Forms
 
 ```html
@@ -155,13 +237,7 @@ This is verified in the Rust off Rails website (pulldown-cmark 0.13, ammonia 4).
 
 Every app with pages (`htmx`, `inertia`, `spa`) ships these **from `new`**, not later. A link pasted into Slack or iMessage shows a card, the tab shows an icon, and search engines get a title and a description. `api` mode has none of it, only `/robots.txt` with `Disallow: /` ([api](api.md)).
 
-**Brand assets**, generated once by the framework's tool and committed (needs Chrome at generation time, nothing at runtime):
-
-```sh
-bash .offrails/tools/brand/render.sh "Bookshelf" "#4f46e5" "Track the books you've read." static
-# → static/favicon.svg (the editable source), favicon.ico (48px PNG in an ICO), apple-touch-icon.png (180),
-#   icon-512.png, og.png (1200×630, from assets/brand/og.html: restyle that file and re-run)
-```
+**Brand assets** come from `brand.toml` ([Brand](#brand)), rendered by `cargo offrails brand` and committed (rasterizing needs Chrome or `rsvg-convert` at render time, nothing at runtime): `static/favicon.svg`, `favicon.ico` (48px PNG in an ICO), `apple-touch-icon.png` (180), `icon-512.png`, and `og.png` (1200×630, from `assets/brand/og.svg`). (`tools/brand/render.sh` is the 0.7.2 way for apps without a `brand.toml`.)
 
 **Meta lives in `Ctx`** (htmx; in TS modes the Rust side fills the same fields into the HTML shell):
 
@@ -195,7 +271,7 @@ Handlers set them per page: `ctx.titled(&book.title).described(&book.blurb)`. Pa
 <title>{{ ctx.page_title() }}</title>
 <meta name="description" content="{{ ctx.description }}">
 <link rel="canonical" href="{{ ctx.canonical() }}">
-<meta name="theme-color" content="#4f46e5">
+<meta name="theme-color" content="{{ crate::brand::THEME_COLOR }}">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="{{ crate::config::APP_NAME }}">
 <meta property="og:title" content="{{ ctx.page_title() }}">
@@ -262,20 +338,7 @@ The skeletons `new` generates, in this palette:
 <p class="mt-6 text-sm text-gray-600 dark:text-gray-400">Already have an account? <a href="…" class="link">Log in</a></p>
 ```
 
-The component layer in `assets/app.css` (forms and buttons; the templates use these names, and §11 checks the `@apply` lists too):
-
-```css
-@layer components {
-  .label { @apply block text-sm font-medium text-gray-700 dark:text-gray-300; }
-  .input { @apply mt-1 block w-full rounded-md bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100 border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500; }
-  .input[aria-invalid="true"] { @apply border-red-500; }
-  .field-error { @apply mt-1 text-sm text-red-700 dark:text-red-300; }
-  .btn { @apply inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-950; }
-  .btn-secondary { @apply inline-flex items-center rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500; }
-  .btn-danger { @apply inline-flex items-center rounded-md border border-red-300 dark:border-red-800 bg-white dark:bg-gray-900 px-4 py-2 text-sm font-medium text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500; }
-  .link { @apply text-indigo-700 dark:text-indigo-300 underline underline-offset-2 hover:decoration-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500; }
-}
-```
+The component layer is in `assets/app.css` (`.btn`, `.input`, `.card`, `.badge`, `.alert`, `.table`…; [Components](#components) lists them); the templates use these names, and §11 checks the `@apply` lists too. Brand color is `primary-*` (`indigo-*` is an alias of it, from `assets/brand.css`), so the palette's indigo rows below follow `brand.toml`.
 
 **Never** add a light surface without its partner "for now", and never fix a dark-mode bug by removing `color-scheme` or the body's `dark:` classes: that hides the bug for OS-dark users only until the next page. In development the layout's CSS banner (`Ctx.css_warning`) also says when `static/app.css` is missing a class a template uses ([dev-tools](dev-tools.md#introspection)).
 

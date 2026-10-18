@@ -1,0 +1,227 @@
+{% extends "layouts/application.html" %}
+{% import "components/ui.html" as ui %}
+{#- /dev/components: every component of components/ui.html in every state. ?theme=light|dark pins
+    a theme for this view; the kit's source is templates/components/ui.html. -#}
+{% block body %}
+<div class="wide-nav">{% include "shared/_nav.html" %}</div>
+<main id="main" class="mx-auto max-w-6xl px-4 py-8">
+  {% include "shared/_notices.html" %}
+  {% call ui::breadcrumbs([("Home", "/"), ("Components", "")]) %}{% endcall %}
+  {% call ui::page_header("Components", "templates/components/ui.html: one import, a few words per component. Light and dark, in the brand from brand.toml.") %}
+    {% call ui::link_button("Light", "/dev/components?theme=light", "secondary", "sm") %}{% endcall %}
+    {% call ui::link_button("Dark", "/dev/components?theme=dark", "secondary", "sm") %}{% endcall %}
+  {% endcall %}
+
+  <nav class="mb-8 flex flex-wrap gap-x-4 gap-y-1 text-sm" aria-label="Sections">
+    <a class="link" href="#brand">Brand</a><a class="link" href="#buttons">Buttons</a><a class="link" href="#feedback">Feedback</a><a class="link" href="#data">Data</a><a class="link" href="#forms">Forms</a><a class="link" href="#navigation">Navigation</a><a class="link" href="#overlays">Overlays</a><a class="link" href="#layouts">Layouts</a>
+  </nav>
+
+  <section id="brand" class="scroll-mt-8" aria-labelledby="brand-title">
+    <h2 id="brand-title" class="text-xl font-semibold">Brand</h2>
+    <p class="muted mt-1">The scales <code>cargo offrails brand</code> renders from brand.toml: <code>primary-*</code> (600 is the brand color), <code>accent-*</code>, and <code>gray-*</code> (the neutral).</p>
+    <div class="mt-4 space-y-3">
+      <div>
+        <p class="mb-1 text-xs font-medium text-gray-600 dark:text-gray-400">primary 50–950</p>
+        <div class="grid grid-cols-11 overflow-hidden rounded-md">
+          <span class="h-8 bg-primary-50 dark:bg-primary-50"></span><span class="h-8 bg-primary-100 dark:bg-primary-100"></span><span class="h-8 bg-primary-200 dark:bg-primary-200"></span><span class="h-8 bg-primary-300"></span><span class="h-8 bg-primary-400"></span><span class="h-8 bg-primary-500"></span><span class="h-8 bg-primary-600"></span><span class="h-8 bg-primary-700"></span><span class="h-8 bg-primary-800"></span><span class="h-8 bg-primary-900"></span><span class="h-8 bg-primary-950"></span>
+        </div>
+      </div>
+      <div>
+        <p class="mb-1 text-xs font-medium text-gray-600 dark:text-gray-400">accent 50–950</p>
+        <div class="grid grid-cols-11 overflow-hidden rounded-md">
+          <span class="h-8 bg-accent-50 dark:bg-accent-50"></span><span class="h-8 bg-accent-100 dark:bg-accent-100"></span><span class="h-8 bg-accent-200 dark:bg-accent-200"></span><span class="h-8 bg-accent-300"></span><span class="h-8 bg-accent-400"></span><span class="h-8 bg-accent-500"></span><span class="h-8 bg-accent-600"></span><span class="h-8 bg-accent-700"></span><span class="h-8 bg-accent-800"></span><span class="h-8 bg-accent-900"></span><span class="h-8 bg-accent-950"></span>
+        </div>
+      </div>
+      <div>
+        <p class="mb-1 text-xs font-medium text-gray-600 dark:text-gray-400">neutral (gray) 50–950</p>
+        <div class="grid grid-cols-11 overflow-hidden rounded-md border border-gray-200 dark:border-gray-800">
+          <span class="h-8 bg-gray-50 dark:bg-gray-50"></span><span class="h-8 bg-gray-100 dark:bg-gray-100"></span><span class="h-8 bg-gray-200 dark:bg-gray-200"></span><span class="h-8 bg-gray-300"></span><span class="h-8 bg-gray-400"></span><span class="h-8 bg-gray-500"></span><span class="h-8 bg-gray-600"></span><span class="h-8 bg-gray-700"></span><span class="h-8 bg-gray-800"></span><span class="h-8 bg-gray-900"></span><span class="h-8 bg-gray-950"></span>
+        </div>
+      </div>
+    </div>
+    <div class="mt-6 grid gap-4 sm:grid-cols-2">
+      {% call ui::card("Type") %}
+        <h1 class="text-3xl font-semibold tracking-tight">Heading one</h1>
+        <h2 class="mt-2 text-xl font-semibold">Heading two</h2>
+        <p class="mt-2">Body text with <a class="link" href="#brand">a link</a> and <code class="font-mono text-sm">inline code</code>.</p>
+        <p class="muted mt-2">Muted text: hints, meta, timestamps.</p>
+      {% endcall %}
+      {% call ui::card("Avatars and badges", "Initials when there is no picture") %}
+        <div class="flex flex-wrap items-center gap-3">
+          {% call ui::avatar("Ada Lovelace", "", "sm") %}{% endcall %}
+          {% call ui::avatar("Grace Hopper") %}{% endcall %}
+          {% call ui::avatar("Katherine Johnson", "", "lg") %}{% endcall %}
+          {% call ui::avatar("The app icon", "/static/icon-512.png") %}{% endcall %}
+        </div>
+        <div class="mt-4 flex flex-wrap gap-2">
+          {% call ui::badge("Neutral") %}{% endcall %}
+          {% call ui::badge("Primary", "primary") %}{% endcall %}
+          {% call ui::badge("Accent", "accent") %}{% endcall %}
+          {% call ui::badge("Success", "success") %}{% endcall %}
+          {% call ui::badge("Warning", "warning") %}{% endcall %}
+          {% call ui::badge("Danger", "danger") %}{% endcall %}
+        </div>
+      {% endcall %}
+    </div>
+  </section>
+
+  <section id="buttons" class="mt-12 scroll-mt-8" aria-labelledby="buttons-title">
+    <h2 id="buttons-title" class="text-xl font-semibold">Buttons</h2>
+    <div class="mt-4 space-y-4">
+      <div class="flex flex-wrap items-center gap-3">
+        {% call ui::button("Primary", "primary", "md", "button") %}{% endcall %}
+        {% call ui::button("Secondary", "secondary", "md", "button") %}{% endcall %}
+        {% call ui::button("Danger", "danger", "md", "button") %}{% endcall %}
+        {% call ui::button("Ghost", "ghost", "md", "button") %}{% endcall %}
+        {% call ui::button("Disabled", "primary", "md", "button", disabled = true) %}{% endcall %}
+      </div>
+      <div class="flex flex-wrap items-center gap-3">
+        {% call ui::button("Small", "primary", "sm", "button") %}{% endcall %}
+        {% call ui::button("Medium", "secondary", "md", "button") %}{% endcall %}
+        {% call ui::button("Large", "primary", "lg", "button") %}{% endcall %}
+        {% call ui::button("With icon", "primary", "md", "button", icon = "plus") %}{% endcall %}
+        {% call ui::link_button("Link as button", "#buttons", "secondary") %}{% endcall %}
+        {% call ui::link_button("Home", "/", "ghost", "md", "chevron-left") %}{% endcall %}
+      </div>
+      <div class="flex flex-wrap items-center gap-3">
+        {% call ui::icon_button("search", "Search") %}{% endcall %}
+        {% call ui::icon_button("settings", "Settings", "secondary") %}{% endcall %}
+        {% call ui::icon_button("plus", "Add", "primary") %}{% endcall %}
+        {% call ui::icon_button("menu", "Show the hidden panel", "ghost", "toggle-demo") %}{% endcall %}
+        <p id="toggle-demo" class="hidden text-sm">Shown by the icon button's data-toggle.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="feedback" class="mt-12 scroll-mt-8" aria-labelledby="feedback-title">
+    <h2 id="feedback-title" class="text-xl font-semibold">Feedback</h2>
+    <div class="mt-4 grid gap-4 lg:grid-cols-2">
+      <div class="space-y-3">
+        {% call ui::alert("info", "Info") %}Something worth knowing.{% endcall %}
+        {% call ui::alert("success") %}It worked.{% endcall %}
+        {% call ui::alert("warning", "Warning", true) %}Check this before you go on. (Dismissible.){% endcall %}
+        {% call ui::alert("danger", "Danger") %}That didn't go through.{% endcall %}
+      </div>
+      <div>
+        {% call ui::flash(notice) %}{% endcall %}
+        {% call ui::flash(alert) %}{% endcall %}
+        <p class="mb-2 text-sm font-medium">Toasts (here inline; in a page they stack in the corner)</p>
+        <div class="space-y-2">
+          {% call ui::toast("Saved your changes.", "success", 0) %}{% endcall %}
+          {% call ui::toast("Three new comments.", "info", 0) %}{% endcall %}
+          {% call ui::toast("Your session ends in five minutes.", "warning", 0) %}{% endcall %}
+          {% call ui::toast("Couldn't reach the server.", "danger", 0) %}{% endcall %}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="data" class="mt-12 scroll-mt-8" aria-labelledby="data-title">
+    <h2 id="data-title" class="text-xl font-semibold">Data</h2>
+    <div class="mt-4 grid gap-4 sm:grid-cols-3">
+      {% call ui::stat("Readers", "1,284", "+12% this week", "up") %}{% endcall %}
+      {% call ui::stat("Books finished", "312", "-3% this week", "down") %}{% endcall %}
+      {% call ui::stat("Reviews", "98") %}{% endcall %}
+    </div>
+    <div class="mt-6">
+      {% call ui::table("Books, sortable", [("title", "Title"), ("author", "Author"), ("year", "Year"), ("", "Status")], false, "", sort, dir, "/dev/components?") %}
+        {% for row in rows %}
+        <tr>
+          <td class="font-medium">{{ row.title }}</td>
+          <td>{{ row.author }}</td>
+          <td>{{ row.year }}</td>
+          <td>{% if row.status == "done" %}{% call ui::badge("Done", "success") %}{% endcall %}{% else if row.status == "reading" %}{% call ui::badge("Reading", "primary") %}{% endcall %}{% else %}{% call ui::badge("Next") %}{% endcall %}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      {% endcall %}
+      {% call ui::pagination(page, 12, "/dev/components?") %}{% endcall %}
+    </div>
+    <div class="mt-6 grid gap-4 lg:grid-cols-2">
+      {% call ui::table("An empty table", [("", "Title"), ("", "Author")], true, "No books yet.") %}{% endcall %}
+      {% call ui::empty_state("No books yet", "Books you add show up here.", "Add a book", "#forms") %}{% endcall %}
+    </div>
+  </section>
+
+  <section id="forms" class="mt-12 scroll-mt-8" aria-labelledby="forms-title">
+    <h2 id="forms-title" class="text-xl font-semibold">Forms</h2>
+    <p class="muted mt-1">Submit it empty: the 422 keeps what you typed and marks each field (aria-invalid, aria-describedby).</p>
+    <div class="mt-4 grid gap-6 lg:grid-cols-2">
+      {% call ui::card("The live form") %}
+        <form method="post" action="{{ crate::routes::paths::dev_components() }}" novalidate>
+          {% include "shared/_errors.html" %}
+          {% call ui::field(errors, "title", "Title", form.title, required = true, hint = "What the book is called.") %}{% endcall %}
+          {% call ui::field(errors, "email", "Email", form.email, "email", autocomplete = "email") %}{% endcall %}
+          {% call ui::field(errors, "password", "Password", form.password, "password", hint = "Never sent back on a 422.") %}{% endcall %}
+          {% call ui::textarea(errors, "notes", "Notes", form.notes, 3) %}{% endcall %}
+          {% call ui::select(errors, "plan", "Plan", crate::views::gallery::PLANS, form.plan, blank = "Choose a plan") %}{% endcall %}
+          {% call ui::radios(errors, "contact", "Contact me by", crate::views::gallery::CONTACTS, form.contact) %}{% endcall %}
+          {% call ui::checkbox(errors, "terms", "I accept the terms", form.terms.is_some()) %}{% endcall %}
+          {% call ui::form_actions("Save", "/dev/components") %}{% endcall %}
+        </form>
+      {% endcall %}
+      {% call ui::card("Every field in its error state") %}
+        <div>
+          {% call ui::field(bad, "bad_title", "Title", "", hint = "What the book is called.") %}{% endcall %}
+          {% call ui::select(bad, "bad_plan", "Plan", crate::views::gallery::PLANS, "", blank = "Choose a plan") %}{% endcall %}
+          {% call ui::checkbox(bad, "bad_terms", "I accept the terms") %}{% endcall %}
+        </div>
+      {% endcall %}
+    </div>
+  </section>
+
+  <section id="navigation" class="mt-12 scroll-mt-8" aria-labelledby="navigation-title">
+    <h2 id="navigation-title" class="text-xl font-semibold">Navigation</h2>
+    <div class="mt-4 space-y-6">
+      {% call ui::nav_tabs([("Overview", "/dev/components"), ("Settings", "/dev/components?tab=settings"), ("Billing", "/dev/components?tab=billing")], "/dev/components", "Link tabs") %}{% endcall %}
+      {% call ui::tabs("demo-tabs", [("one", "Details"), ("two", "Reviews"), ("three", "History")], "one", "Client tabs") %}
+        {% call ui::tab_panel("demo-tabs", "one", "one") %}<p class="text-sm">Details: client-side tabs, arrow keys move between them.</p>{% endcall %}
+        {% call ui::tab_panel("demo-tabs", "two", "one") %}<p class="text-sm">Reviews: the second panel.</p>{% endcall %}
+        {% call ui::tab_panel("demo-tabs", "three", "one") %}<p class="text-sm">History: the third panel.</p>{% endcall %}
+      {% endcall %}
+      <div class="flex flex-wrap items-center gap-3">
+        {% call ui::dropdown("Options") %}
+          {% call ui::menu_item("Edit", "#navigation") %}{% endcall %}
+          {% call ui::menu_item("Duplicate", "#navigation") %}{% endcall %}
+          {% call ui::menu_item("Archive", "#navigation") %}{% endcall %}
+        {% endcall %}
+        {% call ui::dropdown("Primary menu", "primary", "sm") %}
+          {% call ui::menu_item("Profile", "#navigation") %}{% endcall %}
+        {% endcall %}
+      </div>
+    </div>
+  </section>
+
+  <section id="overlays" class="mt-12 scroll-mt-8" aria-labelledby="overlays-title">
+    <h2 id="overlays-title" class="text-xl font-semibold">Overlays</h2>
+    <p class="muted mt-1">Modals are native dialogs: the page behind is inert, focus stays inside, Esc closes, focus returns.</p>
+    <div class="mt-4 flex flex-wrap items-center gap-3">
+      {% call ui::modal_button("Open a modal", "demo-modal") %}{% endcall %}
+      {% call ui::modal_link("Load a modal with htmx", crate::routes::paths::dev_components_modal()) %}{% endcall %}
+      <form method="post" action="{{ crate::routes::paths::dev_components() }}" class="inline" data-confirm="Run the confirm demo? Nothing is deleted.">
+        <input type="hidden" name="confirm_demo" value="1">
+        {% call ui::button("Delete (asks first)", "danger") %}{% endcall %}
+      </form>
+      {% call ui::confirm_button("Archive (asks first)", "/dev/components", "Archive it? (The demo only redirects back.)", "secondary") %}{% endcall %}
+    </div>
+    {% call ui::modal("demo-modal", "Edit the title") %}
+      <p class="text-sm text-gray-700 dark:text-gray-300">A modal on the page, opened with <code>ui::modal_button</code>.</p>
+      {% call ui::field(errors, "modal_title", "Title", "Piranesi") %}{% endcall %}
+      <div class="mt-6 flex flex-wrap justify-end gap-3">
+        {% call ui::modal_close() %}{% endcall %}
+        {% call ui::button("Save", "primary", "md", "button") %}{% endcall %}
+      </div>
+    {% endcall %}
+  </section>
+
+  <section id="layouts" class="mt-12 scroll-mt-8" aria-labelledby="layouts-title">
+    <h2 id="layouts-title" class="text-xl font-semibold">Layouts</h2>
+    <p class="muted mt-1">A page picks one with <code>{&#37; extends "layouts/…" &#37;}</code>. This page is the top-nav layout (application.html).</p>
+    <ul class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <li><a class="card card-body block hover:bg-gray-50 dark:hover:bg-gray-800" href="{{ crate::routes::paths::dev_layout("sidebar") }}"><span class="font-medium">Sidebar</span><span class="muted block">layouts/sidebar.html</span></a></li>
+      <li><a class="card card-body block hover:bg-gray-50 dark:hover:bg-gray-800" href="{{ crate::routes::paths::dev_layout("marketing") }}"><span class="font-medium">Marketing</span><span class="muted block">layouts/marketing.html</span></a></li>
+      <li><a class="card card-body block hover:bg-gray-50 dark:hover:bg-gray-800" href="{{ crate::routes::paths::dev_layout("auth") }}"><span class="font-medium">Auth card</span><span class="muted block">layouts/auth.html</span></a></li>
+      <li><a class="card card-body block hover:bg-gray-50 dark:hover:bg-gray-800" href="{{ crate::routes::paths::dev_layout("docs") }}"><span class="font-medium">Docs</span><span class="muted block">layouts/docs.html</span></a></li>
+    </ul>
+  </section>
+</main>
+{% endblock %}

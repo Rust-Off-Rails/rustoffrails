@@ -80,10 +80,12 @@ myapp/
 │   ├── mailers/               # all modes: layout.html (THE mail layout) + <mailer>/<action>.html and .txt
 │   └── kernel/                # all modes: layout.html, jobs/ (dashboard), mailbox/, dev/ (Askama + htmx, framework-owned look)
 ├── assets/app.css             # htmx: Tailwind input
-├── assets/brand/og.html       # modes with pages: the social card source (tools/brand/render.sh renders it)
+├── brand.toml                 # modes with pages: the look (colors, fonts, radius, logo); `cargo offrails brand` renders it
+├── assets/brand.css           # generated from brand.toml: the Tailwind theme (never edit)
+├── assets/brand/og.svg        # generated: the social card source
 ├── static/                    # public/: served at /static (Vite build output is served at /assets from web/dist)
 │   ├── app.css                # htmx: Tailwind output (built, git-ignored)
-│   ├── favicon.svg, favicon.ico, apple-touch-icon.png, icon-512.png, og.png   # modes with pages, from `new` (tools/brand/render.sh)
+│   ├── favicon.svg, favicon.ico, apple-touch-icon.png, icon-512.png, og.png   # modes with pages, from brand.toml (`cargo offrails brand`; `new` runs it)
 │   ├── kernel/admin.css       # all modes: plain CSS for /admin/jobs, /dev, /dev/mailbox
 │   ├── kernel/admin.js        # all modes: reload kernel pages restored from the back/forward cache
 │   └── vendor/htmx-<ver>.min.js   # all modes (the dashboard and /dev use it)

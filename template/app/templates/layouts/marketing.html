@@ -1,0 +1,28 @@
+{#- The marketing / landing layout: a wide header with a call to action, full-width sections, a
+    footer. Blocks: hero (the first, full-width section), content (the sections after it), nav
+    (header links, .nav-link each), cta (the header's button), footer_links.
+      {% extends "layouts/marketing.html" %}
+    GUIDE: .offrails/guides/views.md#layouts -#}
+{% extends "layouts/application.html" %}
+{% block body %}
+<header class="border-b border-gray-200 dark:border-gray-800">
+  <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-4">
+    {% include "shared/_brand.html" %}
+    <nav class="flex flex-wrap items-center gap-1 sm:gap-2" aria-label="Main">
+      {% block nav %}{% endblock %}
+      {% block cta %}{% endblock %}
+    </nav>
+  </div>
+</header>
+<main id="main">
+  <div class="mx-auto max-w-6xl px-4">{% include "shared/_notices.html" %}</div>
+  {% block hero %}{% endblock %}
+  {% block content %}{% endblock %}
+</main>
+<footer class="border-t border-gray-200 dark:border-gray-800">
+  <div class="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-8 text-sm text-gray-600 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between">
+    <p>{{ crate::config::APP_NAME }}</p>
+    <nav class="flex flex-wrap gap-x-4 gap-y-2" aria-label="Footer">{% block footer_links %}{% endblock %}</nav>
+  </div>
+</footer>
+{% endblock %}

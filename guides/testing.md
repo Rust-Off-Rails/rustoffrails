@@ -247,6 +247,23 @@ Request tests can't see what a boosted link does: it swaps `<body>` and runs not
 - **Measured** on an app with every part (M2, load ~15): 18 page visits (signed out and in) in 28 s, with the sign-in, sign-up, confirm, password and two-factor pages' Show and Copy buttons each clicked on both paths. A bare app (one page, `/`): 4.7 s, most of it starting Chrome.
 - **Proof it catches the bug:** `node .offrails/tools/browser-smoke/selftest-boosted.mjs` serves a tiny htmx site whose sign-in page binds its Show button three ways: delegated from the layout (passes), from a head-block script on `DOMContentLoaded` (fails, naming the script and the dead button), from the layout on `DOMContentLoaded` (fails on the dead button), plus a console error (fails). The framework's CI runs it. By hand on a real app: move `<script src="{{ ctx.auth_js }}">` from the layout into `templates/sessions/new.html`'s `{% block head %}`, rebuild, and the smoke fails with `/session/new: loads /static/auth.js in its <head>…` and `button[data-reveal="signin_password"] "Show password" reacts on a full load and is DEAD after a boosted link`; put it back and it passes.
 
+## Proof: `cargo offrails prove`
+
+Tests prove behavior; `prove` shows the human (and the next agent) that the pages work, and ties each acceptance criterion to its evidence. With the app running (`bin/dev`):
+
+```sh
+BASE=<the URL bin/dev printed> cargo offrails prove       # --strict: visual changes fail too; --commit-screenshots: keep the PNGs in git
+```
+
+- **Which pages:** every GET route in `docs/routes.md` without a parameter that answers HTML (plus `SMOKE_PATHS`, minus `SMOKE_SKIP`, as the smokes), each as the visitor who can see it: signed out, or signed in as the demo account (`SMOKE_EMAIL`/`SMOKE_PASSWORD`) when it sends you to sign in. Fragments, JSON and files are listed under "Not proven here".
+- **What it does per page:** full-page screenshots at desktop 1280 and mobile 390, light and dark (`docs/proof/screens/`); it fails on a console error, an uncaught exception or a CSP violation in any of the four loads, on axe-core violations (WCAG 2.2 AA, light and dark; the a11y smoke's pinned axe, from the smokes' cache), on a same-site link that answers 4xx/5xx or an `#anchor` without a target, and on horizontal scroll at 390 px (naming the elements that stick out; on a kernel page, `/dev` or `/admin/…` from the framework and its parts, that is a warning in PROOF.md, failing only with `--strict`). Each screenshot is compared with the previous run's (a pixel diff in Node, no package): changes over `PROVE_DIFF_THRESHOLD` (0.5% of pixels) are reported with a diff image in `docs/proof/diff/`, and fail only with `--strict`.
+- **What it writes:** `docs/proof/PROOF.md`: the result, the checks, a table of pages with links to the four screenshots and what changed, and **every acceptance criterion** in `product/features/*.md` → the tests that cite it (`/// AC-…`) with their result in the last `cargo offrails verify` (read from `target/verify/`) → the pages those tests request (`"/…"` literals and `paths::…()` helpers in the test, backticked paths in the criterion) with their screenshots. `proof.json` holds the same for programs. PNGs are git-ignored (`docs/proof/.gitignore`) unless `--commit-screenshots`.
+- **What it needs:** what `smoke-boosted.mjs` needs (Node ≥ 18 and an installed Chrome, Chromium or Edge, no npm install; `skip: no Chrome`, exit 77, without one). `cargo offrails verify --full` runs it when `BASE` is set; the framework's CI proves it on the bare app and the app with every part (`tools/ci/test-template.sh prove`).
+- **The component smoke:** `BASE=… node .offrails/tools/browser-smoke/smoke-components.mjs` drives `/dev/components` on a full load and after a boosted link: the modal (focus kept inside, Esc, focus returned), the htmx-loaded modal, the confirm dialog (Cancel and Confirm) and the demo form's 422. `verify --full` runs it too.
+- **Measured** (M2, other agents building, load 15–70): a bare app (9 pages, 36 screenshots, axe on 18 loads) 13–24 s; an app with every part (63 pages, 6 of them signed in, 252 screenshots) 165–216 s. Pages with live data (charts, timestamps) show up as visual changes on every run: expected, and why changes fail only with `--strict`.
+
+Your final message links `docs/proof/PROOF.md` ([workflow](../workflow.md#definition-of-done)).
+
 ## CI
 
 `.github/workflows/ci.yml`. Action majors verified 2026-10-12. When generating, check each action's latest release and use its current major tag.

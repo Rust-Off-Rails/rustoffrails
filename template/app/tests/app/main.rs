@@ -1,6 +1,7 @@
 #[allow(dead_code)]
 mod support;
 
+mod components_test;
 mod errors_test;
 mod factories;
 mod headers_test;

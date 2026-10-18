@@ -162,6 +162,17 @@ pub mod paths {
     pub fn theme() -> String {
         "/theme".into()
     }
+    /// The component gallery (development only).
+    pub fn dev_components() -> String {
+        "/dev/components".into()
+    }
+    pub fn dev_components_modal() -> String {
+        "/dev/components/modal".into()
+    }
+    /// A layout demo: `sidebar`, `marketing`, `auth` or `docs` (development only).
+    pub fn dev_layout(name: &str) -> String {
+        format!("/dev/layouts/{name}")
+    }
     // samples: paths
 }
 
@@ -194,6 +205,14 @@ const APP_ROUTES: &[Route] = &[
     ("GET",  "/dev/introspect.json", "dev::introspect", Access::Dev),
     ("GET",  "/dev/reload",          "dev::reload",     Access::Dev),
     ("POST", "/dev/migrations",      "migrations::run", Access::Dev),
+    ("GET",  "/dev/components",      "gallery::index",  Access::Dev),
+    ("POST", "/dev/components",      "gallery::submit", Access::Dev),
+    ("GET",  "/dev/components/modal", "gallery::modal", Access::Dev),
+    ("GET",  "/dev/layouts/sidebar", "gallery::sidebar", Access::Dev),
+    ("GET",  "/dev/layouts/marketing", "gallery::marketing", Access::Dev),
+    ("GET",  "/dev/layouts/auth",    "gallery::auth",   Access::Dev),
+    ("POST", "/dev/layouts/auth",    "gallery::auth_submit", Access::Dev),
+    ("GET",  "/dev/layouts/docs",    "gallery::docs",   Access::Dev),
     // samples: routes table
 ];
 

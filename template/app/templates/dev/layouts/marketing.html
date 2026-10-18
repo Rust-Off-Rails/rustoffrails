@@ -1,0 +1,40 @@
+{% extends "layouts/marketing.html" %}
+{% import "components/ui.html" as ui %}
+{% block nav %}
+<a class="nav-link hidden sm:inline-flex" href="#features">Features</a>
+<a class="nav-link hidden sm:inline-flex" href="{{ crate::routes::paths::dev_layout("docs") }}">Docs</a>
+{% endblock %}
+{% block cta %}{% call ui::link_button("Get started", "#start", "primary", "sm") %}{% endcall %}{% endblock %}
+{% block hero %}
+<section class="border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900">
+  <div class="mx-auto max-w-6xl px-4 py-16 sm:py-24">
+    {% call ui::badge("New: the component kit", "accent") %}{% endcall %}
+    <h1 class="mt-4 max-w-3xl text-4xl font-semibold tracking-tight sm:text-5xl">{{ crate::config::APP_NAME }}: {{ crate::brand::TAGLINE }}</h1>
+    <p class="mt-4 max-w-2xl text-lg text-gray-700 dark:text-gray-300">layouts/marketing.html: a wide header with a call to action, full-width sections, a footer. The brand comes from brand.toml.</p>
+    <div class="mt-8 flex flex-wrap gap-3">
+      {% call ui::link_button("Get started", "#start", "primary", "lg") %}{% endcall %}
+      {% call ui::link_button("See the components", "/dev/components", "secondary", "lg") %}{% endcall %}
+    </div>
+  </div>
+</section>
+{% endblock %}
+{% block content %}
+<section id="features" class="mx-auto max-w-6xl scroll-mt-8 px-4 py-16" aria-labelledby="features-title">
+  <h2 id="features-title" class="text-2xl font-semibold tracking-tight">Why it works</h2>
+  <div class="mt-8 grid gap-6 sm:grid-cols-3">
+    {% call ui::card("Fast") %}<p class="text-sm text-gray-700 dark:text-gray-300">Server-rendered pages, boosted links, no bundle.</p>{% endcall %}
+    {% call ui::card("Accessible") %}<p class="text-sm text-gray-700 dark:text-gray-300">Landmarks, a skip link, AA contrast in both themes.</p>{% endcall %}
+    {% call ui::card("Yours") %}<p class="text-sm text-gray-700 dark:text-gray-300">One brand.toml: colors, fonts, radius, logo.</p>{% endcall %}
+  </div>
+</section>
+<section id="start" class="scroll-mt-8 bg-primary-600 text-on-primary" aria-labelledby="start-title">
+  <div class="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-12 sm:flex-row sm:items-center sm:justify-between">
+    <h2 id="start-title" class="text-2xl font-semibold tracking-tight">Ready when you are.</h2>
+    <a class="inline-flex items-center justify-center rounded-md bg-white dark:bg-white px-5 py-2.5 text-base font-medium text-primary-700 dark:text-primary-700 hover:bg-primary-50 dark:hover:bg-primary-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-white" href="#features">Read more</a>{# offrails-check: classes ok (a button on the primary band) #}
+  </div>
+</section>
+{% endblock %}
+{% block footer_links %}
+<a class="hover:text-gray-900 dark:hover:text-white hover:underline" href="{{ crate::routes::paths::dev_layout("docs") }}">Docs</a>
+<a class="hover:text-gray-900 dark:hover:text-white hover:underline" href="{{ crate::routes::paths::dev_components() }}">Components</a>
+{% endblock %}

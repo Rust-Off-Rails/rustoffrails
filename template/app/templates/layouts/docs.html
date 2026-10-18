@@ -1,0 +1,21 @@
+{#- Documentation: the top nav, a table of contents beside the text (above it on a phone), the text
+    in readable measure. Blocks: toc (links to the page's #anchors, .toc-link each), content (the
+    article: h2/h3 with ids, p, code are styled by .prose-doc).
+      {% extends "layouts/docs.html" %}
+    GUIDE: .offrails/guides/views.md#layouts -#}
+{% extends "layouts/application.html" %}
+{% block body %}
+<div class="wide-nav">{% include "shared/_nav.html" %}</div>
+<div class="mx-auto max-w-6xl px-4 lg:grid lg:grid-cols-4 lg:gap-10">
+  <aside class="border-b border-gray-200 dark:border-gray-800 py-4 lg:col-span-1 lg:border-b-0 lg:py-8">
+    <nav class="lg:sticky lg:top-8" aria-label="On this page">
+      <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">On this page</p>
+      <div class="flex flex-col gap-1 text-sm">{% block toc %}{% endblock %}</div>
+    </nav>
+  </aside>
+  <main id="main" class="min-w-0 py-8 lg:col-span-3">
+    {% include "shared/_notices.html" %}
+    <article class="prose-doc max-w-3xl">{% block content %}{% endblock %}</article>
+  </main>
+</div>
+{% endblock %}

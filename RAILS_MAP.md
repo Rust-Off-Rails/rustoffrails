@@ -23,7 +23,9 @@ When a human (or your training data) says "the Rails way", look it up here.
 | rack-cors                 | tower-http `CorsLayer` from `APP_CORS_ORIGINS` (exact origins) | [api](guides/api.md#cors) |
 | Puma                      | The binary itself: axum on hyper (HTTP/1.1 + h2); optional direct TLS via `APP_TLS_*` | [deployment](guides/deployment.md#direct-tls-optional) |
 | `docker compose up` (Rails 7.1+ devcontainer) | `compose.yaml` from `new`: the production image + Postgres, profiles `worker`, `mail` | [deployment](guides/deployment.md#docker-compose-the-whole-app-locally) |
-| `favicon.ico`, meta-tags gem | `tools/brand/render.sh` + `Ctx` meta (title, description, canonical, OG, Twitter) from `new` | [views](guides/views.md#meta-favicon-and-social-cards-every-app-with-pages) |
+| `favicon.ico`, meta-tags gem | `brand.toml` + `cargo offrails brand` + `Ctx` meta (title, description, canonical, OG, Twitter) from `new` | [views](guides/views.md#brand) |
+| ViewComponent, a UI kit, `layout "admin"` | `{% import "components/ui.html" as ui %}` macros; `{% extends "layouts/sidebar.html" %}` (application, sidebar, marketing, auth, docs) | [views](guides/views.md#components) |
+| Capybara screenshots, a Percy-style visual review | `BASE=… cargo offrails prove` → `docs/proof/PROOF.md` | [testing](guides/testing.md#proof-cargo-offrails-prove) |
 | inertia-rails             | `inertia` mode: generated `kernel/inertia.rs` (Inertia v3 protocol) + `@inertiajs/react` | [frontend-inertia](guides/frontend-inertia.md) |
 | jsbundling / vite_rails   | Vite 8 in `web/` (`inertia`, `spa`, islands), manifest read by `kernel/assets.rs` | [frontend-inertia](guides/frontend-inertia.md) |
 | Jbuilder / serializers    | `#[derive(Serialize, TS)]` structs in `src/views/`     | [frontend-react](guides/frontend-react.md) |

@@ -4,7 +4,10 @@
 // never bind to elements directly or on DOMContentLoaded (guides/frontend-htmx.md#boosted-navigation).
 document.addEventListener("click", (e) => {
   const el = e.target.closest("[data-toggle]");
-  if (el) document.getElementById(el.dataset.toggle)?.classList.toggle("hidden");
+  const target = el && document.getElementById(el.dataset.toggle);
+  if (!target) return;
+  target.classList.toggle("hidden");
+  if (el.hasAttribute("aria-expanded")) el.setAttribute("aria-expanded", String(!target.classList.contains("hidden")));
 });
 
 // A boosted navigation or form that fails (500, 403, 404…) would otherwise do nothing visible:
@@ -19,11 +22,7 @@ document.addEventListener("htmx:responseError", (e) => {
   window.htmx?.process(document.body);
 });
 
-// A quick confirm on a form (data-confirm="…"); kernel pages use server-rendered confirmations.
-document.addEventListener("submit", (e) => {
-  const message = e.submitter?.dataset?.confirm ?? e.target.dataset?.confirm;
-  if (message && !window.confirm(message)) e.preventDefault();
-});
+// A confirm on a form (data-confirm="…") asks in the layout's dialog: static/components.js.
 
 // A page the back/forward cache restores is reloaded, so it never shows stale data.
 window.addEventListener("pageshow", (event) => {

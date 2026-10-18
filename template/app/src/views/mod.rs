@@ -1,6 +1,7 @@
 //! What the client receives: Askama page structs, one file per resource, plus the layout context.
 
 pub mod errors;
+pub mod gallery;
 pub mod helpers;
 pub mod home;
 // samples: view mods
@@ -9,8 +10,7 @@ use crate::error::AppError;
 use crate::kernel::assets::Assets;
 use crate::kernel::flash::FlashMessage;
 
-pub const DEFAULT_DESCRIPTION: &str =
-    "A new Rust off Rails app.";
+pub const DEFAULT_DESCRIPTION: &str = "A new Rust off Rails app.";
 
 pub fn render(t: impl askama::Template) -> Result<axum::response::Html<String>, AppError> {
     Ok(axum::response::Html(t.render()?))

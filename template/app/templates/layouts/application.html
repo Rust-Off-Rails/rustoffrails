@@ -9,7 +9,7 @@
   <meta name="description" content="{{ ctx.description }}">
   {% if ctx.noindex %}<meta name="robots" content="noindex">{% endif %}
   <link rel="canonical" href="{{ ctx.canonical() }}">
-  <meta name="theme-color" content="#4f46e5">
+  <meta name="theme-color" content="{{ crate::brand::THEME_COLOR }}">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="{{ crate::config::APP_NAME }}">
   <meta property="og:title" content="{{ ctx.page_title() }}">
@@ -26,6 +26,7 @@
   <link rel="stylesheet" href="{{ ctx.assets.css }}">
   <script src="{{ ctx.assets.htmx }}" defer></script>
   <script src="{{ ctx.assets.app_js }}" defer></script>
+  <script src="{{ ctx.assets.components_js }}" defer></script>
   {% if ctx.dev %}<script src="{{ ctx.assets.dev_reload_js }}" defer></script>{% endif %}
   {# A part's scripts and stylesheets for app pages load here, on every page, never in a page's
      head block: a boosted link swaps only <body>, so a script a page adds to <head> never runs. #}
@@ -33,12 +34,20 @@
   {% block head %}{% endblock %}
 </head>
 <body hx-boost="true" class="min-h-screen bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100 antialiased">
+  <a href="#main" class="skip-link">Skip to content</a>
+  {% include "components/_icons.html" %}
+  {# This file is the shell every layout extends: <head> (one set of scripts for every page, so
+     boosted links keep working), the skip link, the overlays and the dev footer. The body block
+     below is the top-nav layout; layouts/sidebar.html, marketing.html, auth.html and docs.html
+     replace it. A page picks one with {% extends %}. GUIDE: .offrails/guides/views.md#layouts #}
+  {% block body %}
   {% include "shared/_nav.html" %}
-  <main class="mx-auto max-w-3xl px-4 py-8">
-    {% if let Some(problem) = ctx.css_warning %}<p role="alert">{{ problem }}</p>{% endif %}
-    {% include "shared/_flash.html" %}
+  <main id="main" class="mx-auto max-w-3xl px-4 py-8">
+    {% include "shared/_notices.html" %}
     {% block content %}{% endblock %}
   </main>
+  {% endblock %}
+  {% include "components/_overlays.html" %}
   {% if ctx.dev %}
   <footer class="mx-auto max-w-3xl px-4 pb-8 text-sm text-gray-600 dark:text-gray-400">
     Development &middot; <a href="{{ paths::dev() }}" hx-boost="false" class="link">Dev tools</a>
