@@ -3,6 +3,7 @@
 //! Inside an app, through the alias in `.cargo/config.toml`:
 //!   cargo offrails generate <kind> <name> [field:type…] [--dry-run] [--force]   (alias: g)
 //!   cargo offrails destroy <kind> <name> [--dry-run]                            (alias: d)
+//!   cargo offrails snippets | snippet show|add|remove <name> [--as <model>]     small tested code to copy
 //!   cargo offrails parts                       (alias: list-parts)
 //!   cargo offrails add mailer [more parts…] [--dry-run] [--force] [--offline] [--no-fmt]   (alias: add-part)
 //!   cargo offrails update-part <part>… [--dry-run]   3-way merge of a newer part into the app

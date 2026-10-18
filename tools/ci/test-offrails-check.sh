@@ -256,6 +256,9 @@ expect "no Host check fails" "$d" 1 "no Host check: development answers any Host
 
 d=$(make_app routes); : > "$d/docs/routes.md"
 expect "a stale docs/routes.md only warns" "$d" 0 "docs/routes.md is missing ROUTES path(s): /notes/{id}"
+d=$(make_app feature-routes); mkdir -p "$d/src/routes"
+printf '#[rustfmt::skip]\npub const ROUTES: &[Route] = &[\n    ("GET",  "/posts", "posts::index", Access::User),\n];\n' > "$d/src/routes/posts.rs"
+expect "a feature routes file's rows are checked against docs/routes.md too" "$d" 0 "docs/routes.md is missing ROUTES path(s): /posts"
 
 echo
 if [ "$failures" = 0 ]; then

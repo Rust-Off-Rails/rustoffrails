@@ -120,7 +120,7 @@ Users must be logged in to create books. Send the owner an email when a book get
 
 A new app is a copy of [`template/app/`](template/README.md): a complete, compiling app (htmx) with the kernel, security headers, CSRF, sessions, Host allowlist, rate limiting, log redaction, SQLite and Postgres, `/dev` tools, Tailwind, CI, Docker and the kernel tests, renamed and green in minutes instead of an hour of generated Markdown. On top of it go the **parts** the product needs: the mailer and dev mailbox, jobs and their dashboard, accounts (password, magic link, TOTP), realtime with presence, and a LiveDashboard-style dev dashboard. They're the tested samples from [Rust-Off-Rails/samples](https://github.com/Rust-Off-Rails/samples) (screenshots of every screen there). Your agent proposes the ones your app needs, you confirm, and later needs are one command: `cargo offrails add-part <name>`. Once copied, the app owns the code ([guides/samples.md](guides/samples.md)).
 
-The generators (`offrails-gen`: `new`, `add-part`, `list-parts`) are a small standard-library Rust tool, so they work the same on Linux, macOS and Windows.
+The generators (`offrails-gen`: `new`, `add-part`, `list-parts`, `generate`, `destroy`, `snippets`) are a small standard-library Rust tool, so they work the same on Linux, macOS and Windows. Features start from a **snippet** (small tested code to copy: a feed, slugs, Markdown, a pager, a theme toggle; [template/snippets](template/snippets/README.md)) or a **generator** (`cargo offrails g resource posts title:string`), both optional, both the app's once written: small files per feature, one marked line per shared spot.
 
 ## Repository layout
 
@@ -165,7 +165,7 @@ Releasing:
 
 Installer tests: `tools/ci/test-install.sh` (local shells + clean Linux containers; `--full` also runs the real rustup + cargo-binstall path).
 
-Template tests: `TEST_DATABASE_URL=postgres://… tools/ci/test-template.sh` (generates the bare app, every part, and parts added one by one; the Definition of Done on SQLite and Postgres and the memory budget). Parts come from the samples repo: `tools/sync-parts.sh <samples checkout> <ref>`, never edited here.
+Template tests: `TEST_DATABASE_URL=postgres://… tools/ci/test-template.sh` (generates the bare app, every part, parts added one by one, every generator and every snippet; the Definition of Done on SQLite and Postgres and the memory budget). Parts come from the samples repo: `tools/sync-parts.sh <samples checkout> <ref>`, never edited here.
 
 Installed plugins update only when the version changes.
 

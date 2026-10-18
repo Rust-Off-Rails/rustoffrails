@@ -43,8 +43,10 @@ kinds:
   migration <name> [field:type…]       create_<table> | add_<x>_to_<table> | remove_<x>_from_<table> | <any>
   model <Name> field:type…             migration + entity, validation, scoped queries + factory + model tests
   resource <name> field:type…          (scaffold) model + htmx CRUD: 7 actions, pages, routes, nav, request tests
-  controller <name> [action…]          handlers + pages + routes + request tests (default action: index)
-  page <name>                          a static page: route, handler, template, sitemap entry, test [--nav]
+  controller <name> [action[:/path]…]  handlers + pages + routes + request tests (default action: index);
+                                       path params: show:/blog/{slug} (or --path /blog/{slug} for one action)
+  page <name>                          a public page: route, handler, template, sitemap entry, test [--nav]
+                                       [--path /about-us | --path /people/{handle}]
   api <name> field:type…               versioned JSON API under /api/v1 (bearer tokens, OpenAPI, tests);
                                        makes the model too unless it exists
   job <Name> [arg:type…]               a background job (jobs part): worker, registration, test [--queue q]
@@ -66,8 +68,13 @@ options:
   --no-fmt       don't run cargo fmt afterwards
   --app <dir>    the app (default: .)
 
-Every generated file is recorded in docs/generated.toml; destroy removes the unchanged ones and the
-wiring, and reports what it kept. Next steps are printed after each run. Guides: .offrails/generators/";
+  --forget       destroy: drop the record only (a generation recorded before 0.7.3; delete its files by hand)
+
+Each feature is small files in its own folders (src/controllers/<x>/, src/models/<x>/, src/routes/<x>.rs,
+templates/<x>/, tests/app/<x>/) plus one line per spot in shared files, marked `// <x>`. Every generated
+file is recorded in docs/generated.toml; destroy removes the unchanged ones and the marked lines, and
+reports what it kept. Commit after each run. Smaller recipes to copy: cargo offrails snippets.
+Guides: .offrails/generators/";
 
 /// Options shared by every generator, plus the choices a previous run recorded.
 #[derive(Debug, Clone, Default)]

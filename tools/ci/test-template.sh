@@ -330,8 +330,8 @@ GENS
       destroy_all "$work/$name/all.gens" || return 1
       ;;
     snippets)
-      shipped=$(ls "$root/template/snippets" | while IFS= read -r d; do [ -f "$root/template/snippets/$d/snippet.toml" ] && echo "$d"; done)
-      for sn in $shipped; do
+      for toml in "$root"/template/snippets/*/snippet.toml; do
+        sn=$(basename "$(dirname "$toml")")
         printf '%s\n' "$SNIPPETS" | grep -q "^$sn\( \|$\)" || { echo "test-template: snippet $sn is not in SNIPPETS" >&2; return 1; }
       done
       snippets_round snip_bare || return 1

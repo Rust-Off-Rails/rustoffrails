@@ -350,7 +350,11 @@ fi
 
 # ---- docs/routes.md -----------------------------------------------------------------------------
 if [ -f src/routes.rs ] && grep -q 'pub const ROUTES' src/routes.rs; then
-  paths=$(awk '/pub const ROUTES/{ s = 1 } s; s && /^\];/{ exit }' src/routes.rs | grep -oE '"/[^"]*"' | tr -d '"' | sort -u)
+  # Every `("GET", "/path", …)` row: src/routes.rs's own tables and each feature's src/routes/*.rs.
+  route_files=src/routes.rs
+  for f in src/routes/*.rs; do [ -f "$f" ] && route_files="$route_files $f"; done
+  # shellcheck disable=SC2086  # a space-separated list of file names
+  paths=$(grep -hE '^[[:space:]]*\("[A-Z]+",[[:space:]]*"/' $route_files | grep -oE '"/[^"]*"' | tr -d '"' | sort -u)
   if [ ! -f docs/routes.md ]; then
     warn routes "docs/routes.md is missing" "cargo run -- routes"
   else
