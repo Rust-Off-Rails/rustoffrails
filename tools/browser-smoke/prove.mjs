@@ -766,7 +766,7 @@ async function provePage(tab, page, axe, results) {
   const changed = Object.values(shots).filter((s) => (s.diff ?? 0) > THRESHOLD).length;
   console.log(`${failures.length ? "FAIL" : "ok  "} ${page.path} (${page.who})${failures.length ? `: ${failures.length} problem(s)` : ""}${changed ? `, ${changed} screenshot(s) changed` : ""}`);
   for (const f of failures) console.log(`       ${f}`);
-  for (const w of warnings) console.log(`  warn ${w}`);
+  for (const w of warnings) console.log(`  warn ${page.path}: ${w}`);
 }
 
 async function main() {
