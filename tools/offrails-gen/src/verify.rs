@@ -11,12 +11,14 @@
 //! without a browser).
 //!
 //! Each step writes `target/verify/<step>.log`; the summary prints one line per step and the
-//! tail of each failure. Exit status: 0 all green, 1 something failed, 2 usage.
+//! tail of each failure. Postgres runs only when `TEST_DATABASE_URL` is set (environment or
+//! `.env`); it is never probed for on localhost. The verdict is `green` only when nothing was
+//! skipped, else `green (N skipped: a, b)`. Exit status: 0 all green, 1 something failed (or, with
+//! `--full`, a step other than the browser smokes was skipped), 2 usage.
 
 use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{self, Write};
-use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -149,10 +151,17 @@ pub fn run(app: &Path, opts: &VerifyOptions) -> Result<()> {
             );
         }
     }
+    let (skipped_names, blocking) = skip_summary(&done, opts.full);
     println!(
         "{} in {:.1}s",
-        if failed == 0 {
+        if failed == 0 && skipped_names.is_empty() {
             "green".to_owned()
+        } else if failed == 0 {
+            format!(
+                "green ({} skipped: {})",
+                skipped_names.len(),
+                skipped_names.join(", ")
+            )
         } else {
             format!("{failed} failed")
         },
@@ -163,6 +172,15 @@ pub fn run(app: &Path, opts: &VerifyOptions) -> Result<()> {
             "Plus the Definition of Done table items no command proves (workflow.md#definition-of-done): \
              rollback then migrate, the real-browser smoke of what you changed, decisions logged."
         );
+    }
+    if failed == 0 && !blocking.is_empty() {
+        for b in &blocking {
+            println!("  not run: {b}");
+        }
+        return Err(Fail::new(format!(
+            "verify --full: {} step(s) skipped that --full requires (see the lines above for what to set or install); only \"no browser\" may be skipped",
+            blocking.len()
+        )));
     }
     if failed == 0 {
         Ok(())
@@ -719,8 +737,9 @@ fn tailwind(app: &Path) -> Option<String> {
         .map(|p| p.to_string_lossy().into_owned())
 }
 
-/// `TEST_DATABASE_URL` from the environment or `.env`; else the compose `db` service's URL when
-/// something listens on `localhost:${DB_PORT:-5432}`. Err: why the Postgres run is skipped.
+/// `TEST_DATABASE_URL` from the environment or `.env`. Postgres is never probed for: whatever
+/// happens to listen on localhost is not a database this app's tests may wipe. Err: why the
+/// Postgres run is skipped.
 fn postgres_url(app: &Path) -> std::result::Result<String, String> {
     if let Ok(url) = std::env::var("TEST_DATABASE_URL")
         && !url.is_empty()
@@ -730,25 +749,34 @@ fn postgres_url(app: &Path) -> std::result::Result<String, String> {
     if let Some(url) = dotenv_value(&app.join(".env"), "TEST_DATABASE_URL") {
         return Ok(url);
     }
-    let port = std::env::var("DB_PORT")
-        .ok()
-        .or_else(|| dotenv_value(&app.join(".env"), "DB_PORT"))
-        .unwrap_or_else(|| "5432".into());
-    let listening = format!("localhost:{port}")
-        .to_socket_addrs()
-        .ok()
-        .into_iter()
-        .flatten()
-        .any(|a| TcpStream::connect_timeout(&a, Duration::from_millis(300)).is_ok());
-    if listening {
-        Ok(format!(
-            "postgres://postgres:postgres@localhost:{port}/postgres"
-        ))
+    Err(POSTGRES_UNSET.to_owned())
+}
+
+const POSTGRES_UNSET: &str = "set TEST_DATABASE_URL (e.g. docker compose up -d db, then postgres://postgres:postgres@localhost:5432/postgres); CI runs it";
+
+/// The verdict line's text, and (with `--full`) the skips that make the run fail: every skip but
+/// "no browser". `done` holds every step's outcome; dependency skips ("X failed") are not skips.
+fn skip_summary(done: &[Done], full: bool) -> (Vec<&'static str>, Vec<String>) {
+    let skipped: Vec<&'static str> = done
+        .iter()
+        .filter(|d| matches!(&d.outcome, Outcome::Skipped(why) if !why.ends_with(" failed")))
+        .map(|d| d.name)
+        .collect();
+    let blocking: Vec<String> = if full {
+        done.iter()
+            .filter_map(|d| match &d.outcome {
+                Outcome::Skipped(why)
+                    if !why.ends_with(" failed") && !why.contains("no Chrome") =>
+                {
+                    Some(format!("{}: {why}", d.name))
+                }
+                _ => None,
+            })
+            .collect()
     } else {
-        Err(format!(
-            "no TEST_DATABASE_URL and nothing on localhost:{port} (docker compose up -d db); CI runs it"
-        ))
-    }
+        Vec::new()
+    };
+    (skipped, blocking)
 }
 
 fn dotenv_value(path: &Path, key: &str) -> Option<String> {
@@ -789,6 +817,46 @@ mod tests {
             redact("postgres://me@localhost/db"),
             "postgres://me@localhost/db"
         );
+    }
+
+    fn done(name: &'static str, outcome: Outcome) -> Done {
+        Done {
+            name,
+            outcome,
+            took: Duration::ZERO,
+            note: String::new(),
+        }
+    }
+
+    #[test]
+    fn skips_are_named_and_only_the_browser_may_be_skipped_in_full() {
+        let all = vec![
+            done("fmt", Outcome::Passed),
+            done("tests (Postgres)", Outcome::Skipped(POSTGRES_UNSET.into())),
+            done(
+                "smoke",
+                Outcome::Skipped("skip: no Chrome (set CHROME_PATH)".into()),
+            ),
+            done("later", Outcome::Skipped("fmt failed".into())),
+        ];
+        let (names, blocking) = skip_summary(&all, true);
+        assert_eq!(names, vec!["tests (Postgres)", "smoke"]);
+        assert_eq!(blocking.len(), 1);
+        assert!(blocking[0].contains("TEST_DATABASE_URL"));
+        assert!(skip_summary(&all, false).1.is_empty());
+    }
+
+    #[test]
+    fn postgres_is_skipped_unless_configured() {
+        let dir = std::env::temp_dir().join(format!("offrails-verify-pg-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        if std::env::var("TEST_DATABASE_URL").is_err() {
+            let why = postgres_url(&dir).unwrap_err();
+            assert!(why.contains("set TEST_DATABASE_URL"));
+            fs::write(dir.join(".env"), "TEST_DATABASE_URL=postgres://u:p@h/db\n").unwrap();
+            assert_eq!(postgres_url(&dir).unwrap(), "postgres://u:p@h/db");
+        }
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

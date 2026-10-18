@@ -117,7 +117,7 @@ sha256_of() {
 fetch() {
   case "$1" in
     http://*|https://*)
-      if have curl; then curl -fsSL --proto '=https' --tlsv1.2 "$1" -o "$2" 2>/dev/null || curl -fsSL "$1" -o "$2"
+      if have curl; then curl -fsSL --proto '=https' --tlsv1.2 "$1" -o "$2" 2>/dev/null || curl -fsSL --proto '=https' "$1" -o "$2"
       elif have wget; then wget -q "$1" -O "$2"
       else die "need curl or wget to download $1"; fi ;;
     file://*) cp "${1#file://}" "$2" ;;
@@ -289,6 +289,10 @@ if [ "$AGENTS" = 1 ] && have claude; then
   if claude plugin list --json 2>/dev/null | grep -q '"offrails@offrails"'; then
     ok "Claude Code plugin offrails@offrails already installed (update with: claude plugin update offrails@offrails)"
   else
+    # The release tarball above is checksum-verified at $VERSION_INSTALLED, but `claude plugin
+    # marketplace add` takes no ref or tag (see its --help: only a URL, path or GitHub repo), so the
+    # plugin is fetched from the default branch (main) and updated from it. It is not pinned.
+    warn "the Claude Code plugin tracks the $REPO default branch (main), not release $VERSION_INSTALLED, and is not checksum-verified; the framework itself is"
     if ! claude plugin marketplace list --json 2>/dev/null | grep -q '"name": *"offrails"'; then
       run claude plugin marketplace add "$REPO" >/dev/null 2>&1 || warn "could not add the marketplace $REPO (try: claude plugin marketplace add $REPO)"
     fi
