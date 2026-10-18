@@ -22,7 +22,7 @@ Read before you pipe: [`install.sh`](install.sh) is about 300 lines of POSIX she
    - Re-running with the same release is a no-op.
 5. **The `offrails` command**: copies `~/.offrails/current/tools/offrails` to `~/.local/bin/offrails`. If that directory isn't on your `PATH`, it tells you the exact line to add.
 6. **Coding agents**:
-   - If `claude` (Claude Code) is on your PATH, it adds the marketplace and installs the plugin: `claude plugin marketplace add Rust-Off-Rails/rustoffrails`, then `claude plugin install offrails@offrails --scope user`. It skips this if the plugin is already installed.
+   - If `claude` (Claude Code) is on your PATH, it adds the marketplace and installs the plugin: `claude plugin marketplace add rust-off-rails/rustoffrails`, then `claude plugin install offrails@offrails --scope user`. It skips this if the plugin is already installed.
    - For Codex, Cursor or any other agent, it prints the one-line prompt that points the agent at `~/.offrails/current/AGENTS.md`.
 7. **Optional tools**: it only *detects* Docker (local Postgres, image builds, deploys), Node 24 and pnpm (only for `inertia`/`spa`/islands apps). It doesn't install them.
 
@@ -64,14 +64,14 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 cargo install --locked sea-orm-cli cargo-nextest cargo-watch
 
 # 2. Framework (verify the checksum yourself)
-V=0.3.0   # see https://github.com/Rust-Off-Rails/rustoffrails/releases
-curl -fsSLO https://github.com/Rust-Off-Rails/rustoffrails/releases/download/v$V/rustoffrails.tar.gz
-curl -fsSLO https://github.com/Rust-Off-Rails/rustoffrails/releases/download/v$V/checksums.txt
+V=0.3.0   # see https://github.com/rust-off-rails/rustoffrails/releases
+curl -fsSLO https://github.com/rust-off-rails/rustoffrails/releases/download/v$V/rustoffrails.tar.gz
+curl -fsSLO https://github.com/rust-off-rails/rustoffrails/releases/download/v$V/checksums.txt
 shasum -a 256 -c checksums.txt --ignore-missing
 mkdir -p ~/.offrails && tar -xzf rustoffrails.tar.gz -C ~/.offrails && mv ~/.offrails/rustoffrails ~/.offrails/$V && ln -sfn $V ~/.offrails/current
 
 # 3. Claude Code plugin (or skip and point any agent at ~/.offrails/current/AGENTS.md)
-claude plugin marketplace add Rust-Off-Rails/rustoffrails
+claude plugin marketplace add rust-off-rails/rustoffrails
 claude plugin install offrails@offrails
 ```
 

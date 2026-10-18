@@ -67,7 +67,7 @@ offrails update                                                # latest release
 ### Or by hand: Claude Code plugin
 
 ```
-/plugin marketplace add Rust-Off-Rails/rustoffrails      # or a local checkout: /plugin marketplace add /path/to/rustoffrails
+/plugin marketplace add rust-off-rails/rustoffrails      # or a local checkout: /plugin marketplace add /path/to/rustoffrails
 /plugin install offrails@offrails
 ```
 
@@ -118,7 +118,7 @@ Users must be logged in to create books. Send the owner an email when a book get
 
 ### The template and its parts
 
-A new app is a copy of [`template/app/`](template/README.md): a complete, compiling app (htmx) with the kernel, security headers, CSRF, sessions, Host allowlist, rate limiting, log redaction, SQLite and Postgres, `/dev` tools, Tailwind, CI, Docker and the kernel tests, renamed and green in minutes instead of an hour of generated Markdown. On top of it go the **parts** the product needs: the mailer and dev mailbox, jobs and their dashboard, accounts (password, magic link, TOTP), realtime with presence, and a LiveDashboard-style dev dashboard. They're the tested samples from [Rust-Off-Rails/samples](https://github.com/Rust-Off-Rails/samples) (screenshots of every screen there). Your agent proposes the ones your app needs, you confirm, and later needs are one command: `cargo offrails add-part <name>`. Once copied, the app owns the code ([guides/samples.md](guides/samples.md)).
+A new app is a copy of [`template/app/`](template/README.md): a complete, compiling app (htmx) with the kernel, security headers, CSRF, sessions, Host allowlist, rate limiting, log redaction, SQLite and Postgres, `/dev` tools, Tailwind, CI, Docker and the kernel tests, renamed and green in minutes instead of an hour of generated Markdown. On top of it go the **parts** the product needs: the mailer and dev mailbox, jobs and their dashboard, accounts (password, magic link, TOTP), realtime with presence, and a LiveDashboard-style dev dashboard. They're the tested samples from [rust-off-rails/samples](https://github.com/rust-off-rails/samples) (screenshots of every screen there). Your agent proposes the ones your app needs, you confirm, and later needs are one command: `cargo offrails add-part <name>`. Once copied, the app owns the code ([guides/samples.md](guides/samples.md)).
 
 The generators (`offrails-gen`: `new`, `add-part`, `list-parts`) are a small standard-library Rust tool, so they work the same on Linux, macOS and Windows.
 

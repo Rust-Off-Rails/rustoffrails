@@ -2,7 +2,7 @@
 
 > **TL;DR**
 > - `template/app/` is a complete, compiling, tested blank app (htmx). A new app is a copy of it, renamed, with this framework vendored into `.offrails/`: one command, no code retyped.
-> - `template/parts/<name>/` are the optional kernel parts (mailer, dev mailbox, jobs, jobs dashboard, accounts, realtime, dev dashboard). They are the [samples](https://github.com/Rust-Off-Rails/samples), vendored into the release. Add one at any time with `cargo offrails add-part <name>`.
+> - `template/parts/<name>/` are the optional kernel parts (mailer, dev mailbox, jobs, jobs dashboard, accounts, realtime, dev dashboard). They are the [samples](https://github.com/rust-off-rails/samples), vendored into the release. Add one at any time with `cargo offrails add-part <name>`.
 > - The generators are `tools/offrails-gen`, a standard-library-only Rust tool: the same commands on Linux, macOS and Windows.
 > - After generating, the app's code is the app's: agents read it, adapt it and own it, as if they had written it. The guides stay the spec for *why*.
 >
@@ -71,7 +71,7 @@ The agent decides which parts the app needs from what the human said and the spe
 | Chat, presence ("who's online"), typing indicators, multiplayer, live updates pushed to other users | `realtime` | Channels over WebSocket with SSE and long-poll fallbacks |
 | None of the above (a content site, an internal read-only tool) | `dev-dashboard` only | The base already has `/dev`, the cache, security headers and the theme switch |
 
-When the human wants to see what a part is before deciding, point them at **<https://github.com/Rust-Off-Rails/samples>**: its README has screenshots of every screen, light and dark. When the product later grows a need, add the part then: `cargo offrails add-part <name>`. Before hand-writing a mailer, a queue, sessions or a socket layer, run `cargo offrails list-parts`: if a part does it, add the part ([workflow](../workflow.md#when-the-product-grows-a-need-add-the-part)).
+When the human wants to see what a part is before deciding, point them at **<https://github.com/rust-off-rails/samples>**: its README has screenshots of every screen, light and dark. When the product later grows a need, add the part then: `cargo offrails add-part <name>`. Before hand-writing a mailer, a queue, sessions or a socket layer, run `cargo offrails list-parts`: if a part does it, add the part ([workflow](../workflow.md#when-the-product-grows-a-need-add-the-part)).
 
 ## Other modes
 

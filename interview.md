@@ -80,7 +80,7 @@ Parts:   dev-dashboard      (every app: traces, SQL, logs in development)
          mailer, dev-mailbox (magic-link sign-in sends email; /dev/mailbox shows it)
          auth-core, auth-magic-link (ACCOUNTS: magic-link)
          jobs, jobs-dashboard (the weekly digest is scheduled)
-         See every screen first: https://github.com/Rust-Off-Rails/samples
+         See every screen first: https://github.com/rust-off-rails/samples
 ```
 
 The recommended answer is yes. A human who wants a part built from the guides instead, or no part at all, says so; record that answer in `product/README.md` → Decisions, and `generators/new.md` takes `--parts` accordingly. Parts left out now can be added any time with one command (`cargo offrails add-part <name>`), and the agent proposes them again when a feature needs one ([workflow](workflow.md#when-the-product-grows-a-need-add-the-part)).

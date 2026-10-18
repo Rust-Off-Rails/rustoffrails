@@ -1,7 +1,7 @@
 # Samples and parts: tested code for the parts most apps need
 
 > **TL;DR**
-> - Samples are tested, security-reviewed code for the parts most apps need: mailer, dev mailbox, jobs, jobs dashboard, auth (core, password, magic link, TOTP), realtime, dev dashboard. They're developed in **<https://github.com/Rust-Off-Rails/samples>** (screenshots of every screen in its README) and **shipped in every release as parts**: `.offrails/template/parts/<name>/`.
+> - Samples are tested, security-reviewed code for the parts most apps need: mailer, dev mailbox, jobs, jobs dashboard, auth (core, password, magic link, TOTP), realtime, dev dashboard. They're developed in **<https://github.com/rust-off-rails/samples>** (screenshots of every screen in its README) and **shipped in every release as parts**: `.offrails/template/parts/<name>/`.
 > - **The default path:** a new app is the template plus the parts its product needs, proposed by the agent and confirmed by the human ([template → choosing parts](../template/README.md#choosing-parts)). Later needs get a part too: `cargo offrails add-part <name>`.
 > - The guides stay the spec; a part is that spec built. Once added, the app owns the code: adapt `// APP:` lines, keep every `// SECURITY:` and `// INVARIANT:` marker and the tests CHECKS.md cites, then the Definition of Done on both databases.
 >
@@ -11,7 +11,7 @@ The guides say what each part must do. A part is that part **built**: compiled, 
 
 ## Rules
 
-1. **Propose them by default.** At the interview, propose the template plus the parts that fit the plan, with a one-line reason each and the link <https://github.com/Rust-Off-Rails/samples> so the human sees what they get; take the human's yes, or their opt-out, and record it ([interview](../interview.md#then-confirm-the-plan-once-before-generating)). When a feature needs a part the app lacks, add it ([workflow](../workflow.md#when-the-product-grows-a-need-add-the-part)). On upgrade, offer parts for areas an older app built by hand ([upgrade](../generators/upgrade.md#7b-offer-the-parts)).
+1. **Propose them by default.** At the interview, propose the template plus the parts that fit the plan, with a one-line reason each and the link <https://github.com/rust-off-rails/samples> so the human sees what they get; take the human's yes, or their opt-out, and record it ([interview](../interview.md#then-confirm-the-plan-once-before-generating)). When a feature needs a part the app lacks, add it ([workflow](../workflow.md#when-the-product-grows-a-need-add-the-part)). On upgrade, offer parts for areas an older app built by hand ([upgrade](../generators/upgrade.md#7b-offer-the-parts)).
 2. **Never replace working code without consent.** An app's hand-built mailbox that passes its tests stays until the human says otherwise.
 3. **The guide wins.** A part may do more than its guide (more screens, more checks). Where it contradicts a rule in `.offrails/` (a security non-negotiable, a convention), follow the guide, note the difference in `docs/decisions.md` and tell the human. That's a samples bug worth reporting.
 4. **Keep what makes it safe.** `// SECURITY: … (test: <name>)` and `// INVARIANT: … (test: <name>)` markers stay, and so does every test they name and every test in the part's CHECKS.md table. Change `// APP:` lines freely; that's what they're for. `// WHY:` explains a choice: change it only once you've understood it.
@@ -28,7 +28,7 @@ cargo offrails add-part dev-mailbox      # installs mailer first; refuses (chang
 
 `add-part` runs each `cargo add` in the part's `sample.toml`, copies `files/` to the same paths (the samples' host crate name `offrails_host` becomes yours), applies each `[[wire]]` above its `samples: <anchor>` comment, logs `installed sample <name> <version>` in `docs/decisions.md`, keeps the `AGENTS.md` header current and runs `cargo fmt --all`. Re-running it changes nothing. Then: `cargo run -q -- db migrate` (parts with tables), `cargo run -q -- routes`, the part's README ("After installing", "Adapting it") and CHECKS.md in `.offrails/template/parts/<name>/`, and the Definition of Done on both databases. Log what you adapted: `YYYY-MM-DD: adapted part <name> (<what>)`.
 
-The samples repo's own `tools/install.sh <name> <app>` does the same from a checkout (same format, same record line), for a sample newer than the release's parts: fetch the tag matching `.offrails/VERSION` (`git clone --depth 1 --branch "v$V" https://github.com/Rust-Off-Rails/samples ../offrails-samples`), never `main` without the human's OK.
+The samples repo's own `tools/install.sh <name> <app>` does the same from a checkout (same format, same record line), for a sample newer than the release's parts: fetch the tag matching `.offrails/VERSION` (`git clone --depth 1 --branch "v$V" https://github.com/rust-off-rails/samples ../offrails-samples`), never `main` without the human's OK.
 
 **An app built from the guides before 0.7.1** may lack pieces parts build on: the anchors, the theme switch (`kernel/theme.rs`, `kernel/cookie.rs`, `POST /theme`, the `offrails_theme` cookie), `kernel/redact.rs`, `Chrome::stylesheet`/`script` in `kernel/ui.rs`, and shapes the wires assume (the `Config` `Debug` builder `d.field(…)`, `Tab { key, … }` in `kernel/ui.rs`). `add-part` names each missing anchor and changes nothing. Compare the app with `.offrails/template/app/` (the files listed in [new → what the template contains](../generators/new.md#what-the-template-contains)), port what's missing as an ordinary change (`cargo check` names it), add the anchors at the spots [new → anchors](../generators/new.md#anchors) lists, then add the part. When the app has its own version of a part (say, a hand-built `kernel/mailbox.rs`), the part replaces it: remove yours only once the part's tests are green.
 
@@ -45,7 +45,7 @@ Shared files (`routes.rs`, `config.rs`, `state.rs`, `main.rs`, `kernel/mod.rs`, 
 
 ## The samples
 
-Each row says what the part adds over what the guide alone leads you to build. Use it to describe the part honestly when you propose it, with the link <https://github.com/Rust-Off-Rails/samples> (screenshots of every screen).
+Each row says what the part adds over what the guide alone leads you to build. Use it to describe the part honestly when you propose it, with the link <https://github.com/rust-off-rails/samples> (screenshots of every screen).
 
 | Sample | Guide | Depends on | What it adds |
 |--------|-------|------------|--------------|

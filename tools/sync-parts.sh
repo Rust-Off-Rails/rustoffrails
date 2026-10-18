@@ -1,6 +1,6 @@
 #!/bin/sh
 # Maintainers: refresh template/parts/ from a checkout of the samples repo
-# (https://github.com/Rust-Off-Rails/samples), at a tag or commit.
+# (https://github.com/rust-off-rails/samples), at a tag or commit.
 #
 #   tools/sync-parts.sh <samples-checkout> [<ref>]       (default ref: HEAD)
 #
@@ -31,5 +31,5 @@ for d in "$tmp"/samples/*/; do
     [ -e "$d/$f" ] && cp -R "$d/$f" "$dest/$name/"
   done
 done
-printf 'Rust-Off-Rails/samples %s (%s)\n' "$commit" "$(git -C "$src" describe --tags --always "$commit")" >"$dest/SOURCE"
+printf 'rust-off-rails/samples %s (%s)\n' "$commit" "$(git -C "$src" describe --tags --always "$commit")" >"$dest/SOURCE"
 echo "template/parts synced from samples $commit; now: tools/ci/test-template.sh"
