@@ -651,8 +651,9 @@ impl Ctx<'_> {
             "        ;\n"
         };
         out.push_str(&format!(
-            "#[tokio::test]\nasync fn edit_shows_the_saved_values_and_update_saves_changes() {{\n    let app = TestApp::new().await;\n{setup}    let record = factories::{s}(app.db(){owner}).await;\n    app.get(&paths::edit_{s}(record.id))\n        .await\n        .assert_ok()\n        .assert_contains(&format!(\"action=\\\"{{}}\\\"\", paths::{s}(record.id)));\n    let mut params = {s}::{m}Params::from(&record);\n{change}    submit(&app, &paths::{s}(record.id), &params)\n        .await\n        .assert_redirect_to(&paths::{s}(record.id));\n    app.get(&paths::{s}(record.id))\n        .await\n        .assert_ok()\n        .assert_text(\"{h} was successfully updated.\")\n{check_change}}}\n\n",
-            h = n.human
+            "#[tokio::test]\nasync fn edit_shows_the_saved_values_and_update_saves_changes() {{\n    let app = TestApp::new().await;\n{setup}    let record = factories::{s}(app.db(){owner}).await;\n    app.get(&paths::edit_{s}(record.id))\n        .await\n        .assert_ok()\n        .assert_contains(&format!(\"action=\\\"{{}}\\\"\", paths::{s}(record.id)));\n    let {mutable}params = {s}::{m}Params::from(&record);\n{change}    submit(&app, &paths::{s}(record.id), &params)\n        .await\n        .assert_redirect_to(&paths::{s}(record.id));\n    app.get(&paths::{s}(record.id))\n        .await\n        .assert_ok()\n        .assert_text(\"{h} was successfully updated.\")\n{check_change}}}\n\n",
+            h = n.human,
+            mutable = if label.is_some() { "mut " } else { "" }
         ));
         if let Some((f, bad, msg)) = invalid_case(&self.spec.fields) {
             out.push_str(&format!(
