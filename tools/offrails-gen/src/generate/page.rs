@@ -8,6 +8,7 @@ use super::Flags;
 use super::app::AppInfo;
 use super::controller::nav_link;
 use super::feature::{self, Mount};
+use super::html;
 use super::names::{self, Names};
 use super::plan::Plan;
 use super::resource::RESERVED;
@@ -131,7 +132,7 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
     );
     let shows: String = params
         .iter()
-        .map(|p| format!(" <code>{{{{ {p} }}}}</code>"))
+        .map(|p| html::pages_inline("param", &[("PARAM", p)]))
         .collect();
     let shows = if shows.is_empty() {
         String::new()
@@ -140,9 +141,14 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
     };
     plan.create(
         format!("templates/pages/{name}.html"),
-        format!(
-            "{{% extends \"layouts/application.html\" %}}\n{{% block content %}}\n<article class=\"py-6\">\n  <h1 class=\"text-3xl font-semibold tracking-tight\">{title}</h1>\n  <p class=\"mt-4 text-gray-700 dark:text-gray-300\">APP: the {lower} page's words{shows} (templates/pages/{name}.html).</p>\n</article>\n{{% endblock %}}\n",
-            lower = title.to_lowercase()
+        html::pages(
+            "page",
+            &[
+                ("TITLE", &title),
+                ("LOWER", &title.to_lowercase()),
+                ("SHOWS", &shows),
+                ("NAME", name),
+            ],
         ),
     );
     feature::plan_into(

@@ -1,0 +1,75 @@
+//! The HTML the generators write lives in two files, `files/html/resource.html` and
+//! `files/html/pages.html`, one section per piece (`@@ <name>` starts one), with `__NAME__` tokens.
+//! Swapping the markup (a component kit, other design tokens) is editing those files; the golden
+//! files then show every changed template.
+
+const RESOURCE: &str = include_str!("files/html/resource.html");
+const PAGES: &str = include_str!("files/html/pages.html");
+
+fn section(file: &'static str, name: &str) -> String {
+    let mut out = String::new();
+    let mut inside = false;
+    for line in file.lines() {
+        if let Some(h) = line.strip_prefix("@@ ") {
+            if inside {
+                break;
+            }
+            inside = h.trim() == name;
+            continue;
+        }
+        if inside {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    assert!(inside, "files/html: no section `{name}`");
+    out
+}
+
+/// `text` with each `__KEY__` replaced by its value, in order.
+pub fn fill(text: &str, vars: &[(&str, &str)]) -> String {
+    let mut out = text.to_owned();
+    for (k, v) in vars {
+        out = out.replace(&format!("__{k}__"), v);
+    }
+    out
+}
+
+/// A section of `files/html/resource.html`, filled; with its final newline.
+pub fn resource(name: &str, vars: &[(&str, &str)]) -> String {
+    fill(&section(RESOURCE, name), vars)
+}
+
+/// The same, without the final newline (an attribute or a fragment inside a line).
+pub fn resource_inline(name: &str, vars: &[(&str, &str)]) -> String {
+    resource(name, vars).trim_end_matches('\n').to_owned()
+}
+
+/// A section of `files/html/pages.html`, filled.
+pub fn pages(name: &str, vars: &[(&str, &str)]) -> String {
+    fill(&section(PAGES, name), vars)
+}
+
+pub fn pages_inline(name: &str, vars: &[(&str, &str)]) -> String {
+    pages(name, vars).trim_end_matches('\n').to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sections_are_found_and_filled() {
+        assert_eq!(
+            resource("required", &[]),
+            " required\n",
+            "a section keeps its leading space and gets its newline"
+        );
+        assert_eq!(
+            resource_inline("index td", &[("S", "post"), ("COL", "title")]),
+            "        <td class=\"px-4 py-3 text-gray-700 dark:text-gray-300\">{{ post.title }}</td>"
+        );
+        assert!(resource("index", &[("S", "post"), ("P", "posts")]).contains("paths::new_post()"));
+        assert!(pages("page", &[("TITLE", "About")]).contains(">About</h1>"));
+    }
+}

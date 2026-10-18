@@ -1,0 +1,19 @@
+@@ README
+The HTML `cargo offrails g controller` and `g page` write (one section per piece; `@@ <name>` starts
+one). `__NAME__` tokens are filled by src/generate/controller.rs and page.rs.
+@@ action
+{% extends "layouts/application.html" %}
+{% block content %}
+<h1 class="text-3xl font-semibold tracking-tight">__TITLE__</h1>
+<p class="mt-4 text-gray-700 dark:text-gray-300">APP: what this page shows__SHOWS__ (templates/__TEMPLATE__).</p>
+{% endblock %}
+@@ page
+{% extends "layouts/application.html" %}
+{% block content %}
+<article class="py-6">
+  <h1 class="text-3xl font-semibold tracking-tight">__TITLE__</h1>
+  <p class="mt-4 text-gray-700 dark:text-gray-300">APP: the __LOWER__ page's words__SHOWS__ (templates/pages/__NAME__.html).</p>
+</article>
+{% endblock %}
+@@ param
+ <code>{{ __PARAM__ }}</code>

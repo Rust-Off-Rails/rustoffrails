@@ -7,6 +7,7 @@
 use super::Flags;
 use super::app::AppInfo;
 use super::feature::{self, Mount};
+use super::html;
 use super::names::{self, Names};
 use super::plan::Plan;
 use super::resource::RESERVED;
@@ -207,7 +208,7 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
         let shows: String = a
             .params
             .iter()
-            .map(|p| format!(" <code>{{{{ {p} }}}}</code>"))
+            .map(|p| html::pages_inline("param", &[("PARAM", p)]))
             .collect();
         let shows = if shows.is_empty() {
             String::new()
@@ -216,9 +217,13 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
         };
         plan.create(
             format!("templates/{}", a.template),
-            format!(
-                "{{% extends \"layouts/application.html\" %}}\n{{% block content %}}\n<h1 class=\"text-3xl font-semibold tracking-tight\">{title}</h1>\n<p class=\"mt-4 text-gray-700 dark:text-gray-300\">APP: what this page shows{shows} (templates/{}).</p>\n{{% endblock %}}\n",
-                a.template
+            html::pages(
+                "action",
+                &[
+                    ("TITLE", &title),
+                    ("SHOWS", &shows),
+                    ("TEMPLATE", &a.template),
+                ],
             ),
         );
         let setup = if user {
@@ -333,7 +338,5 @@ pub fn not_tenant_row(info: &AppInfo, plan: &mut Plan, flags: &Flags, url: &str,
 /// A link in the main nav (`templates/shared/_nav.html`; full paths: partials resolve names in
 /// each including struct's module).
 pub fn nav_link(path_fn: &str, label: &str) -> String {
-    format!(
-        "<a href=\"{{{{ crate::routes::paths::{path_fn}() }}}}\" class=\"text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100\">{label}</a>\n"
-    )
+    html::resource("nav link", &[("PATH_FN", path_fn), ("LABEL", label)])
 }

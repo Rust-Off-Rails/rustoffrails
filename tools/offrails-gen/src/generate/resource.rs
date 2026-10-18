@@ -8,6 +8,7 @@ use super::Flags;
 use super::app::AppInfo;
 use super::feature::{self, Mount};
 use super::fields::{Field, Kind};
+use super::html;
 use super::migration;
 use super::model::{self, ModelSpec, Scope};
 use super::plan::Plan;
@@ -428,172 +429,149 @@ impl Ctx<'_> {
         out
     }
 
-    // ---------- templates ----------
+    // ---------- templates: the markup is files/html/resource.html ----------
+
+    fn names_vars(&self) -> Vec<(&'static str, String)> {
+        let n = &self.spec.names;
+        vec![
+            ("HP", n.human_plural.clone()),
+            ("LOWER_P", n.lower_plural.clone()),
+            ("LOWER", n.lower.clone()),
+            ("S", n.singular.clone()),
+            ("P", n.plural.clone()),
+        ]
+    }
+
+    fn page(&self, name: &str, more: &[(&'static str, String)]) -> String {
+        let mut vars = more.to_vec();
+        vars.extend(self.names_vars());
+        let refs: Vec<(&str, &str)> = vars.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        html::resource(name, &refs)
+    }
 
     fn index_html(&self) -> String {
-        let n = &self.spec.names;
-        let (s, p) = (&n.singular, &n.plural);
-        let cols = index_columns(&self.spec.fields);
-        let mut head = String::from(
-            "        <th scope=\"col\" class=\"px-4 py-3 text-left font-medium text-gray-700 dark:text-gray-300\">Name</th>\n",
-        );
-        let mut cells = format!(
-            "        <td class=\"px-4 py-3\"><a href=\"{{{{ paths::{s}(*{s}.id) }}}}\" class=\"link\">{{{{ {s}.label }}}}</a></td>\n"
-        );
-        for f in &cols {
-            head.push_str(&format!(
-                "        <th scope=\"col\" class=\"px-4 py-3 text-left font-medium text-gray-700 dark:text-gray-300\">{}</th>\n",
-                f.human()
-            ));
-            cells.push_str(&format!(
-                "        <td class=\"px-4 py-3 text-gray-700 dark:text-gray-300\">{{{{ {s}.{} }}}}</td>\n",
-                f.column()
+        let s = &self.spec.names.singular;
+        let mut head = html::resource("index th", &[("LABEL", "Name")]);
+        let mut cells = html::resource("index label td", &[("S", s)]);
+        for f in index_columns(&self.spec.fields) {
+            head.push_str(&html::resource("index th", &[("LABEL", &f.human())]));
+            cells.push_str(&html::resource(
+                "index td",
+                &[("S", s), ("COL", &f.column())],
             ));
         }
-        format!(
-            "{{% extends \"layouts/application.html\" %}}\n{{% block content %}}\n<div class=\"flex flex-wrap items-end justify-between gap-4\">\n  <h1 class=\"text-3xl font-semibold tracking-tight\">{hp}</h1>\n  <a href=\"{{{{ paths::new_{s}() }}}}\" class=\"btn\">New {lower}</a>\n</div>\n{{% if {p}.is_empty() %}}\n<p class=\"mt-10 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 p-10 text-center text-gray-600 dark:text-gray-400\">No {lower_p} yet. <a href=\"{{{{ paths::new_{s}() }}}}\" class=\"link\">Create the first one</a>.</p>\n{{% else %}}\n<div class=\"mt-8 overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800\">\n  <table class=\"min-w-full divide-y divide-gray-200 dark:divide-gray-800 text-sm\">\n    <thead class=\"bg-gray-50 dark:bg-gray-900\">\n      <tr>\n{head}        <th scope=\"col\" class=\"px-4 py-3\"><span class=\"sr-only\">Actions</span></th>\n      </tr>\n    </thead>\n    <tbody class=\"divide-y divide-gray-200 dark:divide-gray-800 bg-white dark:bg-gray-950\">\n      {{% for {s} in {p} %}}\n      <tr id=\"{s}_{{{{ {s}.id }}}}\">\n{cells}        <td class=\"px-4 py-3 text-right whitespace-nowrap\"><a href=\"{{{{ paths::edit_{s}(*{s}.id) }}}}\" class=\"link\">Edit</a></td>\n      </tr>\n      {{% endfor %}}\n    </tbody>\n  </table>\n</div>\n{{% endif %}}\n{{% if newer().is_some() || older().is_some() %}}\n<nav class=\"mt-6 flex justify-between text-sm\" aria-label=\"Pages\">\n  {{% if let Some(href) = newer() %}}<a href=\"{{{{ href }}}}\" class=\"link\">&larr; Newer</a>{{% else %}}<span></span>{{% endif %}}\n  {{% if let Some(href) = older() %}}<a href=\"{{{{ href }}}}\" class=\"link\">Older &rarr;</a>{{% endif %}}\n</nav>\n{{% endif %}}\n{{% endblock %}}\n",
-            hp = n.human_plural,
-            lower = n.lower,
-            lower_p = n.lower_plural,
-        )
+        self.page("index", &[("HEAD", head), ("CELLS", cells)])
     }
 
     fn show_html(&self) -> String {
-        let n = &self.spec.names;
-        let s = &n.singular;
+        let s = &self.spec.names.singular;
         let mut rows = String::new();
         for f in &self.spec.fields {
             let pre = if matches!(f.kind, Kind::Text | Kind::Json) {
-                " whitespace-pre-line break-words"
+                html::resource_inline("show pre", &[])
             } else {
-                ""
+                String::new()
             };
-            rows.push_str(&format!(
-                "  <div class=\"grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-4\">\n    <dt class=\"text-sm font-medium text-gray-600 dark:text-gray-400\">{}</dt>\n    <dd class=\"text-sm text-gray-900 dark:text-gray-100 sm:col-span-2{pre}\">{{{{ {s}.{} }}}}</dd>\n  </div>\n",
-                f.human(),
-                f.column()
+            rows.push_str(&html::resource(
+                "show row",
+                &[
+                    ("LABEL", &f.human()),
+                    ("S", s),
+                    ("COL", &f.column()),
+                    ("PRE", &pre),
+                ],
             ));
         }
-        format!(
-            "{{% extends \"layouts/application.html\" %}}\n{{% block content %}}\n<div class=\"flex flex-wrap items-end justify-between gap-4\">\n  <h1 class=\"text-3xl font-semibold tracking-tight break-words\">{{{{ {s}.label }}}}</h1>\n  <div class=\"flex items-center gap-2\">\n    <a href=\"{{{{ paths::edit_{s}(*{s}.id) }}}}\" class=\"btn-secondary\">Edit</a>\n    <form method=\"post\" action=\"{{{{ paths::delete_{s}(*{s}.id) }}}}\" data-confirm=\"Delete this {lower}? This can't be undone.\">\n      <button class=\"btn-danger\">Delete</button>\n    </form>\n  </div>\n</div>\n<dl class=\"mt-8 divide-y divide-gray-200 dark:divide-gray-800 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900\">\n{rows}</dl>\n<p class=\"mt-6 text-sm\"><a href=\"{{{{ paths::{p}() }}}}\" class=\"link\">&larr; All {lower_p}</a></p>\n{{% endblock %}}\n",
-            lower = n.lower,
-            lower_p = n.lower_plural,
-            p = n.plural
-        )
+        self.page("show", &[("ROWS", rows)])
     }
 
     fn form_html(&self) -> String {
-        let n = &self.spec.names;
-        let s = &n.singular;
-        let mut out = String::from(
-            "<form method=\"post\" action=\"{{ action }}\" class=\"mt-8 space-y-6\" novalidate>\n  {% include \"shared/_errors.html\" %}\n",
-        );
-        for f in &self.spec.fields {
-            out.push_str(&self.form_field(f));
-        }
-        out.push_str(&format!(
-            "  <div class=\"flex flex-wrap items-center gap-3\">\n    <button class=\"btn\">Save {lower}</button>\n    <a href=\"{{{{ paths::{p}() }}}}\" class=\"btn-secondary\">Cancel</a>\n  </div>\n</form>\n",
-            lower = n.lower,
-            p = n.plural
-        ));
-        let _ = s;
-        out
+        let fields: String = self
+            .spec
+            .fields
+            .iter()
+            .map(|f| self.form_field(f))
+            .collect();
+        self.page("form", &[("FIELDS", fields)])
     }
 
     fn form_field(&self, f: &Field) -> String {
         let s = &self.spec.names.singular;
         let p = f.param();
-        let key = &f.name;
+        let key = f.name.clone();
         let id = format!("{s}_{p}");
-        let invalid = format!(
-            "{{% if !errors.on(\"{key}\").is_empty() %}} aria-invalid=\"true\" aria-describedby=\"{id}_error\"{{% endif %}}"
-        );
-        let required = if f.nullable || f.kind == Kind::Boolean {
-            ""
-        } else {
-            " required"
-        };
         let label = f.human();
-        let hint = if f.nullable {
-            " <span class=\"font-normal text-gray-600 dark:text-gray-400\">(optional)</span>"
+        let invalid = html::resource_inline("invalid", &[("KEY", &key), ("ID", &id)]);
+        let required = if f.nullable || f.kind == Kind::Boolean {
+            String::new()
         } else {
-            ""
+            html::resource_inline("required", &[])
         };
-        let errors = format!(
-            "    {{% for msg in errors.on(\"{key}\") %}}<p id=\"{id}_error\" class=\"field-error\">{label} {{{{ msg }}}}</p>{{% endfor %}}\n"
-        );
-        let value = format!("{{{{ params.{p} }}}}");
+        let hint = if f.nullable {
+            html::resource_inline("optional hint", &[])
+        } else {
+            String::new()
+        };
+        let errors = html::resource("errors", &[("KEY", &key), ("ID", &id), ("LABEL", &label)]);
+        let max = model::max_len(f).to_string();
+        let vars = |extra: &[(&'static str, &str)]| -> Vec<(&'static str, String)> {
+            let mut v: Vec<(&'static str, String)> =
+                extra.iter().map(|(k, x)| (*k, (*x).to_owned())).collect();
+            v.extend([
+                ("REQUIRED", required.clone()),
+                ("INVALID", invalid.clone()),
+                ("ID", id.clone()),
+                ("NAME", p.clone()),
+                ("KEY", key.clone()),
+                ("MAX", max.clone()),
+            ]);
+            v
+        };
+        let control_of = |section: &str, extra: &[(&'static str, &str)]| -> String {
+            let v = vars(extra);
+            let refs: Vec<(&str, &str)> = v.iter().map(|(k, x)| (*k, x.as_str())).collect();
+            html::resource(section, &refs)
+        };
         let control = match &f.kind {
-            Kind::String => format!(
-                "    <input type=\"text\" id=\"{id}\" name=\"{p}\" value=\"{value}\" class=\"input\" maxlength=\"{}\"{required}{invalid}>\n",
-                model::max_len(f)
-            ),
-            Kind::Text => format!(
-                "    <textarea id=\"{id}\" name=\"{p}\" rows=\"6\" class=\"input\"{required}{invalid}>{value}</textarea>\n"
-            ),
-            Kind::Integer | Kind::BigInt => format!(
-                "    <input type=\"number\" id=\"{id}\" name=\"{p}\" value=\"{value}\" class=\"input\" step=\"1\" inputmode=\"numeric\"{required}{invalid}>\n"
-            ),
-            Kind::Decimal { .. } => format!(
-                "    <input type=\"text\" id=\"{id}\" name=\"{p}\" value=\"{value}\" class=\"input\" inputmode=\"decimal\"{required}{invalid}>\n"
-            ),
-            Kind::Money => format!(
-                "    <input type=\"text\" id=\"{id}\" name=\"{p}\" value=\"{value}\" class=\"input\" inputmode=\"decimal\" placeholder=\"0.00\"{required}{invalid}>\n"
-            ),
-            Kind::DateTime => format!(
-                "    <input type=\"datetime-local\" id=\"{id}\" name=\"{p}\" value=\"{value}\" class=\"input\"{required}{invalid}>\n"
-            ),
-            Kind::Date => format!(
-                "    <input type=\"date\" id=\"{id}\" name=\"{p}\" value=\"{value}\" class=\"input\"{required}{invalid}>\n"
-            ),
-            Kind::Uuid => format!(
-                "    <input type=\"text\" id=\"{id}\" name=\"{p}\" value=\"{value}\" class=\"input font-mono\" autocapitalize=\"off\" spellcheck=\"false\"{required}{invalid}>\n"
-            ),
-            Kind::Json => format!(
-                "    <textarea id=\"{id}\" name=\"{p}\" rows=\"6\" class=\"input font-mono\" spellcheck=\"false\"{required}{invalid}>{value}</textarea>\n"
-            ),
+            Kind::String => control_of("control string", &[]),
+            Kind::Text => control_of("control text", &[]),
+            Kind::Integer | Kind::BigInt => control_of("control integer", &[]),
+            Kind::Decimal { .. } => control_of("control decimal", &[]),
+            Kind::Money => control_of("control money", &[]),
+            Kind::DateTime => control_of("control datetime", &[]),
+            Kind::Date => control_of("control date", &[]),
+            Kind::Uuid => control_of("control uuid", &[]),
+            Kind::Json => control_of("control json", &[]),
             Kind::Boolean if !f.nullable => {
-                return format!(
-                    "  <div>\n    <div class=\"flex items-center gap-2\">\n      <input type=\"checkbox\" id=\"{id}\" name=\"{p}\" value=\"true\" class=\"h-4 w-4 rounded border-gray-300 dark:border-gray-700 accent-indigo-600 dark:accent-indigo-400\"{{% if params.{p} == \"true\" %}} checked{{% endif %}}{invalid}>\n      <label for=\"{id}\" class=\"label\">{label}</label>\n    </div>\n{errors}  </div>\n"
-                );
+                return control_of("checkbox field", &[("LABEL", &label), ("ERRORS", &errors)]);
             }
-            Kind::Boolean => format!(
-                "    <select id=\"{id}\" name=\"{p}\" class=\"input\"{invalid}>\n      <option value=\"\">Not set</option>\n      <option value=\"true\"{{% if params.{p} == \"true\" %}} selected{{% endif %}}>Yes</option>\n      <option value=\"false\"{{% if params.{p} == \"false\" %}} selected{{% endif %}}>No</option>\n    </select>\n"
-            ),
+            Kind::Boolean => control_of("control optional boolean", &[]),
             Kind::References { target } => {
                 if self.spec.target(f).is_some_and(|t| t.choices) {
-                    format!(
-                        "    <select id=\"{id}\" name=\"{p}\" class=\"input\"{required}{invalid}>\n      <option value=\"\">Choose a {}</option>\n      {{% for (choice_id, choice_label) in choices.{key} %}}\n      <option value=\"{{{{ choice_id }}}}\"{{% if params.{p} == choice_id.to_string() %}} selected{{% endif %}}>{{{{ choice_label }}}}</option>\n      {{% endfor %}}\n    </select>\n",
-                        target.lower
-                    )
+                    control_of("control reference select", &[("TARGET", &target.lower)])
                 } else {
-                    format!(
-                        "    <input type=\"number\" id=\"{id}\" name=\"{p}\" value=\"{value}\" class=\"input\" step=\"1\" inputmode=\"numeric\"{required}{invalid}>\n"
-                    )
+                    control_of("control reference id", &[])
                 }
             }
         };
-        format!(
-            "  <div>\n    <label for=\"{id}\" class=\"label\">{label}{hint}</label>\n{control}{errors}  </div>\n"
+        html::resource(
+            "field",
+            &[
+                ("ID", &id),
+                ("LABEL", &label),
+                ("HINT", &hint),
+                ("CONTROL", &control),
+                ("ERRORS", &errors),
+            ],
         )
     }
 
     fn new_html(&self) -> String {
-        let n = &self.spec.names;
-        format!(
-            "{{% extends \"layouts/application.html\" %}}\n{{% block content %}}\n<h1 class=\"text-3xl font-semibold tracking-tight\">New {}</h1>\n{{% include \"{}/_form.html\" %}}\n{{% endblock %}}\n",
-            n.lower, n.plural
-        )
+        self.page("new", &[])
     }
 
     fn edit_html(&self) -> String {
-        let n = &self.spec.names;
-        format!(
-            "{{% extends \"layouts/application.html\" %}}\n{{% block content %}}\n<div class=\"flex flex-wrap items-end justify-between gap-4\">\n  <h1 class=\"text-3xl font-semibold tracking-tight\">Edit {lower}</h1>\n  <a href=\"{{{{ paths::{s}(*id) }}}}\" class=\"btn-secondary\">Show</a>\n</div>\n{{% include \"{p}/_form.html\" %}}\n{{% endblock %}}\n",
-            lower = n.lower,
-            s = n.singular,
-            p = n.plural
-        )
+        self.page("edit", &[])
     }
 
     // ---------- routes: src/routes/<plural>.rs ----------
@@ -937,10 +915,7 @@ pub fn plan(info: &AppInfo, args: &[String], flags: &Flags) -> Result<Plan> {
         plan.insert(
             "templates/shared/_nav.html",
             "nav links",
-            format!(
-                "<a href=\"{{{{ crate::routes::paths::{p}() }}}}\" class=\"text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100\">{}</a>\n",
-                n.human_plural
-            ),
+            html::resource("nav link", &[("PATH_FN", p), ("LABEL", &n.human_plural)]),
         );
     }
     if spec.scope == Scope::Public {

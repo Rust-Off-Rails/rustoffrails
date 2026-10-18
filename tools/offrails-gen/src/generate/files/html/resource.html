@@ -1,0 +1,146 @@
+@@ README
+The HTML `cargo offrails g resource` writes, one section per piece (`@@ <name>` starts one; the
+section runs to the next). `__NAME__` tokens are filled by src/generate/resource.rs; everything else
+is copied as is. Swap the markup here (a component kit, other tokens) and the golden files show the
+change: `UPDATE_GOLDEN=1 cargo test golden`. The resource snippet (template/snippets/resource) is this
+output too; re-export it after a change.
+@@ index
+{% extends "layouts/application.html" %}
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-4">
+  <h1 class="text-3xl font-semibold tracking-tight">__HP__</h1>
+  <a href="{{ paths::new___S__() }}" class="btn">New __LOWER__</a>
+</div>
+{% if __P__.is_empty() %}
+<p class="mt-10 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 p-10 text-center text-gray-600 dark:text-gray-400">No __LOWER_P__ yet. <a href="{{ paths::new___S__() }}" class="link">Create the first one</a>.</p>
+{% else %}
+<div class="mt-8 overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
+  <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-800 text-sm">
+    <thead class="bg-gray-50 dark:bg-gray-900">
+      <tr>
+__HEAD__        <th scope="col" class="px-4 py-3"><span class="sr-only">Actions</span></th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-200 dark:divide-gray-800 bg-white dark:bg-gray-950">
+      {% for __S__ in __P__ %}
+      <tr id="__S___{{ __S__.id }}">
+__CELLS__        <td class="px-4 py-3 text-right whitespace-nowrap"><a href="{{ paths::edit___S__(*__S__.id) }}" class="link">Edit</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% if newer().is_some() || older().is_some() %}
+<nav class="mt-6 flex justify-between text-sm" aria-label="Pages">
+  {% if let Some(href) = newer() %}<a href="{{ href }}" class="link">&larr; Newer</a>{% else %}<span></span>{% endif %}
+  {% if let Some(href) = older() %}<a href="{{ href }}" class="link">Older &rarr;</a>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}
+@@ index th
+        <th scope="col" class="px-4 py-3 text-left font-medium text-gray-700 dark:text-gray-300">__LABEL__</th>
+@@ index label td
+        <td class="px-4 py-3"><a href="{{ paths::__S__(*__S__.id) }}" class="link">{{ __S__.label }}</a></td>
+@@ index td
+        <td class="px-4 py-3 text-gray-700 dark:text-gray-300">{{ __S__.__COL__ }}</td>
+@@ show
+{% extends "layouts/application.html" %}
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-4">
+  <h1 class="text-3xl font-semibold tracking-tight break-words">{{ __S__.label }}</h1>
+  <div class="flex items-center gap-2">
+    <a href="{{ paths::edit___S__(*__S__.id) }}" class="btn-secondary">Edit</a>
+    <form method="post" action="{{ paths::delete___S__(*__S__.id) }}" data-confirm="Delete this __LOWER__? This can't be undone.">
+      <button class="btn-danger">Delete</button>
+    </form>
+  </div>
+</div>
+<dl class="mt-8 divide-y divide-gray-200 dark:divide-gray-800 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+__ROWS__</dl>
+<p class="mt-6 text-sm"><a href="{{ paths::__P__() }}" class="link">&larr; All __LOWER_P__</a></p>
+{% endblock %}
+@@ show row
+  <div class="grid gap-1 px-4 py-3 sm:grid-cols-3 sm:gap-4">
+    <dt class="text-sm font-medium text-gray-600 dark:text-gray-400">__LABEL__</dt>
+    <dd class="text-sm text-gray-900 dark:text-gray-100 sm:col-span-2__PRE__">{{ __S__.__COL__ }}</dd>
+  </div>
+@@ show pre
+ whitespace-pre-line break-words
+@@ new
+{% extends "layouts/application.html" %}
+{% block content %}
+<h1 class="text-3xl font-semibold tracking-tight">New __LOWER__</h1>
+{% include "__P__/_form.html" %}
+{% endblock %}
+@@ edit
+{% extends "layouts/application.html" %}
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-4">
+  <h1 class="text-3xl font-semibold tracking-tight">Edit __LOWER__</h1>
+  <a href="{{ paths::__S__(*id) }}" class="btn-secondary">Show</a>
+</div>
+{% include "__P__/_form.html" %}
+{% endblock %}
+@@ form
+<form method="post" action="{{ action }}" class="mt-8 space-y-6" novalidate>
+  {% include "shared/_errors.html" %}
+__FIELDS__  <div class="flex flex-wrap items-center gap-3">
+    <button class="btn">Save __LOWER__</button>
+    <a href="{{ paths::__P__() }}" class="btn-secondary">Cancel</a>
+  </div>
+</form>
+@@ field
+  <div>
+    <label for="__ID__" class="label">__LABEL____HINT__</label>
+__CONTROL____ERRORS__  </div>
+@@ checkbox field
+  <div>
+    <div class="flex items-center gap-2">
+      <input type="checkbox" id="__ID__" name="__NAME__" value="true" class="h-4 w-4 rounded border-gray-300 dark:border-gray-700 accent-indigo-600 dark:accent-indigo-400"{% if params.__NAME__ == "true" %} checked{% endif %}__INVALID__>
+      <label for="__ID__" class="label">__LABEL__</label>
+    </div>
+__ERRORS__  </div>
+@@ optional hint
+ <span class="font-normal text-gray-600 dark:text-gray-400">(optional)</span>
+@@ errors
+    {% for msg in errors.on("__KEY__") %}<p id="__ID___error" class="field-error">__LABEL__ {{ msg }}</p>{% endfor %}
+@@ invalid
+{% if !errors.on("__KEY__").is_empty() %} aria-invalid="true" aria-describedby="__ID___error"{% endif %}
+@@ required
+ required
+@@ control string
+    <input type="text" id="__ID__" name="__NAME__" value="{{ params.__NAME__ }}" class="input" maxlength="__MAX__"__REQUIRED____INVALID__>
+@@ control text
+    <textarea id="__ID__" name="__NAME__" rows="6" class="input"__REQUIRED____INVALID__>{{ params.__NAME__ }}</textarea>
+@@ control integer
+    <input type="number" id="__ID__" name="__NAME__" value="{{ params.__NAME__ }}" class="input" step="1" inputmode="numeric"__REQUIRED____INVALID__>
+@@ control decimal
+    <input type="text" id="__ID__" name="__NAME__" value="{{ params.__NAME__ }}" class="input" inputmode="decimal"__REQUIRED____INVALID__>
+@@ control money
+    <input type="text" id="__ID__" name="__NAME__" value="{{ params.__NAME__ }}" class="input" inputmode="decimal" placeholder="0.00"__REQUIRED____INVALID__>
+@@ control datetime
+    <input type="datetime-local" id="__ID__" name="__NAME__" value="{{ params.__NAME__ }}" class="input"__REQUIRED____INVALID__>
+@@ control date
+    <input type="date" id="__ID__" name="__NAME__" value="{{ params.__NAME__ }}" class="input"__REQUIRED____INVALID__>
+@@ control uuid
+    <input type="text" id="__ID__" name="__NAME__" value="{{ params.__NAME__ }}" class="input font-mono" autocapitalize="off" spellcheck="false"__REQUIRED____INVALID__>
+@@ control json
+    <textarea id="__ID__" name="__NAME__" rows="6" class="input font-mono" spellcheck="false"__REQUIRED____INVALID__>{{ params.__NAME__ }}</textarea>
+@@ control optional boolean
+    <select id="__ID__" name="__NAME__" class="input"__INVALID__>
+      <option value="">Not set</option>
+      <option value="true"{% if params.__NAME__ == "true" %} selected{% endif %}>Yes</option>
+      <option value="false"{% if params.__NAME__ == "false" %} selected{% endif %}>No</option>
+    </select>
+@@ control reference select
+    <select id="__ID__" name="__NAME__" class="input"__REQUIRED____INVALID__>
+      <option value="">Choose a __TARGET__</option>
+      {% for (choice_id, choice_label) in choices.__KEY__ %}
+      <option value="{{ choice_id }}"{% if params.__NAME__ == choice_id.to_string() %} selected{% endif %}>{{ choice_label }}</option>
+      {% endfor %}
+    </select>
+@@ control reference id
+    <input type="number" id="__ID__" name="__NAME__" value="{{ params.__NAME__ }}" class="input" step="1" inputmode="numeric"__REQUIRED____INVALID__>
+@@ nav link
+<a href="{{ crate::routes::paths::__PATH_FN__() }}" class="text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100">__LABEL__</a>

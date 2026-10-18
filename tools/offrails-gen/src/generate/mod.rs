@@ -10,6 +10,7 @@ pub mod channel;
 pub mod controller;
 pub mod feature;
 pub mod fields;
+pub mod html;
 pub mod job;
 pub mod mailer;
 pub mod manifest;
