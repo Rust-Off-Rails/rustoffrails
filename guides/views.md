@@ -26,7 +26,7 @@ Don't use `askama_axum` or any `IntoResponse` derive. Call `views::render(...)` 
 ## Page structs
 
 ```rust
-// src/views/posts.rs
+// src/views/posts.rs (the controllers are src/controllers/posts/<action>.rs)
 use askama::Template;
 
 #[derive(Template)]

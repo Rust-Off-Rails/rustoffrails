@@ -75,6 +75,15 @@ cargo offrails update-part <part>… --framework "$FW" --dry-run   # the plan: t
 cargo offrails update-part <part>… --framework "$FW"
 ```
 
+**An app on 0.7.1 or older has no `update-part`** (its `cargo offrails` is the vendored, older offrails-gen): run the new release's instead, the same arguments plus `--app .`:
+
+```sh
+cargo run -q --manifest-path "$FW/tools/offrails-gen/Cargo.toml" --target-dir target/offrails-gen-new -- \
+  update-part <part>… --framework "$FW" --app . --dry-run    # then without --dry-run
+```
+
+After step 6's re-vendoring, `cargo offrails` is the new release's, and `update-part` works directly from then on.
+
 Per file it is a three-way merge: the part as installed (`.offrails/`), the new part (`$FW`), the app's copy. A file only the part changed is taken; one only the app changed is kept; both changed merges line by line, and overlapping edits are written with `<<<<<<< app` / `||||||| <part> <old>` / `=======` / `>>>>>>> <part> <new>` markers (exit 1). Wiring the part changed is swapped where the old text still stands. It never overwrites an app change silently. Resolve every marker (`grep -rn '<<<<<<<' src templates tests migration`), then `cargo fmt --all`, `cargo run -q -- db migrate`, and the part's CHECKS.md. `update-part` logs `updated sample <name> <old> -> <new>` in `docs/decisions.md`.
 
 

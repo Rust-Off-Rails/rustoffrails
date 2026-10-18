@@ -28,8 +28,16 @@ try {
   let s = await state();
   check(s.path === "/dev" && s.styled, "app nav → /dev is styled without a hard refresh");
 
-  // 2. Seed three emails with the dev-only button, then open the mailbox.
-  for (let i = 0; i < 3; i++) await click('form[action="/dev/mailbox/test"] button');
+  // 2. Seed three emails with the dev-only button, then open the mailbox. The button lands on the
+  // list or on the message it sent (dev-mailbox 0.7.2+), which may not carry the button again.
+  const seed = 'form[action="/dev/mailbox/test"] button';
+  for (let i = 0; i < 3; i++) {
+    if (!(await page.$(seed))) await page.goto(`${BASE}/dev`, { waitUntil: "load" });
+    await click(seed);
+    s = await state();
+    check(/^\/dev\/mailbox(\/\d+)?$/.test(s.path) && s.styled, `the test-email button lands in the mailbox (${s.path})`);
+  }
+  if (s.path !== "/dev/mailbox") await page.goto(`${BASE}/dev/mailbox`, { waitUntil: "load" });
   s = await state();
   check(s.path === "/dev/mailbox" && s.styled && s.rows >= 3, `mailbox lists the seeded mail (${s.rows} rows)`);
 

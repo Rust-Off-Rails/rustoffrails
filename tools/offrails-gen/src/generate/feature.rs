@@ -58,10 +58,11 @@ pub fn path_of(module: &str) -> String {
 
 /// The routes file's text.
 pub fn file(r: &Routes) -> String {
+    // Only each chain's first verb is a `routing::` function; the rest are `MethodRouter` methods.
     let mut methods: Vec<&str> = r
         .mounts
         .iter()
-        .flat_map(|m| m.methods.iter().map(|(x, _)| *x))
+        .filter_map(|m| m.methods.first().map(|(x, _)| *x))
         .collect();
     methods.sort_unstable();
     methods.dedup();
@@ -337,7 +338,7 @@ mod tests {
             shared: false,
         };
         let f = file(&r);
-        assert!(f.contains("use axum::{Router, routing::{get, post}};"));
+        assert!(f.contains("use axum::{Router, routing::get};"), "{f}");
         assert!(f.contains(".route(\"/posts\", get(crate::controllers::posts::index).post(crate::controllers::posts::create))"));
         assert!(f.contains("    pub fn posts() -> String {\n"));
         let parsed = routes_md::parse(&f);

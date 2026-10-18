@@ -28,6 +28,9 @@ App jobs, workers and `app jobs …` exist once the `jobs` part is in; API token
 
 ```
 cargo offrails generate <kind> <name> [field:type…] [--dry-run] [--force]   # alias g; `g --help` lists the kinds
+cargo offrails snippets                                   # small tested code to copy (feed, slugs, Markdown, pager…)
+cargo offrails snippet show <name>                        # its README, files and wiring
+cargo offrails snippet add <name> [--as <model>]          # copied and wired, recorded; `snippet remove <name>` takes it back
 cargo offrails destroy <kind> <name> [--dry-run]                           # alias d; removes only unchanged files
 cargo offrails parts                          # parts: installed or available, what each needs and adds (alias list-parts)
 cargo offrails add <name>… [--dry-run]        # add parts (dependencies first); re-running is a no-op (alias add-part)
@@ -79,7 +82,16 @@ The binary embeds the `migration` crate. The Docker entrypoint (`bin/docker-entr
 
 ## Running the app from an agent
 
-- **Start it as a tracked background task** using your harness's mechanism (Claude Code: Bash with `run_in_background`), running `bin/dev` or `cargo run -- serve`, **with a PID file** (below). Don't use `nohup … &` from a tool call: the harness can reap it within minutes, and the human then gets "connection refused".
+- **Start it as a tracked background task** using your harness's mechanism (Claude Code: Bash with `run_in_background`), running `bin/dev` or `cargo run -- serve`, **with a PID file** (below). Don't use `nohup … &` from a tool call when you are the session the human talks to: the harness can reap it within minutes, and the human then gets "connection refused".
+- **A sub-agent that hands a running server back to its caller** is the exception: its tracked background tasks end when it does, so the server dies with it. Start it detached, with its output in a file and its PID file, and hand back the three facts the caller needs:
+
+  ```sh
+  mkdir -p storage/pids storage/logs
+  PORT=3005 nohup bin/dev > storage/logs/dev-3005.log 2>&1 < /dev/null &   # bin/dev writes storage/pids/dev-3005.pid
+  # wait for ✓ ready in the log, then prove it: curl -fsS <the URL it printed>/up
+  ```
+
+  Report: the URL `bin/dev` printed, `storage/pids/dev-3005.pid`, `storage/logs/dev-3005.log`. The caller (or the human) stops it with `kill "$(cat storage/pids/dev-3005.pid)"`. Re-check `/up` from the caller before telling the human it's up: if it's gone, start it again as the caller's own background task.
 - **Pick a free port** and set `PORT`. Check it first with `lsof -nP -iTCP:$PORT -sTCP:LISTEN`: on macOS, development's `127.0.0.1:$PORT` bind succeeds even when another process holds `*:$PORT` (a container's published port, a production-mode run, another framework's dev server), because tokio sets `SO_REUSEADDR`. Then `127.0.0.1` reaches your app while `localhost` over IPv6 (`[::1]`) may silently reach the *other* one (verified 2026-10-16: with `*:P` or `[::]:P` held, a `127.0.0.1:P` bind succeeds; with `127.0.0.1:P` held, it fails). A taken `127.0.0.1:$PORT` still fails the bind with a clear error. After starting, confirm `/up` answers from **your** process (the PID from `lsof`). In development, `APP_URL` defaults to `https://localhost:{PORT}` when `serve` has TLS (a trusted certificate from `bin/dev-cert`) and `http://localhost:{PORT}` otherwise ([config](guides/config.md)), so email links and the CSRF origin check follow the port and scheme. **Use the exact URL `bin/dev` printed** (`→ …` and `✓ ready: …`); a bare `localhost:PORT` is http to a browser (the TLS port answers it with a 307 to https).
 - **Prove it's up before telling the human:** `curl -fsS $URL/up` with the printed URL (`-k` only with `DEV_CERT_SELF_SIGNED=1`, and then tell the human to open the printed http URL, never the self-signed one). Re-check after any restart. Then `curl -s $URL/dev/introspect.json` answers what state it's in (pending migrations, stale CSS, protocol).
 - **Never tell a human to click through a certificate warning.** Chrome drops cookies on an untrusted certificate, so login bounces ([dev-tools](guides/dev-tools.md#https-in-development)).

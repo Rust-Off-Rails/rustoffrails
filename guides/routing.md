@@ -1,14 +1,14 @@
 # Routing (`config/routes.rb` → `src/routes.rs`)
 
 > **TL;DR**
-> - Every route lives in `src/routes.rs`, plus `paths::` helpers and the `ROUTES` table with an `Access` level per route (tests walk it; `#[rustfmt::skip]` keeps it aligned).
+> - The router is `src/routes.rs`: the middleware, the kernel's routes, `paths::` helpers and the `ROUTES` table with an `Access` level per route (tests walk it; `#[rustfmt::skip]` keeps it aligned). Each feature's routes are its own file, `src/routes/<feature>.rs` (its `router()`, its `paths::`, its `ROUTES` rows), wired in by four lines marked `// <feature>` ([below](#a-features-routes-file)).
 > - htmx mode uses POST-only resource routes (`/posts/{id}/delete`); inertia uses real verbs; spa exposes `/api` only.
 > - axum 0.8: `/{id}`, never `/:id`; a parameter is a whole segment (`/{id}.eml` panics at startup); the body extractor goes last.
 > - Middleware order matters: security headers outside panic and timeout layers, the migrations guard after the fallback.
 >
 > Read the rest when adding routes, middleware, or nested resources.
 
-Every route lives in `src/routes.rs`. One file, read top to bottom, is the whole URL surface of the app.
+`src/routes.rs`, read top to bottom, is the whole URL surface of the app: its own routes, then one `app = app.merge(<feature>::router()); // <feature>` line per feature, each a file in `src/routes/`.
 
 ## The resource shape
 
@@ -98,7 +98,7 @@ pub enum Access { Public, User, Admin, Dev }
 /// The route table. `app routes` prints it and writes docs/routes.md. Tests assert every entry is
 /// routable (not 404/405) in development and enforce its access level, so it can't drift.
 #[rustfmt::skip] // keep the table aligned; cargo fmt would explode each tuple onto five lines
-pub const ROUTES: &[(&str, &str, &str, Access)] = &[
+pub const ROUTES: &[(&str, &str, &str, Access)] = &[   // since 0.7.3: APP_ROUTES + TABLES (below)
     ("GET",  "/",                 "home::index",              Access::Public),
     ("GET",  "/up",               "health::up",               Access::Public),
     ("GET",  "/posts",            "posts::index",             Access::Public),
@@ -111,6 +111,37 @@ pub const ROUTES: &[(&str, &str, &str, Access)] = &[
 
 - `router` returns `anyhow::Result` because `add_trusted_origin` validates `APP_URL`. `main` and `TestApp` both call it.
 - **Every route goes in `ROUTES`** with its access level, framework routes included (`/admin/*` are `Admin`, `/dev/*` are `Dev`).
+
+### A feature's routes file
+
+Generators and snippets write one per feature, and a hand-written feature takes the same shape. `src/routes/posts.rs`:
+
+```rust
+use axum::{Router, routing::{get, post}};   // each chain's first verb only
+
+use super::{Access, Route};
+use crate::state::AppState;
+
+pub fn router() -> Router<AppState> {
+    Router::new()
+        .route("/posts", get(crate::controllers::posts::index).post(crate::controllers::posts::create))
+        .route("/posts/{id}/delete", post(crate::controllers::posts::destroy))
+}
+
+/// URL helpers; `crate::routes::paths` re-exports them.
+pub mod paths {
+    pub fn posts() -> String { "/posts".into() }
+    pub fn delete_post(id: i64) -> String { format!("/posts/{id}/delete") }
+}
+
+#[rustfmt::skip]
+pub const ROUTES: &[Route] = &[
+    ("GET",  "/posts",             "posts::index",   Access::User),
+    ("POST", "/posts/{id}/delete", "posts::destroy", Access::User),
+];
+```
+
+and four lines in `src/routes.rs`, one at each anchor: `pub mod posts; // posts` (`samples: route mods`), `app = app.merge(posts::router()); // posts` (`samples: routes`), `pub use super::posts::paths::*; // posts` (`samples: paths`), and `posts::ROUTES,` under a `// posts` line (`samples: route tables`). `ROUTES` is `APP_ROUTES` (the kernel's and the parts' rows) followed by every table in `TABLES`, concatenated at compile time, so `for (method, path, handler, access) in ROUTES` sees every row; `security_test::every_mounted_route_is_in_the_routes_table` reads `src/routes/*.rs` too. Removing the feature is deleting the file and those four lines.
 
 ## axum 0.8 gotchas (agents get these wrong)
 

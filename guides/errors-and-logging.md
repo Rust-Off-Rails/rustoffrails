@@ -301,7 +301,15 @@ It's for text, after the fact. It never replaces the rules above: secrets stay o
 
 ## Spans
 
-Controller actions and model or service functions carry `#[tracing::instrument(skip_all)]`, so each request's traces (the `dev-dashboard` part's waterfalls, any OpenTelemetry layer) name the work it did. The template's actions do; so does generated code. Add a field only when it's safe and useful, e.g. `#[tracing::instrument(skip_all, fields(id))]` for a record id. **Never put secrets or personal data in span fields** (passwords, tokens, emails, names, request bodies): `skip_all` is the default for that reason, and span fields reach logs and dashboards.
+**The rule (one, everywhere: the guides, the generators, the snippets, the parts' READMEs):**
+
+| What | Attribute | Why |
+|------|-----------|-----|
+| a controller action, a public model or service fn, a job's `perform`, a mailer fn | `#[tracing::instrument(skip_all)]` (the default level, INFO) | one or a few per request: production traces name the work |
+| a helper called many times per request (in a loop, per row), or a step only worth seeing while debugging | `#[tracing::instrument(level = "debug", skip_all)]` | free in production (the filter is `info`: the span is never built); the dev dashboard shows it |
+| anything | never without `skip_all` | arguments are secrets and personal data more often than not |
+
+So each request's traces (the `dev-dashboard` part's waterfalls, any OpenTelemetry layer) name the work it did. The template's actions follow it; so do generated code and the snippets. Add a field only when it's safe and useful, e.g. `#[tracing::instrument(skip_all, fields(id))]` for a record id. **Never put secrets or personal data in span fields** (passwords, tokens, emails, names, request bodies): `skip_all` is the default for that reason, and span fields reach logs and dashboards.
 
 ## Health check
 

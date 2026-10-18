@@ -41,6 +41,7 @@ Each line is a mistake an agent shipped. The check that catches it is in parenth
 3. Follow only the `FRONTEND_MODE` branch of each guide, and the `UI_LIBRARY` branch of the JS guides.
 4. Done means `.offrails/workflow.md#definition-of-done`, green, with each item's command run. Start with `sh .offrails/tools/offrails-check`.
 5. Log decisions not covered by `.offrails/` in `docs/decisions.md`; supersede, never edit.
+6. **Start app code from a snippet or a generator (both tested, both yours once copied); hand-write the rest.** `cargo offrails snippets` (`snippet show <name>` to read one), `cargo offrails g --help`; neither is mandatory. Commit after each run, then edit. Keep a feature in its own small files, and mark each line it adds to a shared file with its name (`// posts`).
 
 ## Quick commands
 
@@ -56,6 +57,8 @@ docker compose up -d db        # a Postgres for verify (or set TEST_DATABASE_URL
 cargo run -- db migrate        # migrate (any DATABASE_URL)
 cargo run -q -- introspect     # the app's state as JSON (development; live parts: $URL/dev/introspect.json)
 cargo run -- routes            # list routes (with access levels); rewrites docs/routes.md
+cargo offrails snippets        # small tested code to copy: snippet show <name> (read), snippet add <name> (copy + wire)
+cargo offrails g --help        # generators: resource, model, controller (path params), page, api, job, mailer, channel, test
 cargo offrails list-parts      # parts (mailer, jobs, auth, realtime, dev dashboard): installed or available
 cargo offrails add-part <name> # add one when the product needs it (dependencies first; re-running is a no-op)
 cargo run -- jobs stats        # with the jobs part: job counts per state (dashboard: /admin/jobs; dev tools: /dev)

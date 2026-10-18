@@ -1,89 +1,58 @@
-# Generator: `authentication` (`rails generate authentication` / `phx.gen.auth`)
+# Accounts (`rails generate authentication` / `phx.gen.auth`): the auth parts
 
 > **TL;DR**
-> - Implements `guides/auth.md` for the `ACCOUNTS` variant (`signup`, `invite`, `magic-link`, `magic-link-invite`); write `product/features/accounts.md` first.
-> - Steps in order, compiling at each one: crates → migrations → kernel (`session.rs`, rate limits) → models → extractors → error shaping → jobs that mint tokens → mailer → controllers → routes → views → dev seed → tests.
-> - Tests: one per `AC-accounts-<n>`, plus cookie flags, no token in job args, idle-session expiry, the dev mailbox hint (dev only), the magic-link list from auth.md, and the app's first real-browser smoke (`tests/e2e/`).
+> - Accounts are **parts**, not a recipe to type: `cargo offrails add auth-core auth-password` (email + password), `auth-core auth-magic-link` (passwordless), both, and `auth-totp` for two-factor. They bring users, database sessions, sign-in, the account security page, security emails, the audit trail, throttling and their own tests ([the parts](../template/README.md#choosing-parts), [samples](https://github.com/Rust-Off-Rails/samples)).
+> - Before: write `product/features/accounts.md`, and pick the variant from the interview (`ACCOUNTS: signup | magic-link | magic-link-invite | invite`). After: the header (`ACCOUNTS`, `TENANCY`), `APP_SECRET_KEY`, where people land after sign-in, your own handlers scoped to the user, the tenancy suites (the first scoped `g resource` writes them), and the browser smoke.
+> - What's left is product, not plumbing: invite-only sign-up, roles, teams, the spec's own acceptance tests. Each is listed below with where it goes.
 >
 > Read it all when adding accounts to an app.
 
-Implements the design in [`guides/auth.md`](../guides/auth.md). Read that first. This recipe is the file checklist, in an order that compiles at every step. The `signup` variant was executed end to end in the reference app (htmx) on 2026-10-12, green on SQLite and Postgres.
+Design: [`guides/auth.md`](../guides/auth.md) (the why, the flows, the threat model) and [`guides/security.md`](../guides/security.md). The parts implement it, tested; this page is the order of work and what the parts leave to you. Before 0.7.0 this page was a 14-step checklist for writing it all by hand; don't.
 
-## Inputs (from the interview, recorded in the app's `AGENTS.md`)
+## 0. Spec and variant
 
-- `ACCOUNTS`: `magic-link` | `magic-link-invite` | `signup` | `invite` (table in [auth.md#variants](../guides/auth.md#variants-accounts-in-the-apps-agentsmd))
-- `ROLES`: none | admin+member | custom
-- `TENANCY`: per-user | teams | shared (never `none` here: that means no accounts)
+Write `product/features/accounts.md` from [`blueprints/feature-spec.md`](../blueprints/feature-spec.md): one `AC-accounts-<n>` per behavior the product promises (who may sign up, how people sign in, where they land, what an admin can do), and the STRIDE `## Security` table. The parts' suites already prove the generic contract (cookie flags, rotation, throttling, enumeration safety, single-use links); your criteria cite their tests where they cover one, and get a test of their own where they don't.
 
-## 0. Spec first
+| `ACCOUNTS` (interview) | Parts | Then |
+|------------------------|-------|------|
+| `signup` | `auth-core auth-password` | done: sign-up, verification, reset, sign-in |
+| `magic-link` | `auth-core auth-magic-link` | done: sign-up on first link |
+| `invite` | `auth-core auth-password` | make sign-up invite-only ([below](#invite-only)) |
+| `magic-link-invite` | `auth-core auth-magic-link` | make sign-up invite-only ([below](#invite-only)) |
+| any, plus two-factor | `+ auth-totp` | optional per user; required for admins is yours ([below](#roles-and-teams)) |
 
-Write `product/features/accounts.md` from [`blueprints/feature-spec.md`](../blueprints/feature-spec.md), with `AC-accounts-<n>` criteria for each behavior below that applies (sign-up, duplicate email, password length, login, same message for bad email and bad password, logout ends the session, rate limit, reset request is enumeration-safe, link single-use and expiry, reset logs out other sessions, return-to). Record assumptions, e.g. "no email confirmation while EMAIL is not yet".
+`auth-core` needs `mailer` and `dev-mailbox`; `add` installs them first.
 
-## Steps
+## 1. Add the parts
 
-1. **Crates:**
-   - password variants: `cargo add argon2` (0.6; default features);
-   - all variants: nothing else (`rand`, `sha2`, `base64` come with `new`).
-2. **Migrations**, one each (`sea-orm-cli migrate generate …`), in this order because of the foreign keys:
-   - `create_users`: `big_pk_auto`, `email` + unique `users_email_key`, `password_digest` (`string`; `string_null` for magic-link), `email_verified_at` (`timestamp_with_time_zone_null`; [pre-hijacking](../guides/auth.md#claiming-an-unverified-account-pre-hijacking)), `role` if roles, timestamps;
-   - `create_sessions`: FK cascade + `sessions_user_id_idx`, unique `sessions_token_digest_key`, `ip`/`user_agent` as `string_null`, `created_at`, `last_seen_at`;
-   - then `create_password_resets` (password variants) **or** `create_login_links` (magic-link: `email`, unique digest, `expires_at`, `created_at`, index on `email`);
-   - teams: `create_accounts`, `create_memberships` (`account_id`, `user_id`, `role`, unique pair).
+```sh
+cargo offrails add auth-core auth-password --dry-run   # what it will do
+cargo offrails add auth-core auth-password
+cargo run -q -- db migrate                             # then prove it: db rollback --steps <n> && db migrate
+```
 
-   Run `cargo run -- db migrate`, then prove `db rollback --steps N && db migrate`.
-3. **Kernel:**
-   - `kernel/session.rs`: `generate_token`, `digest`, `read`/`read_cookie`, and the hand-formatted `cookie`/`clear_cookie`/`removal`;
-   - `kernel/return_to.rs`: `cookie`, `read` (validated), `clear`, `is_safe`.
+`add` updates the `ACCOUNTS` header line; set `TENANCY` yourself (`per-user` for records people own, `teams` with teams). Read each part's README, "After installing" and "Adapting it", and its CHECKS.md.
 
-   Both get unit tests (token length and uniqueness, cookie flags, `//` and `/\` rejected).
-4. **Models:**
-   - `user.rs`: entity without `Serialize`; `SignupParams` + `validate`; `normalize_email`; `check_password`; `hash_password`/`verify_password` on `spawn_blocking`; `find`; `find_by_email`; `create` (unique violation → "has already been taken"); `authenticate` with the `LazyLock` dummy digest; `update_password`; `claim_unverified(txn, id, now) → bool`;
-   - `session.rs`: `start → (Model, raw)`, `find_by_token(db, raw, now)` (one `find_also_related` query, idle-expiry filter), `touch` (hourly), `destroy`, `destroy_all_for_user`, `delete_expired`;
-   - `password_reset.rs`: `issue(db, user_id, now) → raw`, `find_valid`, `consume` (validate the password, then one transaction: `claim_unverified` (and on `true` drop the account's API tokens), update, delete resets and sessions), `delete_stale`;
-   - **or** `login_link.rs`: `issue(db, email, now) → raw`, `find_valid`, `consume(db, raw, now) → Option<(User, Session, raw_token)>` (one transaction: delete the row, find or create the user with `ON CONFLICT DO NOTHING` (created verified), end a session the browser already had (`session::destroy`), start the session), `delete_expired`.
+## 2. What the parts leave to you
 
-   Register them in `models/mod.rs` with `pub type User = user::Model;`.
-5. **Extractors** in `controllers/application.rs`:
-   - `load_session` with the `LoadedSession` extension cache;
-   - `Ctx` gains `current_user` and `dev_mailbox`;
-   - `CurrentUser`, `RequireUser`, `CurrentSession`, `UserAgent`;
-   - `RequireAdmin` if roles (and switch `AdminAccess` to it);
-   - `CurrentAccount` if teams.
-6. **Error shaping:** in `error::shape_errors`, capture the GET path (not `/api`) before running the request. On `Unauthorized`, append `return_to::cookie(path, secure)` to the redirect.
-7. **Jobs:**
-   - `jobs/password_reset_email.rs` (`PasswordResetEmailJob { user_id }`) **or** `jobs/login_link_email.rs` (`LoginLinkEmailJob { email }`). Each issues the token in `perform`, renders the mail, calls `state.mailer.deliver`. `MAX_ATTEMPTS = 5`; `Outcome::Cancel` when the user is gone.
-   - Register the job in `dispatch` and `worker_config`.
-   - Add `session::delete_expired` and `password_reset::delete_stale` / `login_link::delete_expired` to `CleanupJob`.
-8. **Mailer:** `mailers/passwords.rs::reset` (or `mailers/login_links.rs::login`) with `templates/mailers/<mailer>/<action>.{html,txt}` extending the mail layout. Use absolute links built from `config.app_url` + `paths::`. Add a preview to `PREVIEWS` in `src/mailers/previews.rs` with a fake user and a placeholder token, never a real one ([mailer generator](mailer.md) step 4; shown in the mailbox's Previews tab at `/dev/mailbox/previews`). The reference app shipped without one, and the dev index showed "0 mailer previews". A test renders every `PREVIEWS` entry.
-9. **Controllers:**
-   - `sessions.rs`: `new`, `create` (password variants), `destroy`;
-   - `registrations.rs`: `new`, `create` (`signup` only; user + session in one transaction);
-   - `passwords.rs`: `new`, `create`, `edit`, `update`;
-   - **or** `login_links.rs`: `create`, `sent`, `show` (confirm page), `consume`;
-   - `spa`: `controllers/api/…` returning JSON, plus `GET /api/session`.
+1. **Configuration.** `APP_SECRET_KEY` (≥ 32 characters, `openssl rand -base64 48`) in the deploy config: production refuses to boot without it. `SMTP_URL` for real email (verification, resets and links are emails). Schedule `app task auth_cleanup` daily (the jobs part's `recurring.rs`, or cron).
+2. **Where people land.** `paths::after_sign_in()` (`// APP:` in `src/routes.rs`): the app's home for signed-in people.
+3. **Your handlers.** `RequireUser(user)` on every private page, `RequireRecentAuth` on anything that changes credentials or money, and an owner-scoped query for every record (`<model>::find_for(db, &user, id)`). With accounts installed, `cargo offrails g resource …` writes exactly that, plus `tests/app/guard_test.rs` and `tests/app/tenancy_test.rs` on the first scoped resource ([scaffold](scaffold.md)); hand-written handlers follow the same shape ([models](../guides/models.md#scoped-lookups-tenancy)).
+4. **The nav.** The parts add "Sign in" and the account link at the `samples: nav links` anchor; the rest of the signed-in nav is yours.
+5. **The browser smoke.** `tests/e2e/smoke.scenario.mjs` with `login(page, base)` (the real form; magic links: read the link from `/dev/mailbox/latest.json`) and `loggedIn(page)`; then `SCENARIO=tests/e2e/smoke.scenario.mjs BASE=<the URL bin/dev printed> bash .offrails/tools/browser-smoke/run.sh login` with no certificate overrides, and `… run.sh a11y` in light and dark ([test-standards §9](../guides/test-standards.md#9-real-browser-smoke)). `verify --full` signs in as `demo@example.com` from `cargo run -- task auth_demo`, or as `SMOKE_EMAIL`/`SMOKE_PASSWORD`.
+6. **Seeds.** `cargo run -- task auth_demo` makes the development demo account; your own seed accounts go in `src/tasks/seed.rs`, development only (refuse in production).
 
-   Rate-limit login, reset and link requests (10 per 3 minutes per IP + action; magic links also per email; 1000 in development; refused attempts never extend the window, [security](../guides/security.md#rate-limiting-kernelrate_limitrs)). Re-render the form with **429** and "Try again later."
-10. **Routes:** the table in [auth.md](../guides/auth.md#routes-password-variants) (magic-link: [its flow table](../guides/auth.md#flow)):
-    - `paths::` helpers, including `dev_mailbox()` if the dev tools haven't added it;
-    - `ROUTES` rows: `Access::Public`, except log-out (`Access::User`).
-11. **Views / pages:**
-    - htmx: `views/{sessions,registrations,passwords}.rs` (or `login_links.rs`) and their templates, in the two-scheme palette ([views](../guides/views.md#dark-mode));
-    - `templates/shared/_dev_mailbox_hint.html` (amber, with its `dark:` partners), included at the top of every auth screen (mandatory on `/login_links/sent`);
-    - nav: "Log in" + "Sign up", or the reader's email + a "Log out" form;
-    - inertia/spa: the matching pages plus a `DevMailboxHint` component fed by the `dev_mailbox` prop.
-12. **Seed** (development only; `tasks/seed.rs` refuses to run in production): create `reader@example.com` (`admin@example.com` if roles) with a random password printed once. Skip it if the account already exists. Magic-link: no password; log in through `/dev/mailbox`.
-13. **Tests:**
-    - `tests/app/support.rs` gains `login_as(&user)` (real `session::start` + jar cookie), `cookie(name)`, `set_cookie`, `logout_locally()`, `assert_text`, `without_fetch_metadata()`/`with_origin()` ([testing](../guides/testing.md));
-    - `tests/app/factories.rs` gains `create_user` with the shared one-time digest;
-    - `tests/app/accounts_test.rs` has one test per `AC-accounts-<n>`, plus:
-      - cookie flags (`Secure` only with production config);
-      - logged-in readers are redirected away from the login and sign-up forms;
-      - the job args hold no token;
-      - an idle session expires;
-      - the dev mailbox hint appears in development and is absent in production and test configs;
-    - magic-link: the required list in [auth.md](../guides/auth.md#required-tests).
-    - **`tests/app/guard_test.rs`**, verbatim from [test-standards §4](../guides/test-standards.md#4-tenant-isolation-suite-every-app-with-accounts): no unscoped lookups in handlers. Mark the handlers that legitimately read nothing private (`new` forms, the dev tools) with `// unscoped: <reason>`.
-    - **`tests/e2e/smoke.scenario.mjs`**: `login(page, base)` fills and submits the real form (sign-up or login; magic links: request the link, read it from `/dev/mailbox/latest.json`, open it), `loggedIn(page)` reads the logged-in nav, plus `a11yPaths`/`a11yAuthPaths`. Check: `SCENARIO=tests/e2e/smoke.scenario.mjs BASE=<the URL bin/dev printed> bash .offrails/tools/browser-smoke/run.sh login` passes with no certificate overrides ([dev-tools](../guides/dev-tools.md#browser-smoke)), and `… run.sh a11y` passes in light and dark;
-    - **`tests/app/tenancy_test.rs`** from the §4 template, with `Tenant` holding the user (and team, with `teams`) and `fill` knowing `{id}` of every id route that exists so far. Every later model (scaffold step 3) extends it. Check: `cargo nextest run tenancy_test guard_test` passes, and `tools/offrails-check` (`offrails check`) reports no tenancy errors.
-    - **the app's first real-browser smoke** (it's the first critical flow): `tests/e2e/` for htmx (`web/e2e/` in TS modes) per [test-standards §9](../guides/test-standards.md#9-real-browser-smoke), with one spec: sign up or request a link → open it from `/dev/mailbox/latest.json` → logged in → log out. `page.on('dialog', d => d.accept())` in the setup, so a `data-confirm` never hangs it.
-14. Log decisions in `docs/decisions.md` (variant, any deviation). Run the [security checklist](../guides/security.md#checklist), then the Definition of Done. Smoke the flows in a real browser: sign up, log out, log in, and request a reset and open it from `/dev/mailbox` (see [test-standards §9](../guides/test-standards.md#9-real-browser-smoke)).
+### Invite-only
+
+`ACCOUNTS: invite` (or `magic-link-invite`): no public sign-up. With `auth-password`, remove the `/registration*` routes and the "Sign up" links (the part's `auth nav links` and `sign in links` wiring), create users from an admin screen or a task (`user::find_or_create` + `password_credential::set`), and send them a reset link (`passwords::send_reset`) to choose a password. With `auth-magic-link`, refuse a link for an email that has no account yet (the part creates accounts on first use). Either way: an `AC-accounts-<n>` that a stranger can't create an account, with its test, and the part's tests that sign up (they assume open sign-up) adapted, not deleted. Check the part's README first: a newer version may ship invite-only as an option.
+
+### Roles and teams
+
+Not in the parts (they're product decisions):
+
+- **Roles:** a `role` column on `users` (a migration), `RequireAdmin` next to `RequireUser` in `src/controllers/auth.rs`, and `AdminAccess` (the kernel's admin pages: `/admin/jobs`, the dashboard) switched to it ([auth](../guides/auth.md), [security](../guides/security.md)). Two-factor for admins: refuse admin pages until `totp_credential::enabled_for` is true.
+- **Teams:** `accounts` and `memberships` tables, `CurrentAccount`, every query scoped to the account instead of the user, and the tenancy suite's `Tenant` holding the account ([test-standards §4](../guides/test-standards.md#4-tenant-isolation-suite-every-app-with-accounts)).
+
+## 3. Done
+
+Log the variant and any deviation in `docs/decisions.md` (`add` already logged the parts). Run the [security checklist](../guides/security.md#checklist), then the [Definition of Done](../workflow.md#definition-of-done) on SQLite and Postgres, and smoke the flows in a real browser: sign up (or request a link), sign out, sign in, a reset opened from `/dev/mailbox`.

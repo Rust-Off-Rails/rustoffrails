@@ -240,30 +240,34 @@ fn plan(
 
     if opts.full && have_cargo("llvm-cov") {
         // The SQLite suite, instrumented: one run proves the tests and the coverage gate.
-        steps.push(
-            Step::new(
-                "tests (SQLite) + coverage",
-                "cargo",
-                &[
-                    "llvm-cov",
-                    "nextest",
-                    "--summary-only",
-                    "--no-fail-fast",
-                    "--ignore-filename-regex",
-                    r"src/main\.rs$",
-                    "--fail-under-lines",
-                    "80",
-                    "--status-level",
-                    "fail",
-                    "--final-status-level",
-                    "flaky",
-                    "--test-threads",
-                    &threads,
-                ],
-            )
-            .env("TEST_DATABASE_URL", None)
-            .after(&test_after),
-        );
+        let mut coverage = Step::new(
+            "tests (SQLite) + coverage",
+            "cargo",
+            &[
+                "llvm-cov",
+                "nextest",
+                "--summary-only",
+                "--no-fail-fast",
+                "--ignore-filename-regex",
+                r"src/main\.rs$",
+                "--fail-under-lines",
+                "80",
+                "--status-level",
+                "fail",
+                "--final-status-level",
+                "flaky",
+                "--test-threads",
+                &threads,
+            ],
+        )
+        .env("TEST_DATABASE_URL", None)
+        .after(&test_after);
+        if let Some((cov, profdata)) = homebrew_llvm() {
+            coverage = coverage
+                .env("LLVM_COV", Some(&cov))
+                .env("LLVM_PROFDATA", Some(&profdata));
+        }
+        steps.push(coverage);
     } else {
         if opts.full {
             skipped.push(skip(
@@ -381,11 +385,15 @@ fn plan(
     let smoke = smokes.join("run.sh");
     match std::env::var("BASE") {
         Ok(base) if !base.is_empty() && smoke.is_file() => {
-            steps.push(Step::new(
-                "browser smoke",
-                "sh",
-                &[".offrails/tools/browser-smoke/run.sh"],
-            ));
+            // Node too old or no Chrome: run.sh exits 77, a skip (said so), never a pass.
+            steps.push(
+                Step::new(
+                    "browser smoke",
+                    "sh",
+                    &[".offrails/tools/browser-smoke/run.sh"],
+                )
+                .skip_on(SKIP_EXIT),
+            );
             // Every page in docs/routes.md, after a full load and after a boosted link: the same
             // elements must react (guides/frontend-htmx.md#boosted-navigation). No npm install:
             // Node and the installed Chrome; exit 77 without one, reported as skip.
@@ -418,7 +426,8 @@ fn plan(
                         "sh",
                         &[".offrails/tools/browser-smoke/run.sh", "a11y"],
                     )
-                    .env("SCENARIO", Some("tests/e2e/smoke.scenario.mjs")),
+                    .env("SCENARIO", Some("tests/e2e/smoke.scenario.mjs"))
+                    .skip_on(SKIP_EXIT),
                 );
             }
         }
@@ -673,6 +682,29 @@ fn summary_note(log: &str) -> String {
 }
 
 /// `cargo <sub> --version` works (an installed cargo subcommand).
+/// cargo-llvm-cov finds `llvm-cov` and `llvm-profdata` in rustup's `llvm-tools` component. A
+/// toolchain without rustup (Homebrew's `rust`) has none: use Homebrew's `llvm` when it's
+/// installed (`brew install llvm`) and LLVM_COV / LLVM_PROFDATA aren't set already.
+fn homebrew_llvm() -> Option<(String, String)> {
+    if std::env::var_os("LLVM_COV").is_some() || util::have("rustup") {
+        return None;
+    }
+    [
+        "/opt/homebrew/opt/llvm/bin",
+        "/usr/local/opt/llvm/bin",
+        "/home/linuxbrew/.linuxbrew/opt/llvm/bin",
+    ]
+    .iter()
+    .map(Path::new)
+    .find(|d| d.join("llvm-cov").is_file() && d.join("llvm-profdata").is_file())
+    .map(|d| {
+        (
+            d.join("llvm-cov").to_string_lossy().into_owned(),
+            d.join("llvm-profdata").to_string_lossy().into_owned(),
+        )
+    })
+}
+
 fn have_cargo(sub: &str) -> bool {
     Command::new("cargo")
         .args([sub, "--version"])

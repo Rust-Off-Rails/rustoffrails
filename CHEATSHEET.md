@@ -6,7 +6,8 @@ The rules agents need most, on two pages. Read this first; open a full guide onl
 
 - **New app:** after the interview, `cargo run -q --manifest-path "$FW/tools/offrails-gen/Cargo.toml" --target-dir <dir>/target/offrails-gen -- new <dir> <crate> "<Name>" --parts <a,b>` ([new](generators/new.md)). Never retype the skeleton.
 - **Parts:** propose the ones the spec implies (dev-dashboard always; mailer+dev-mailbox for email; jobs+jobs-dashboard for slow/scheduled work; auth-core+method for sign-in; realtime for pushed updates), link <https://github.com/Rust-Off-Rails/samples>, the human confirms. Later: `cargo offrails parts`, `cargo offrails add <part>`, `cargo offrails update-part <part> --framework <newer>` (3-way merge). Check for a part before hand-writing kernel code.
-- **Features: generate, then customize.** `cargo offrails g resource posts title:string body:text published_at:datetime:optional` (also `migration`, `model`, `controller`, `page`, `api`, `job`, `mailer`, `channel`, `test`; `cargo offrails g --help`). `--dry-run` shows the plan; `cargo offrails destroy <kind> <name>` undoes it. Use a generator before hand-writing; then edit the `// APP:` lines and add the spec's tests ([generators](generators/README.md)).
+- **Features: start from a snippet or a generator, hand-write the rest.** Both are tested, both are yours once copied, neither is mandatory. Snippets: `cargo offrails snippets`, `snippet show <name>` (read or copy), `snippet add <name> [--as <model>]` / `snippet remove <name>` ([snippets](template/snippets/README.md)). Generators: `cargo offrails g resource posts title:string body:text published_at:datetime:optional` (also `migration`, `model`, `controller` (path params: `show:/blog/{slug}`), `page`, `api`, `job`, `mailer`, `channel`, `test`; `cargo offrails g --help`), `--dry-run` shows the plan, `cargo offrails destroy <kind> <name>` undoes it ([generators](generators/README.md)). **Commit after each run**, then edit the `// APP:` lines and add the spec's tests.
+- **Small files, marked lines.** A feature lives in its own folders (`src/controllers/posts/`, `src/models/post/`, `src/routes/posts.rs`, `templates/posts/`, `tests/app/posts/`); a shared file gets one line per spot, marked `// posts`. Write hand-written features the same way.
 - The copied code is the app's: adapt `// APP:` lines, keep `// SECURITY:`/`// INVARIANT:` lines and their tests.
 
 ## Stack, one crate per job ([stack.md](stack.md))
@@ -22,7 +23,7 @@ The rules agents need most, on two pages. Read this first; open a full guide onl
 
 ```
 AGENTS.md  CLAUDE.md  .offrails/ (read-only)  product/ (human specs)  docs/decisions.md
-src/{main,lib,config,state,routes,error}.rs   src/{models,controllers,views,jobs,mailers,channels,policies,tasks,kernel}/
+src/{main,lib,config,state,routes,error}.rs   src/{models,controllers,views,routes,jobs,mailers,channels,policies,tasks,kernel}/
 migration/   templates/   static/   web/ (TS modes)   tests/app/ (ONE test binary)   bin/{setup,dev,docker-entrypoint}
 ```
 
@@ -70,6 +71,8 @@ Never weaken without a decision entry **and** the human's OK: strict CSP (no `un
 23. **Never `location.reload()` after a mutation:** move the DOM optimistically, then `htmx.ajax` the live region ([frontend-htmx](guides/frontend-htmx.md#no-full-reload-after-a-mutation)).
 24. **Ask the running app before guessing:** `curl -s $URL/dev/introspect.json` (migrations, CSS staleness, protocol, streams), development only ([dev-tools](guides/dev-tools.md#introspection)).
 25. **Ids are 64-bit:** `big_pk_auto` and `big_integer` for every `id`/`*_id`, `i64` in entities. A 32-bit id passes on SQLite and is a 500 on every Postgres write; `TestApp` reads `TEST_DATABASE_URL` so the suite runs there (`offrails-check` `[ids]`, `[postgres]`; [migrations](guides/migrations.md#ids-are-64-bit)).
+26. **`assert_text` escapes its argument like Askama** (`'` → `&#39;`), so it finds text that came through `{{ … }}`; a literal apostrophe typed in a template stays `'` and needs `assert_contains` ([testing](guides/testing.md#gotchas-agents-get-wrong)).
+27. **Spans, one rule:** `#[tracing::instrument(skip_all)]` on actions and public model/service fns; `level = "debug", skip_all` on helpers called per row or in a loop; never without `skip_all` ([errors](guides/errors-and-logging.md#spans)).
 
 ## Commands ([cli.md](cli.md))
 

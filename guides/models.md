@@ -8,11 +8,13 @@
 >
 > Read the rest when writing models, validations, associations, enums/money, or pagination.
 
-A model is one file in `src/models/` holding the SeaORM entity for a table, its params, its validation, and every query that touches the table. The same code runs on SQLite and Postgres. Read [`database.md`](database.md) for the portability rules.
+A model is one module in `src/models/` holding the SeaORM entity for a table, its params, its validation, and every query that touches the table. The same code runs on SQLite and Postgres. Read [`database.md`](database.md) for the portability rules.
+
+**Its files.** What generators and snippets write is a folder, so no file grows past a screen or two: `src/models/post/mod.rs` (the entity, its relations, its label, and `pub use params::*; pub use queries::*;`), `params.rs` (`PostParams` → `validate()` → `NewPost`, the edit form's `From<&Model>`, validation unit tests) and `queries.rs` (`find_for`, `all_for`, `create`…). Callers see one module either way: `post::find_for`, `post::PostParams`, `Post`. A model that is one file, `src/models/post.rs` (a part's `user.rs`, or one written by hand), is the same code in one place; both are fine, and the generators read both. The anatomy below is the one-file form; split it at the `// ----------` lines.
 
 > **Entity format: "compact"** (`DeriveEntityModel` + `Relation` enum + `impl Related`). Verified with SeaORM 2.0.4, where it's still `sea-orm-cli generate entity`'s default. 2.x also offers "dense" and "expanded" formats; don't use them, so every model in every app reads the same. Check `Cargo.lock`: if `sea-orm`'s major differs from 2, read its migration guide before writing entities.
 
-## Anatomy of `src/models/post.rs`
+## Anatomy of a model (`src/models/post.rs`, or `post/{mod,params,queries}.rs`)
 
 ```rust
 use chrono::Utc;
@@ -136,7 +138,7 @@ pub async fn destroy(db: &impl ConnectionTrait, id: i64) -> Result<(), AppError>
 }
 ```
 
-`src/models/mod.rs` declares each module and exports a friendly alias: `pub type Post = post::Model;`. Call sites read `post::find(&db, id)` and `Post`.
+`src/models/mod.rs` declares each module and exports a friendly alias: `pub type Post = post::Model;` (generated lines end in `// posts`, the owner's marker). Call sites read `post::find(&db, id)` and `Post`.
 
 ## Rules
 
@@ -148,7 +150,7 @@ pub async fn destroy(db: &impl ConnectionTrait, id: i64) -> Result<(), AppError>
 6. **No raw SQL in models.** SeaORM's query builder emits correct SQL per backend. If you truly need SQL, see `database.md#escape-hatch`.
 7. **Lookups by id are scoped to the actor** when the app has accounts (`TENANCY` isn't `none`). See the next section.
 8. **Inserts that may hit a unique index use `ON CONFLICT DO NOTHING`, never insert-then-catch.** On Postgres the failed insert aborts the whole transaction ("current transaction is aborted"), so a caught duplicate breaks every statement after it; SQLite doesn't, so only the Postgres run shows it. Get-or-create, dedupe, "join if not a member", first login: `Entity::insert(am).on_conflict_do_nothing_on([Column::Email]).exec_without_returning(&txn).await?` returns `TryInsertResult::{Inserted, Conflicted}` (SeaORM 2.0.4), then select the row. A form whose duplicate is a user error (`has already been taken`) may still map the violation with `sql_err()` **outside** a larger transaction ([validations](#validations)).
-9. **Public model fns that do I/O are `#[tracing::instrument(skip_all)]`** (add `fields(id)` for an id at most); never secrets or personal data in span fields ([spans](errors-and-logging.md#spans)).
+9. **Public model fns that do I/O are `#[tracing::instrument(skip_all)]`** (add `fields(id)` for an id at most; a helper called per row: `level = "debug"`, [the one rule](errors-and-logging.md#spans)); never secrets or personal data in span fields.
 
 ## Scoped lookups (tenancy)
 

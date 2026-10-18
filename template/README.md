@@ -3,7 +3,8 @@
 > **TL;DR**
 > - `template/app/` is a complete, compiling, tested blank app (htmx). A new app is a copy of it, renamed, with this framework vendored into `.offrails/`: one command, no code retyped.
 > - `template/parts/<name>/` are the optional kernel parts (mailer, dev mailbox, jobs, jobs dashboard, accounts, realtime, dev dashboard). They are the [samples](https://github.com/Rust-Off-Rails/samples), vendored into the release. Add one at any time with `cargo offrails add-part <name>`.
-> - The generators are `tools/offrails-gen`, a standard-library-only Rust tool: the same commands on Linux, macOS and Windows.
+> - `template/snippets/<name>/` are small, tested code to copy (a feed, slugs, Markdown, a pager, a theme toggle, backdated seeds, a public page by slug, a CRUD resource): `cargo offrails snippets`, `snippet show <name>`, `snippet add <name>` ([snippets](snippets/README.md)).
+> - The generators are `tools/offrails-gen`, a standard-library-only Rust tool: the same commands on Linux, macOS and Windows. Snippets and generators are both optional starting points; whatever you start from, a feature is small files in its own folders plus one marked line per shared spot.
 > - After generating, the app's code is the app's: agents read it, adapt it and own it, as if they had written it. The guides stay the spec for *why*.
 >
 > Read [Using it](#using-it) to make an app, [Choosing parts](#choosing-parts) to pick parts, [Other modes](#other-modes) for inertia/spa/api.
@@ -29,9 +30,11 @@ cargo offrails add jobs-dashboard --dry-run        # what it would do, changing 
 cargo offrails update-part mailer --framework "$FW"   # a newer framework's part, merged 3-way into the app's copy
 cargo offrails g resource posts title:string body:text   # the generators: migration, model, resource, controller, page, api, job, mailer, channel, test
 cargo offrails d resource posts           # undo a generator (files nobody changed)
+cargo offrails snippets                   # the snippets; `snippet show <name>` prints one, `snippet add <name>` copies and wires it
+cargo offrails snippet remove atom-feed   # take a snippet back (files nobody changed, its marked lines)
 ```
 
-The generators ([generators](../generators/README.md)) write a feature's files and its wiring at the same anchors the parts use, format them, and record them in `docs/generated.toml` (so a re-run is a no-op and `destroy` removes exactly what they wrote). `add` is `add-part`, `parts` is `list-parts`.
+The generators ([generators](../generators/README.md)) and `snippet add` ([snippets](snippets/README.md)) write a feature's files and its wiring at the same anchors the parts use, each wired line marked with its owner (`// posts`), format them, and record them in `docs/generated.toml` (so a re-run is a no-op and `destroy` / `snippet remove` removes exactly what they wrote). `add` is `add-part`, `parts` is `list-parts`.
 
 `add-part` checks everything before changing anything: a file the part brings that exists and differs, or a missing anchor, refuses with the reason and changes nothing (`--force` overwrites files). It then runs each `cargo add`, copies the part's `files/` (crate name replaced), inserts each wire above its `samples: <anchor>` comment, logs `installed sample <name> <version>` in `docs/decisions.md`, updates the `AGENTS.md` header line the part changes (`EMAIL` for `mailer`, `ACCOUNTS` for an auth method), and runs `cargo fmt --all`. Re-running it is a no-op. It is the samples repo's `tools/install.sh` in Rust, with the same file format and the same record line, so either tool sees the other's work. Next steps it prints: `cargo run -q -- db migrate` when the part has tables, `cargo run -q -- routes`, then the [Definition of Done](../workflow.md#definition-of-done) on SQLite **and** Postgres, and the part's README ("After installing", "Adapting it") and CHECKS.md.
 
@@ -42,10 +45,11 @@ template/
   app/                 the base app: kernel, layout, error pages, assets, bin/, migration crate, tests/app, CI, Docker
   parts/<name>/        sample.toml (crates, dependencies, wiring), README.md, CHECKS.md, files/ (at app paths)
   parts/SOURCE         the samples commit the parts were synced from (tools/sync-parts.sh)
-tools/offrails-gen/    new, add-part (add), list-parts (parts), update-part, generate (g), destroy (d), vendor, verify
+  snippets/<name>/     snippet.toml (a part's format + `as`, `snippets`), README.md, files/ (at app paths)
+tools/offrails-gen/    new, add-part (add), list-parts (parts), update-part, generate (g), destroy (d), snippets, snippet, vendor, verify
                        (Rust, std only; its own workspace; src/generate/ holds the generators, testdata/golden/ their golden files)
 tools/new-app.sh       sh shorthand for `new`
-tools/ci/test-template.sh   generate bare / all parts / parts added one by one, then the Definition of Done on both databases
+tools/ci/test-template.sh   generate bare / all parts / parts added one by one / every generator / every snippet, then the Definition of Done on both databases
 tools/ci/memory-budget.sh   boot a generated app (release), serve 1000 requests, fail over an RSS budget
 ```
 

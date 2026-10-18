@@ -14,6 +14,10 @@ pub const TITLE_TOKEN: &str = "Offrails App";
 /// The pitch: `APP_TAGLINE` (lowercase, no period) and the default description (a sentence).
 pub const TAGLINE_TOKEN: &str = "a new Rust off Rails app";
 pub const DESCRIPTION_TOKEN: &str = "A new Rust off Rails app.";
+/// The home page's sentence: replaced by the pitch's sentence too.
+pub const HOME_TOKEN: &str = "A new Rust off Rails app, generated from the framework template.";
+/// blueprints/AGENTS.md's one mode-dependent phrase (the Vite URL of the TS modes).
+const TS_ONLY_TOKEN: &str = "{{TS modes only: \", or :5173 via Vite\"; htmx: nothing}}";
 
 /// Top-level framework paths that never go into an app's `.offrails/` (generators/new.md step 1).
 /// hooks/fingerprint.sh compares by content with the same list.
@@ -92,17 +96,25 @@ pub fn rename(text: &str, krate: &str, title: &str, pitch: Option<&str>) -> Stri
         .replace(KEBAB_TOKEN, &kebab)
         .replace(TITLE_TOKEN, title);
     if let Some(p) = pitch {
-        let sentence = if p.ends_with('.') {
-            p.to_owned()
-        } else {
-            format!("{p}.")
-        };
-        let tagline = p.trim_end_matches('.');
+        let (tagline, sentence) = pitch_forms(p);
         s = s
+            .replace(HOME_TOKEN, &sentence)
             .replace(DESCRIPTION_TOKEN, &sentence)
-            .replace(TAGLINE_TOKEN, tagline);
+            .replace(TAGLINE_TOKEN, &tagline);
     }
     s
+}
+
+/// The pitch as a tagline (as typed, no closing period: "App: track the books you read") and as a
+/// sentence (capitalized, with its period: the description, the home page, the social card).
+pub fn pitch_forms(pitch: &str) -> (String, String) {
+    let tagline = pitch.trim().trim_end_matches('.').to_owned();
+    let mut chars = tagline.chars();
+    let sentence = match chars.next() {
+        Some(first) => format!("{}{}.", first.to_uppercase(), chars.as_str()),
+        None => String::new(),
+    };
+    (tagline, sentence)
 }
 
 /// Build outputs and local state that never come from the template, even when someone built it in place.
@@ -166,6 +178,15 @@ pub fn vendor(fw: &Path, app: &Path) -> Result<()> {
 pub fn run(fw: &Path, o: &NewOptions) -> Result<()> {
     validate_crate_name(&o.crate_name)?;
     validate_title(&o.title)?;
+    if let Some(p) = &o.pitch
+        && (p.trim().is_empty()
+            || p.chars()
+                .any(|c| matches!(c, '"' | '\\' | '{' | '}' | '<' | '>' | '\n' | '\r')))
+    {
+        return Err(Fail::usage(format!(
+            "--pitch '{p}' must be one line of plain text (no quotes, backslashes, braces or angle brackets): it goes into Rust strings and HTML"
+        )));
+    }
     match o.mode.as_str() {
         "htmx" | "api" | "inertia" | "spa" => {}
         m => {
@@ -232,6 +253,10 @@ pub fn run(fw: &Path, o: &NewOptions) -> Result<()> {
 
     vendor(fw, app)?;
     println!("  vendor .offrails/ (Rust off Rails {version}, vendored {today})");
+    if cfg!(target_os = "macos") {
+        // Spotlight would index every build artifact: gigabytes of churn, a busy disk.
+        util::write_text(&app.join("target").join(".metadata_never_index"), "")?;
+    }
 
     // AGENTS.md and product/README.md come from the blueprints, the one copy of each.
     let mut agents = util::read_text(&fw.join("blueprints").join("AGENTS.md"))?;
@@ -270,6 +295,8 @@ pub fn run(fw: &Path, o: &NewOptions) -> Result<()> {
             return Err(Fail::new(format!("blueprints/AGENTS.md has no {k}: line")));
         }
     }
+    // htmx (what `new` writes) has no Vite dev server; the TS modes' conversion adds the phrase.
+    agents = agents.replace(TS_ONLY_TOKEN, "");
     util::write_text(&app.join("AGENTS.md"), &agents)?;
     let product = util::read_text(&fw.join("blueprints").join("product-README.md"))?
         .replace("{{App Name}}", &o.title)
@@ -370,10 +397,35 @@ mod tests {
             rename(t, "book_shelf", "Book Shelf", None),
             "name = \"book_shelf\"\nimage: book-shelf:local\nAPP_NAME = \"Book Shelf\"\ntest_book_shelf_x\n"
         );
-        let p = "TAGLINE: &str = \"a new Rust off Rails app\";\nDESC = \"A new Rust off Rails app.\";\n";
+        let p = "TAGLINE: &str = \"a new Rust off Rails app\";\nDESC = \"A new Rust off Rails app.\";\n<p>A new Rust off Rails app, generated from the framework template.</p>\n";
         assert_eq!(
             rename(p, "x", "X", Some("track the books you read")),
-            "TAGLINE: &str = \"track the books you read\";\nDESC = \"track the books you read.\";\n"
+            "TAGLINE: &str = \"track the books you read\";\nDESC = \"Track the books you read.\";\n<p>Track the books you read.</p>\n"
+        );
+        assert_eq!(
+            pitch_forms("Notes from the field."),
+            (
+                "Notes from the field".to_owned(),
+                "Notes from the field.".to_owned()
+            )
+        );
+    }
+
+    #[test]
+    fn the_template_still_has_every_token_new_replaces() {
+        let home = include_str!("../../../template/app/templates/home/index.html");
+        assert!(
+            home.contains(HOME_TOKEN),
+            "templates/home/index.html lost its pitch sentence"
+        );
+        let config = include_str!("../../../template/app/src/config.rs");
+        assert!(config.contains(TAGLINE_TOKEN));
+        let views = include_str!("../../../template/app/src/views/mod.rs");
+        assert!(views.contains(DESCRIPTION_TOKEN));
+        let agents = include_str!("../../../blueprints/AGENTS.md");
+        assert!(
+            agents.contains(TS_ONLY_TOKEN),
+            "blueprints/AGENTS.md's TS phrase changed: update TS_ONLY_TOKEN"
         );
     }
 

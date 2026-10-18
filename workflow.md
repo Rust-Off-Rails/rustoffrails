@@ -11,11 +11,13 @@ Before building anything new, run the relevant part of [`interview.md`](intervie
 ```
 0. ASK      interview.md: new app → full interview; new feature → feature-level checklist
 1. READ     spec → resources, fields, rules, side effects, acceptance criteria
-2. PLAN     the generators that build it (cargo offrails g --help; --dry-run lists their files);
-            a kernel need → a part (cargo offrails parts); hand-write only what neither covers;
-            show the plan for new apps/big features
-3. GENERATE cargo offrails g resource|model|api|… (migration + entity + wiring + tests together);
-            `cargo run -- db migrate`; prove rollback
+2. PLAN     where each piece starts: a snippet (cargo offrails snippets; snippet show <name>),
+            a generator (cargo offrails g --help; --dry-run lists its files), or the guides;
+            a kernel need → a part (cargo offrails parts); show the plan for new apps/big features
+3. START    cargo offrails snippet add … / cargo offrails g resource|model|api|… (files + marked
+            wiring + tests), or write the files by hand in the same shape (small files per
+            feature, one marked line per shared spot); commit right after a generator or snippet
+            run; `cargo run -- db migrate`; prove rollback
 4. MODEL    customize the `// APP:` lines: validation rules, scopes the spec names, side effects
             (inertia/spa: derive TS on Params + view props; tests export them)
 5. TEST     failing tests for the acceptance criteria, next to the generated ones
@@ -99,7 +101,7 @@ Plus, each with the command that proves it (paste its output, or say which item 
 | New env vars are in `.env.example` (commented out is fine), `Config` and the deploy config | `sh .offrails/tools/offrails-check` (`[env]`: every `"SCREAMING_SNAKE"` literal in `src/config.rs`, however it's read, must be in `.env.example`); the deploy config by hand |
 | Decisions not covered by `.offrails/` are logged | `git diff --stat docs/decisions.md` shows a line for each new choice ([conventions](#decisions)) |
 | **Security-relevant changes** (auth, sessions, permissions, tenancy, payments, uploads, realtime, APIs, webhooks, outbound fetches, anything new in `headers_test.rs`) | `/offrails:security` or its checklist; the spec's `## Security` STRIDE table names an **attack test** per threat (failing first, then fixed), and `offrails-check` finds each one. A Non-negotiable ([security](guides/security.md#non-negotiables)) is never weakened without a decision **and** the human's explicit OK. ZAP runs in CI; run it locally when you add routes or change headers |
-| User-visible changes: you ran the app and exercised it. **UI changes: a real-browser smoke** of the changed flow ([test-standards §9](guides/test-standards.md#9-real-browser-smoke)) | `BASE=<the URL bin/dev printed> bash .offrails/tools/browser-smoke/run.sh` (styling, Back/Forward, no console errors or CSP violations); every page after a boosted link: `BASE=… node .offrails/tools/browser-smoke/smoke-boosted.mjs` ([testing](guides/testing.md#browser-smoke-boosted-navigation); both run in `verify --full` with `BASE` set); accounts: `SCENARIO=tests/e2e/smoke.scenario.mjs … run.sh login` (no certificate overrides: the session must survive a fresh page load); `… run.sh a11y` (axe, light + dark); live pages: `… run.sh live-tabs`. `curl -s $BASE/dev/introspect.json \| jq .css.stale,.migrations.current` prints `false`, `true`. Emails: `curl -s $BASE/dev/mailbox/latest.json`. Jobs: `cargo run -- jobs list --state discarded` is empty |
+| User-visible changes: you ran the app and exercised it. **UI changes: a real-browser smoke** of the changed flow ([test-standards §9](guides/test-standards.md#9-real-browser-smoke)) | `BASE=<the URL bin/dev printed> bash .offrails/tools/browser-smoke/run.sh` (styling, Back/Forward, no console errors or CSP violations; Node ≥ 22.12 and Chrome, else it exits 77 and `verify` reports a skip); every page after a boosted link: `BASE=… node .offrails/tools/browser-smoke/smoke-boosted.mjs` ([testing](guides/testing.md#browser-smoke-boosted-navigation); both run in `verify --full` with `BASE` set; with password sign-in it also signs in, as `demo@example.com` from `cargo run -- task auth_demo`, or as `SMOKE_EMAIL`/`SMOKE_PASSWORD` when an app's own seed account differs: `SMOKE_EMAIL=me@example.com SMOKE_PASSWORD=… BASE=… cargo offrails verify --full`; pages with parameters: `SMOKE_PATHS=/posts/1,/blog/hello`); accounts: `SCENARIO=tests/e2e/smoke.scenario.mjs … run.sh login` (no certificate overrides: the session must survive a fresh page load); `… run.sh a11y` (axe, light + dark); live pages: `… run.sh live-tabs`. `curl -s $BASE/dev/introspect.json \| jq .css.stale,.migrations.current` prints `false`, `true`. Emails: `curl -s $BASE/dev/mailbox/latest.json`. Jobs: `cargo run -- jobs list --state discarded` is empty |
 | Templates correct in both color schemes; the built CSS has every class (htmx) | `cargo nextest run theme_test` ([test-standards §11](guides/test-standards.md#11-theme-and-css-guards)) |
 
 ## When something fails
@@ -134,6 +136,8 @@ The rule is zero handwritten code, but humans will occasionally paste a fix. Whe
 ## Commits
 
 One commit per vertical slice. Message format: `<resource>: <what changed>` plus a body listing the spec file(s) implemented. Commit only when the human has asked you to manage commits. The one exception is the baseline commit at the end of `generators/new.md`.
+
+**After a generator or snippet run, commit before you edit** (when commits are yours to make): `git add -A && git commit -m "generate resource posts"`, then customize. The generated code and your changes are separate diffs: review sees what you decided, a bad edit reverts without losing the scaffold, and `destroy` still recognizes the files you left alone. When the human makes the commits, say which files a generator wrote in your report.
 
 ## Talking to the human
 
