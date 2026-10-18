@@ -154,7 +154,7 @@ claude plugin validate . --strict           # manifests, skills, hooks
 claude plugin eval . --runs 1               # run the eval cases
 ```
 
-Every doc change goes under `## Unreleased` in `CHANGELOG.md` the moment it's made, with **App migration** notes written for an agent. Apps detect drift by content fingerprint (`hooks/fingerprint.sh`), not version alone, so even unreleased edits show up as an upgrade.
+Every doc change goes under `## Unreleased` in `CHANGELOG.md` the moment it's made, with **App migration** notes written for an agent.  Each release section keeps the shape described at the top of `CHANGELOG.md` (What's new, Breaking changes, Upgrading, Full list of changes): it becomes the GitHub Release notes. Apps detect drift by content fingerprint (`hooks/fingerprint.sh`), not version alone, so even unreleased edits show up as an upgrade.
 
 Releasing:
 1. Rename `Unreleased` to the new version.

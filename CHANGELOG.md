@@ -2,7 +2,30 @@
 
 Each entry lists convention changes and what an existing app must do about them. `/offrails:upgrade` reads this file, so write the **App migration** notes as instructions for an agent.
 
+Every release section has the same shape, in this order, because `tools/release/release.sh` copies it verbatim into the GitHub Release: **What's new** (4–6 plain bullets: what you can do now and why it matters), **Breaking changes** (what an existing app must act on, or "None."), **Upgrading** (a pointer to the ordered steps and [upgrade](generators/upgrade.md)), then **Full list of changes** (the detailed entries with their App migration notes). Subsections are `###`, so the release script's `## <version> (` heading match still finds the section's end.
+
 ## Unreleased (0.7.3)
+
+### What's new
+
+- **Snippets beside generators.** `cargo offrails snippets` lists small, tested recipes (an Atom feed, slugs, Markdown, pagination, a theme toggle, backdated seeds, a public page by slug, a CRUD resource); `snippet show` prints one to read or copy, `snippet add` copies and wires it, `snippet remove` takes it back. Both snippets and generators are optional starting points.
+- **Generated code is small files with clear insert and remove points.** A resource is a folder per layer (controllers per action pair, the model's entity, params and queries, a routes file, tests by concern), and every line it adds to a shared file is marked with the feature's name, so `destroy` or a person can find and remove it. Path parameters work in `g controller` and `g page`.
+- **Polish from one file and a component kit.** `brand.toml` with `cargo offrails brand` sets the colors (contrast-checked), fonts, radius, logo, favicon set and social card; five layouts (top nav, sidebar, marketing, auth, docs); a kit of Askama components (forms with errors, tables, pagination, cards, modals, a confirm dialog, toasts) shown in every state at `/dev/components`. Generated and snippet pages are built from the kit, in a layout you pick with `--layout`.
+- **`cargo offrails prove`.** With the app running, it screenshots every page at desktop and phone width in light and dark, checks console errors, CSP, accessibility (axe), links and sideways scrolling, and writes `docs/proof/PROOF.md`, which ties each acceptance criterion to its passing tests and the pages they touch.
+- **Invite-only sign-up is a setting.** `DEFAULT_SIGNUP` in `src/config.rs` (or `APP_AUTH_SIGNUP=open|invite`) closes sign-up for every sign-in method, and `app task auth_invite <email>` lets people in; `cargo offrails new … --invite` starts an app that way.
+- **Fixes from real builds and upgrades:** a huge `?page=` no longer crashes generated lists, an upgraded app no longer runs the previous release's `cargo offrails`, `verify --full` accepts a separate coverage toolchain, the browser smokes find any password sign-in form, the Dockerfile stops compiling dependencies twice, and `offrails-check` warns about `hx-trigger` filters that the CSP setup silently disables.
+
+### Breaking changes
+
+- **Generators and `snippet add` need two 0.7.3 template changes first**, and refuse (naming what's missing) without them: the feature routes anchors in `src/routes.rs` (`ROUTES` becomes `APP_ROUTES` + `TABLES`; steps 3–4 below), and the component kit (`templates/components/ui.html` and its helpers; step 6).
+- **The generated file layout changed.** New generations write small files per feature; `destroy` of a `resource`, `model`, `controller`, `page` or `api` generated before 0.7.3 refuses and lists its files (delete them by hand, then `destroy … --forget`).
+- **The `ACCOUNTS` header has new words:** sign-in methods joined by `+`, then `invite` (`signup` → `password`, `invite` → `password invite`, `magic-link-invite` → `magic-link invite`). `add-part` reads the old ones; rewrite the line (step 8).
+- **Build the new release's offrails-gen in its own target directory** (`target/offrails-gen-<version>`) when upgrading, not `target/offrails-gen`.
+- No MSRV or toolchain change.
+
+### Upgrading
+
+Follow the numbered steps below in order (each names the entry whose App migration has the details), and [upgrade](generators/upgrade.md) for the whole procedure (`/offrails:upgrade` runs it).
 
 **Upgrading an app to 0.7.3, in order** (each step's Detect/Converge/Prove is in the entry it names below; [upgrade](generators/upgrade.md) is the whole procedure). `$FW` is the new framework. Build the new release's offrails-gen in its own target directory, `--target-dir "target/offrails-gen-$(cat "$FW/VERSION")"`, never `target/offrails-gen` (From a real app's upgrade, below).
 1. **Parts first, before re-vendoring**, as in 0.7.2: `cargo offrails update-part <each installed part> --framework "$FW" --dry-run`, then without it. The parts are synced from samples `17d8b85` (Parts below: invite-only as a switch, `paths::after_sign_in()`/`account()` in their tests, the mailbox, phone widths). An app on 0.7.1 or older runs the new release's `offrails-gen` for this one step ([upgrade step 6](generators/upgrade.md#6-update-the-parts-then-re-vendor-the-framework)).
@@ -16,6 +39,8 @@ Each entry lists convention changes and what an existing app must do about them.
 9. **Generations recorded before 0.7.3** keep working as code; `destroy` of a `resource`/`model`/`controller`/`page`/`api` from before refuses and lists its files (Generators → App migration).
 10. **Optional polish** (Polish and proof → App migration): `brand.toml` (`cargo offrails brand --init`), the layouts, and `cargo offrails prove`, which `verify --full` runs when `BASE` is set.
 11. **Prove it:** `cargo offrails verify --full` is green on SQLite and Postgres, `sh .offrails/tools/offrails-check` reports 0 errors, `BASE=… cargo offrails prove` says proven, and `docs/decisions.md` has `YYYY-MM-DD: upgraded to framework 0.7.3`.
+
+### Full list of changes
 
 - **Snippets: small, tested code to copy** ([snippets](template/snippets/README.md)). The human, after a timed blog build on 0.7.2 (43 min, most of it friction, ~2,240 hand-written lines): "make generators kinda optional, i guess i still prefer snippets to generators... or generators that have good insertion or removal points. ideally multiple smaller files." The blog had hand-written (or fought) a feed, slugs, Markdown, the pager, a theme button, backdated seeds and a public page by slug. Each is now a snippet in `template/snippets/<name>/`: a README (what, when, the files, the anchors it wires into, how to remove it), a `snippet.toml` in a part's `sample.toml` format (plus `as`, the model `--as` renames, and `snippets`, the snippets it builds on) and `files/` at app paths.
   - **The eight:** `resource` (htmx CRUD for `notes`, public: exactly the files `g resource notes title:string body:text --public` writes; a test in offrails-gen keeps the two identical), `atom-feed` (`GET /feed.xml`, escaped by Askama, RFC 3339 dates, newest 20, `<link rel="alternate">` on every page), `slug` (`slugify`, accents folded, 80 chars; `unique(base, query)`: `-2`, `-3`…, per owner or global), `markdown` (pulldown-cmark + ammonia; tests for `<script>`, `on*=`, `javascript:`, iframes, styles), `pagination` (`Pager` and `shared/_pager.html`, `per` kept, the `?page` clamp), `theme-toggle` (an app-side partial and one delegated handler in `static/app.js`; no-JS POST to `/theme`; a test that the script and the server agree on the cookie), `seed-backdated` (`backdate::<E>(db, id, days_ago(30))` after the model's `create`), `public-show-by-slug` (`GET /read/notes/{slug}`: a route with a path param end to end, a nullable unique `slug` column, slugs that never move).
