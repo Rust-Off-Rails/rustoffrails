@@ -246,7 +246,9 @@ fn plan(
             "--cargo-quiet",
             "--no-fail-fast",
             "--status-level",
-            "fail",
+            // `retry`, not `fail`: a test that fails and then passes on retry is only reported
+            // with its failed attempt\'s output at this level, and that output is the evidence.
+            "retry",
             "--final-status-level",
             "flaky",
         ];
@@ -303,7 +305,9 @@ fn plan(
                 "--fail-under-lines",
                 "80",
                 "--status-level",
-                "fail",
+                // `retry`, not `fail`: a test that fails and then passes on retry is only reported
+                // with its failed attempt\'s output at this level, and that output is the evidence.
+                "retry",
                 "--final-status-level",
                 "flaky",
                 "--test-threads",
@@ -699,7 +703,9 @@ fn rerun_failures_alone(app: &Path, logs: &Path, suites: &[Suite], done: &mut [D
             "--test-threads",
             "1",
             "--status-level",
-            "fail",
+            // `retry`, not `fail`: a test that fails and then passes on retry is only reported
+            // with its failed attempt\'s output at this level, and that output is the evidence.
+            "retry",
             "--final-status-level",
             "none",
             "-E",

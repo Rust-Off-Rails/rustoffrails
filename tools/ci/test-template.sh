@@ -111,12 +111,14 @@ verify() {
   [ -z "$unknown" ] || {
     echo "flaky, and not a known samples flake: $unknown" >&2
     # The failed attempt's output is only in target/verify/, which CI doesn't keep: print it
-    # (nextest's "--- TRY n STDOUT/STDERR: <test>" blocks for that test).
+    # (verify runs nextest at --status-level retry: a "TRY n FAIL … <test>" line, then its
+    # indented stdout ─── / stderr ─── blocks).
     for t in $unknown; do
       echo "--- $t: the failed attempt" >&2
       cat target/verify/tests-*.log 2>/dev/null | awk -v t="$t" '
-        /^--- (TRY [0-9]+ )?(STDOUT|STDERR):/ { show = index($0, t) > 0 }
-        /^ *(PASS|FAIL|FLAKY|TRY [0-9]+ (PASS|FAIL)|SIGSEGV|SIGABRT) / { show = 0 }
+        /^ *(TRY [0-9]+ (PASS|FAIL)|PASS|FAIL|FLAKY|SIGSEGV|SIGABRT|TIMEOUT|Summary) / || /^─/ {
+          show = ($0 ~ /TRY [0-9]+ FAIL/ && index($0, t) > 0)
+        }
         show' | head -200 >&2
     done
     return 1
