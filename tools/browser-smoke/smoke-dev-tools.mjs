@@ -22,6 +22,7 @@ try {
       path: location.pathname,
       styled: [...document.styleSheets].some((s) => (s.href || "").includes("/kernel/admin.css")),
       rows: document.querySelectorAll("#mbx-list li.mbx-item").length,
+      ids: [...document.querySelectorAll("#mbx-list li.mbx-item a")].map((a) => a.getAttribute("href")),
       flash: document.querySelector(".flash")?.textContent.trim() ?? "",
       text: document.body.innerText,
     }));
@@ -59,16 +60,21 @@ try {
   await page.waitForSelector("iframe[sandbox]");
   check(true, "the HTML part renders in a sandboxed iframe");
 
+  // Judged by the messages that were cleared, not by an empty list: other smokes `verify --full`
+  // runs at the same time sign in, and an auth part's "new sign-in" email may land meanwhile.
+  const cleared = (await state()).ids;
+  const back = (ids) => ids.filter((id) => cleared.includes(id));
   await click('form[action="/dev/mailbox/clear"] button');
   s = await state();
-  check(s.path === "/dev/mailbox" && s.rows === 0, "Clear all empties the list");
+  check(s.path === "/dev/mailbox" && cleared.length >= 3 && back(s.ids).length === 0,
+    `Clear all empties the list (${cleared.length} cleared${s.rows ? `; ${s.rows} newer` : ""})`);
 
   await go(page.goBack());
   s = await state();
-  check(s.rows === 0 && s.styled, "Back after Clear all does not resurrect deleted mail");
+  check(back(s.ids).length === 0 && s.styled, `Back after Clear all does not resurrect deleted mail (${back(s.ids).join(" ") || "none back"})`);
   await go(page.goForward()).catch(() => {});
   s = await state();
-  check(s.rows === 0 && s.styled, "Forward shows an empty, styled mailbox");
+  check(back(s.ids).length === 0 && s.styled, "Forward shows a styled mailbox without the cleared mail");
 
   // 3. Jobs, when /dev has a test-job button: enqueue, open, delete, then Back.
   await page.goto(`${BASE}/dev`, { waitUntil: "load" });
