@@ -3,7 +3,7 @@
 //! email layout's inline colors (mail clients ignore the app's CSS). GUIDE: .offrails/guides/views.md#brand
 
 pub const NAME: &str = "Offrails App";
-pub const TAGLINE: &str = "A new Rust off Rails app.";
+pub const TAGLINE: &str = "A new Rust off Rails app";
 /// `colors.primary`: buttons, links, the favicon tile, `<meta name="theme-color">`.
 pub const PRIMARY: &str = "#4f46e5";
 pub const ON_PRIMARY: &str = "#ffffff";

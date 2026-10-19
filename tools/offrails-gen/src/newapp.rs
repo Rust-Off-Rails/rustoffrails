@@ -11,8 +11,11 @@ use crate::util::{self, Fail, Result, rel};
 pub const CRATE_TOKEN: &str = "offrails_app";
 pub const KEBAB_TOKEN: &str = "offrails-app";
 pub const TITLE_TOKEN: &str = "Offrails App";
-/// The pitch: `APP_TAGLINE` (lowercase, no period) and the default description (a sentence).
-pub const TAGLINE_TOKEN: &str = "a new Rust off Rails app";
+/// The pitch as the tagline: brand.toml's `tagline` (and src/brand.rs's `TAGLINE`, which
+/// `config::APP_TAGLINE` is), capitalized, no closing period. Replaced after the two sentence
+/// tokens below, which start with it.
+pub const TAGLINE_TOKEN: &str = "A new Rust off Rails app";
+/// The pitch as a sentence: the default description.
 pub const DESCRIPTION_TOKEN: &str = "A new Rust off Rails app.";
 /// The home page's sentence: replaced by the pitch's sentence too.
 pub const HOME_TOKEN: &str = "A new Rust off Rails app, generated from the framework template.";
@@ -141,14 +144,20 @@ pub fn rename(text: &str, krate: &str, title: &str, pitch: Option<&str>) -> Stri
     s
 }
 
-/// The pitch as a tagline (as typed, no closing period: "App: track the books you read") and as a
-/// sentence (capitalized, with its period: the description, the home page, the social card).
+/// The pitch as the tagline (capitalized, no closing period: brand.toml's `tagline`, the home
+/// page title "App: Track the books you read", the social card) and as a sentence (with its
+/// period: the description, the home page).
 pub fn pitch_forms(pitch: &str) -> (String, String) {
-    let tagline = pitch.trim().trim_end_matches('.').to_owned();
-    let mut chars = tagline.chars();
-    let sentence = match chars.next() {
-        Some(first) => format!("{}{}.", first.to_uppercase(), chars.as_str()),
+    let typed = pitch.trim().trim_end_matches('.');
+    let mut chars = typed.chars();
+    let tagline = match chars.next() {
+        Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
         None => String::new(),
+    };
+    let sentence = if tagline.is_empty() {
+        String::new()
+    } else {
+        format!("{tagline}.")
     };
     (tagline, sentence)
 }
@@ -459,10 +468,10 @@ mod tests {
             rename(t, "book_shelf", "Book Shelf", None),
             "name = \"book_shelf\"\nimage: book-shelf:local\nAPP_NAME = \"Book Shelf\"\ntest_book_shelf_x\n"
         );
-        let p = "TAGLINE: &str = \"a new Rust off Rails app\";\nDESC = \"A new Rust off Rails app.\";\n<p>A new Rust off Rails app, generated from the framework template.</p>\n";
+        let p = "tagline = \"A new Rust off Rails app\"\nDESC = \"A new Rust off Rails app.\";\n<p>A new Rust off Rails app, generated from the framework template.</p>\n<title>Offrails App: A new Rust off Rails app</title>\n";
         assert_eq!(
             rename(p, "x", "X", Some("track the books you read")),
-            "TAGLINE: &str = \"track the books you read\";\nDESC = \"Track the books you read.\";\n<p>Track the books you read.</p>\n"
+            "tagline = \"Track the books you read\"\nDESC = \"Track the books you read.\";\n<p>Track the books you read.</p>\n<title>X: Track the books you read</title>\n"
         );
         assert_eq!(
             pitch_forms("Notes from the field."),
@@ -470,6 +479,14 @@ mod tests {
                 "Notes from the field".to_owned(),
                 "Notes from the field.".to_owned()
             )
+        );
+        assert_eq!(
+            pitch_forms("notes on software, written slowly"),
+            (
+                "Notes on software, written slowly".to_owned(),
+                "Notes on software, written slowly.".to_owned()
+            ),
+            "one tagline, capitalized like brand.toml's, whatever case was typed"
         );
     }
 
@@ -481,7 +498,12 @@ mod tests {
             "templates/home/index.html lost its pitch sentence"
         );
         let config = include_str!("../../../template/app/src/config.rs");
-        assert!(config.contains(TAGLINE_TOKEN));
+        assert!(
+            config.contains("pub const APP_TAGLINE: &str = crate::brand::TAGLINE;"),
+            "config::APP_TAGLINE must be brand.toml's tagline (src/brand.rs), the one source"
+        );
+        let brand = include_str!("../../../template/app/brand.toml");
+        assert!(brand.contains(&format!("tagline = \"{TAGLINE_TOKEN}\"")));
         let views = include_str!("../../../template/app/src/views/mod.rs");
         assert!(views.contains(DESCRIPTION_TOKEN));
         let agents = include_str!("../../../blueprints/AGENTS.md");

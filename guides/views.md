@@ -82,7 +82,7 @@ Every page extends a layout ([layouts](#layouts)); `templates/layouts/applicatio
 
 ## Brand
 
-`brand.toml` at the app root is the app's look in one file: `name`, `tagline`, `[colors]` `primary` (exactly this on buttons), `accent`, `neutral` (`gray | slate | zinc | neutral | stone`, or a hex to tint grays with), optional `on_primary`; `[fonts]` `sans`, `heading`, `mono` (CSS stacks; self-host web fonts, the CSP blocks font CDNs); `[shape]` `radius`; `[logo]` `mark` (1–2 characters, default the name's initial) or `svg` (a square SVG file) and `tile`. After editing it:
+`brand.toml` at the app root is the app's look in one file: `name`, `tagline` (the only place it lives: `config::APP_TAGLINE` is `brand::TAGLINE`, used by the home page title, the social card and any nav that shows it), `[colors]` `primary` (exactly this on buttons), `accent`, `neutral` (`gray | slate | zinc | neutral | stone`, or a hex to tint grays with), optional `on_primary`; `[fonts]` `sans`, `heading`, `mono` (CSS stacks; self-host web fonts, the CSP blocks font CDNs); `[shape]` `radius`; `[logo]` `mark` (1–2 characters, default the name's initial) or `svg` (a square SVG file) and `tile`. After editing it:
 
 ```sh
 cargo offrails brand            # renders everything below; `new` runs it; --check: fail if stale (verify --full runs that)

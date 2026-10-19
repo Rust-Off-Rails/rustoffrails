@@ -9,8 +9,10 @@ use std::time::Duration;
 /// brand.toml's `name` (`cargo offrails brand` writes src/brand.rs). Never derived from the crate
 /// name: crates get renamed, products don't.
 pub const APP_NAME: &str = crate::brand::NAME;
-/// The home page title is "Offrails App: <tagline>"; the social card carries it too.
-pub const APP_TAGLINE: &str = "a new Rust off Rails app";
+/// The tagline: brand.toml's `tagline` (`cargo offrails brand` writes src/brand.rs), the one
+/// source for the home page title ("Offrails App: <tagline>"), the social card and any nav that
+/// shows it. Change it in brand.toml, never here.
+pub const APP_TAGLINE: &str = crate::brand::TAGLINE;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppEnv {

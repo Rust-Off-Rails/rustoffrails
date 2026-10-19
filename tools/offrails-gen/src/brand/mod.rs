@@ -861,7 +861,10 @@ pub fn run(app: &Path, o: &Options) -> Result<()> {
             ));
         }
         let name = config_app_name(app).unwrap_or_else(|| "My App".into());
-        let tagline = views_description(app).unwrap_or_default();
+        // The tagline is a phrase (the home page title is "<name>: <tagline>"): no closing period.
+        let tagline = views_description(app)
+            .map(|d| d.trim().trim_end_matches('.').to_owned())
+            .unwrap_or_default();
         util::write_text(&toml_path, &default_toml(&name, &tagline))?;
         println!("  write brand.toml (name {name:?}; edit it, then run cargo offrails brand)");
     }
@@ -1034,7 +1037,7 @@ mod tests {
     use super::*;
 
     fn template_brand() -> Brand {
-        Brand::parse(&default_toml("Offrails App", "A new Rust off Rails app.")).unwrap()
+        Brand::parse(&default_toml("Offrails App", "A new Rust off Rails app")).unwrap()
     }
 
     #[test]
@@ -1043,7 +1046,7 @@ mod tests {
         let text = fs::read_to_string(file).unwrap().replace("\r\n", "\n");
         assert_eq!(
             text,
-            default_toml("Offrails App", "A new Rust off Rails app.")
+            default_toml("Offrails App", "A new Rust off Rails app")
         );
     }
 

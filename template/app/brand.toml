@@ -5,7 +5,7 @@
 # which pair and what would pass. GUIDE: .offrails/guides/views.md#brand
 
 name = "Offrails App"
-tagline = "A new Rust off Rails app."
+tagline = "A new Rust off Rails app"
 
 [colors]
 primary = "#4f46e5"   # buttons, links, focus rings, the favicon tile (exactly this on buttons)
