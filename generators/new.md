@@ -42,7 +42,7 @@ The template already has `CLAUDE.md` (`@AGENTS.md`), `.cursor/rules/offrails.mdc
 
 | File | From |
 |------|------|
-| `AGENTS.md` | Written from [`blueprints/AGENTS.md`](../blueprints/AGENTS.md) with the template's defaults (`htmx`, `API: none`, `ACCOUNTS: none`, `TENANCY: none`, and `EMAIL`/`ACCOUNTS` set by the parts). Set every header line from the interview; never one the code doesn't match yet (`TENANCY` changes when [`authentication.md`](authentication.md) builds the tenancy suites) |
+| `AGENTS.md` | Written from [`blueprints/AGENTS.md`](../blueprints/AGENTS.md) with the template's defaults (`htmx`, `API: none`, `ACCOUNTS: none`, `TENANCY: none`, and `EMAIL`/`ACCOUNTS` set by the parts). Set every header line from the interview; never one the code doesn't match yet (`TENANCY` changes when the tenancy suites exist: the first owner-scoped `cargo offrails g resource` writes them, [authentication](authentication.md#2-what-the-parts-leave-to-you)) |
 | `product/README.md` | Written from [`blueprints/product-README.md`](../blueprints/product-README.md) with the name filled; write the rest from the interview |
 | `product/features/` | one spec per feature from the confirmed plan ([`blueprints/feature-spec.md`](../blueprints/feature-spec.md)). They're built after step 5 |
 | `static/` brand assets | `new` renders them from `brand.toml` (`cargo offrails brand`: headless Chrome, else `rsvg-convert`; with neither the PNGs keep the template's look and it says so: log that in `docs/decisions.md`). Set the colors, fonts and logo in `brand.toml` and re-run |
@@ -60,7 +60,7 @@ cargo offrails add <name> [<name>…]        # dependencies first; prints what i
 
 Then `cargo run -q -- db migrate` (parts with tables; docs/routes.md is already refreshed), and read each part's `README.md` ("After installing", "Adapting it") and `CHECKS.md` in `.offrails/template/parts/<name>/`. Adapt the `// APP:` lines (names, copy, limits) to this app; keep every `// SECURITY:` and `// INVARIANT:` line and the tests they name ([samples](../guides/samples.md#rules)).
 
-`ACCOUNTS` isn't `none`: after the auth parts are in, run [`authentication.md`](authentication.md) for what is app-specific (roles, tenancy, the guard and tenancy suites).
+`ACCOUNTS` isn't `none`: accounts are the auth parts (`auth-core` with `auth-password` and/or `auth-magic-link`, `auth-totp` for two-factor; invite-only is `new --invite` or `DEFAULT_SIGNUP`, not a part), added here like any other. [`authentication.md`](authentication.md) is what they leave to you: `APP_SECRET_KEY`, `paths::after_sign_in()`, your scoped handlers, the browser smoke's scenario, roles and teams.
 
 ## 4. Frontend mode
 
@@ -191,7 +191,7 @@ One binary, `tests/app/` ([testing](../guides/testing.md)): `main.rs` (`#[allow(
 - `security_test.rs`: every `ROUTES` entry is routable, non-public routes are never 2xx anonymously, `Dev` routes 404 in production, cross-site and foreign-`Origin` POSTs get 403, development refuses a rebound `Host` ([test-standards §3](../guides/test-standards.md#3-security-tests-every-app));
 - `errors_test.rs`, `logs_test.rs` (tokens never reach logs), `kernel_test.rs` (cache, rate limiter, flash cookie, `DbErr` mapping, `Retry-After`), `kernel_web_test.rs` (`/dev`, introspection, `no-store`, the pending-migrations page and `/up` 503), `theme_test.rs` and `theme_switch_test.rs` ([test-standards §11](../guides/test-standards.md#11-theme-and-css-guards)); unit tests in `kernel/tls.rs`, `kernel/hosts.rs`, `config.rs`.
 
-Each part brings its own suites (`tests/app/<part>_test.rs`). `tests/app/guard_test.rs` and `tenancy_test.rs` arrive with [`authentication.md`](authentication.md) when `TENANCY` isn't `none`.
+Each part brings its own suites (`tests/app/<part>_test.rs`). `tests/app/guard_test.rs` and `tenancy_test.rs` arrive with the first owner-scoped `cargo offrails g resource` (or by hand, [test-standards §4](../guides/test-standards.md#4-tenant-isolation-suite-every-app-with-accounts)) when `TENANCY` isn't `none`.
 
 ### Other modes
 
