@@ -294,7 +294,7 @@ fn plan(
         )
         .env("TEST_DATABASE_URL", None)
         .after(&test_after);
-        if let Some((cov, profdata)) = homebrew_llvm() {
+        if let Some((cov, profdata)) = homebrew_llvm(app) {
             coverage = coverage
                 .env("LLVM_COV", Some(&cov))
                 .env("LLVM_PROFDATA", Some(&profdata));
@@ -752,13 +752,21 @@ fn summary_note(log: &str) -> String {
     String::new()
 }
 
-/// `cargo <sub> --version` works (an installed cargo subcommand).
-/// cargo-llvm-cov finds `llvm-cov` and `llvm-profdata` in rustup's `llvm-tools` component. A
-/// toolchain without rustup (Homebrew's `rust`) has none: use Homebrew's `llvm` when it's
-/// installed (`brew install llvm`) and LLVM_COV / LLVM_PROFDATA aren't set already.
-fn homebrew_llvm() -> Option<(String, String)> {
-    if std::env::var_os("LLVM_COV").is_some() || util::have("rustup") {
+/// cargo-llvm-cov finds `llvm-cov` and `llvm-profdata` in the active toolchain's sysroot
+/// (`<sysroot>/lib/rustlib/<host>/bin`, rustup's `llvm-tools` component). When the rustc the
+/// coverage step runs has none there (Homebrew's `rust`, first on PATH even with rustup
+/// installed), use Homebrew's `llvm` when it's installed (`brew install llvm`) and LLVM_COV /
+/// LLVM_PROFDATA aren't set already. Whether rustup exists says nothing: what counts is the
+/// sysroot of the rustc that cargo will run, in the app (its rust-toolchain file, the coverage
+/// toolchain), so we ask that rustc.
+fn homebrew_llvm(app: &Path) -> Option<(String, String)> {
+    if std::env::var_os("LLVM_COV").is_some() {
         return None;
+    }
+    if let Some((sysroot, host)) = coverage_rustc(app) {
+        if has_llvm_tools(&sysroot, &host) {
+            return None;
+        }
     }
     [
         "/opt/homebrew/opt/llvm/bin",
@@ -776,6 +784,43 @@ fn homebrew_llvm() -> Option<(String, String)> {
     })
 }
 
+/// The sysroot and host triple of the rustc the coverage step runs: `$RUSTC` or `rustc` on
+/// PATH, in the app, with the coverage toolchain when one is set (as the coverage step gets it).
+fn coverage_rustc(app: &Path) -> Option<(PathBuf, String)> {
+    let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".to_owned());
+    let toolchain = ["OFFRAILS_COVERAGE_TOOLCHAIN", "RUSTUP_TOOLCHAIN"]
+        .iter()
+        .find_map(|k| std::env::var(k).ok().filter(|v| !v.trim().is_empty()));
+    let run = |args: &[&str]| {
+        let mut c = Command::new(&rustc);
+        c.args(args).current_dir(app);
+        if let Some(t) = &toolchain {
+            c.env("RUSTUP_TOOLCHAIN", t);
+        }
+        c.output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+    };
+    let sysroot = run(&["--print", "sysroot"])?.trim().to_owned();
+    let host = run(&["-vV"])?
+        .lines()
+        .find_map(|l| l.strip_prefix("host: "))?
+        .trim()
+        .to_owned();
+    Some((PathBuf::from(sysroot), host))
+}
+
+/// The sysroot has the `llvm-tools` component's `llvm-cov` and `llvm-profdata`.
+fn has_llvm_tools(sysroot: &Path, host: &str) -> bool {
+    let bin = sysroot.join("lib").join("rustlib").join(host).join("bin");
+    let exe = if cfg!(windows) { ".exe" } else { "" };
+    ["llvm-cov", "llvm-profdata"]
+        .iter()
+        .all(|t| bin.join(format!("{t}{exe}")).is_file())
+}
+
+/// `cargo <sub> --version` works (an installed cargo subcommand).
 fn have_cargo(sub: &str) -> bool {
     Command::new("cargo")
         .args([sub, "--version"])
@@ -909,6 +954,34 @@ mod tests {
             fast[0].env.is_empty(),
             "no coverage step: the environment is left alone"
         );
+    }
+
+    /// Homebrew's LLVM is for a rustc whose sysroot lacks llvm-tools, whether or not rustup is
+    /// installed (Homebrew's rustc first on PATH beside rustup broke llvm-cov).
+    #[test]
+    fn llvm_tools_are_looked_for_in_the_active_sysroot() {
+        let dir = std::env::temp_dir().join(format!("offrails-verify-llvm-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let bin = dir.join("lib/rustlib/aarch64-apple-darwin/bin");
+        fs::create_dir_all(&bin).unwrap();
+        assert!(!has_llvm_tools(&dir, "aarch64-apple-darwin"), "no tools");
+        let exe = if cfg!(windows) { ".exe" } else { "" };
+        fs::write(bin.join(format!("llvm-cov{exe}")), "").unwrap();
+        assert!(
+            !has_llvm_tools(&dir, "aarch64-apple-darwin"),
+            "llvm-profdata missing"
+        );
+        fs::write(bin.join(format!("llvm-profdata{exe}")), "").unwrap();
+        assert!(has_llvm_tools(&dir, "aarch64-apple-darwin"));
+        assert!(
+            !has_llvm_tools(&dir, "x86_64-unknown-linux-gnu"),
+            "another host's"
+        );
+        let _ = fs::remove_dir_all(&dir);
+        // The rustc running this test answers both questions.
+        let (sysroot, host) = coverage_rustc(Path::new(".")).expect("rustc --print sysroot");
+        assert!(sysroot.join("lib").join("rustlib").is_dir(), "{sysroot:?}");
+        assert!(host.contains('-'), "{host}");
     }
     use super::*;
 
