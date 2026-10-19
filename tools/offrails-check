@@ -29,7 +29,8 @@ Checks a Rust off Rails app (default: the current directory):
   classes      app templates (outside templates/components, kernel, mailers) with long ad-hoc class
                lists on <button>, <input>, <select>, <textarea> or a button-like <a>: use the
                component kit (warning only; CLASS_LIST_MAX, default 8; silence one line with
-               {# offrails-check: classes ok #})
+               {# offrails-check: classes ok #}; a part's template as installed, the same as
+               .offrails/template/parts/<part>/files/, is skipped: it is the part's)
   htmx         an hx-trigger with an event filter ([…]) in templates/: filters need eval, which the
                template's htmx-config turns off for the CSP (allowEval: false), so it never fires
                (warning only)
@@ -397,9 +398,30 @@ fi
 # from dark mode one copy at a time. templates/components/ui.html (and the .btn/.input classes in
 # assets/app.css) say it in a few words. A deliberate one ends its line with
 # {# offrails-check: classes ok #} (a reason after "ok" is welcome).
+# A part's template the app hasn't changed (the same as .offrails/template/parts/<part>/files/, the
+# copy add-part installed and update-part merges from, crate names aside) is skipped: moving it onto
+# the kit is the part's job, in rust-off-rails/samples. Once the app edits it, it is the app's.
+# unmodified_part_file <path>: the part copy's path when <path> is one, else nothing.
+unmodified_part_file() {
+  for pf in .offrails/template/parts/*/files/"$1"; do
+    [ -f "$pf" ] || continue
+    if sed -e "s/offrails_host/$crate_name/g" -e "s/offrails_app/$crate_name/g" "$pf" | cmp -s - "$1"; then
+      printf '%s\n' "$pf"
+      return 0
+    fi
+  done
+  return 0
+}
+crate_name=$(awk -F'"' '/^name *= */ { print $2; exit }' Cargo.toml 2>/dev/null || true)
 if [ -d templates ]; then
-  class_hits=$(find templates -name '*.html' ! -path 'templates/components/*' ! -path 'templates/kernel/*' \
-      ! -path 'templates/mailers/*' 2>/dev/null | sort | while IFS= read -r f; do
+  class_files=$(find templates -name '*.html' ! -path 'templates/components/*' ! -path 'templates/kernel/*' \
+      ! -path 'templates/mailers/*' 2>/dev/null | sort)
+  part_skipped=$(printf '%s\n' "$class_files" | while IFS= read -r f; do
+    [ -z "$f" ] || [ -z "$(unmodified_part_file "$f")" ] || printf '%s\n' "$f"
+  done)
+  class_hits=$(printf '%s\n' "$class_files" | while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if [ -n "$part_skipped" ] && printf '%s\n' "$part_skipped" | grep -qxF -- "$f"; then continue; fi
     awk -v f="$f" -v max="${CLASS_LIST_MAX:-8}" '
       /offrails-check: classes ok/ { next }
       {
@@ -429,6 +451,10 @@ if [ -d templates ]; then
     printf '          a deliberate one: end the line with {# offrails-check: classes ok #}\n'
   elif find templates -name '*.html' 2>/dev/null | grep -q .; then
     pass classes "no long ad-hoc class lists on buttons and inputs"
+  fi
+  if [ -n "$part_skipped" ]; then
+    printf '     [classes] skipped %s unmodified part template(s) (as installed; the samples repo moves them onto the kit)\n' \
+      "$(printf '%s\n' "$part_skipped" | wc -l | tr -d ' ')"
   fi
 fi
 

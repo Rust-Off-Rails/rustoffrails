@@ -282,6 +282,28 @@ else
   printf 'ok   classes: short lists, plain links, silenced lines and the kit itself are not flagged\n'
 fi
 
+# A part's template as installed (the same as .offrails/template/parts/<part>/files/) is the part's:
+# skipped by [classes]; once the app edits it, it is checked like any other.
+d=$(make_app classes-part); mkdir -p "$d/templates/sessions" "$d/.offrails/template/parts/auth-x/files/templates/sessions"
+printf '[package]\nname = "fixture_app"\n' > "$d/Cargo.toml"
+cat > "$d/.offrails/template/parts/auth-x/files/templates/sessions/new.html" <<'EOF2'
+{# offrails_app::sessions #}
+<button type="submit" class="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500">Sign in</button>
+EOF2
+sed 's/offrails_app/fixture_app/' "$d/.offrails/template/parts/auth-x/files/templates/sessions/new.html" > "$d/templates/sessions/new.html"
+cp "$d/templates/sessions/new.html" "$d/templates/sessions/edited.html"
+cp "$d/.offrails/template/parts/auth-x/files/templates/sessions/new.html" "$d/.offrails/template/parts/auth-x/files/templates/sessions/edited.html"
+printf '<p>the app changed this one</p>\n' >> "$d/templates/sessions/edited.html"
+expect "an unmodified part template is skipped by [classes], an edited one is checked" "$d" 0 "0 error(s)" \
+  "WARN [classes] templates/sessions/edited.html:2: <button> with 10 classes" \
+  "skipped 1 unmodified part template(s)" "1 warning(s)"
+out=$(sh "$CHECK" "$d" 2>&1 || true)
+if printf '%s\n' "$out" | grep -q 'sessions/new.html'; then
+  failures=$((failures + 1)); printf 'FAIL classes-part: flagged an unmodified part template\n%s\n' "$out"
+else
+  printf 'ok   classes-part: the unmodified part template is not flagged\n'
+fi
+
 # hx-trigger filters need eval (allowEval: false): a warning.
 d=$(make_app htmx-filter); mkdir -p "$d/templates/posts"
 cat > "$d/templates/posts/search.html" <<'EOF2'
