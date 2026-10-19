@@ -3,9 +3,8 @@ name = "seed-backdated"
 version = "0.7.3"
 summary = "Seeds with history: create through the model, then backdate::<E>(db, id, days_ago(30)) moves the timestamps"
 depends_on = []
-# Its test seeds a note: the resource snippet (or --as the model you added it as).
-snippets = ["resource"]
-as = "note"
+# Needs no resource: backdate is generic over any generated table, and its test makes its own.
+snippets = []
 
 [[wire]]
 file = "src/tasks/mod.rs"

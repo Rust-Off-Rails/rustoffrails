@@ -16,8 +16,8 @@
 | [`markdown`](markdown/README.md) | `markdown::to_html`: CommonMark rendered by pulldown-cmark, sanitized by ammonia (no scripts, handlers, `javascript:`) | crates `pulldown-cmark`, `ammonia` |
 | [`pagination`](pagination/README.md) | `PageLinks::new(base, page, more)` and `shared/_pager.html` (the kit's `ui::pagination`); `?page=` clamped, so a huge one is never a 500 | — |
 | [`theme-toggle`](theme-toggle/README.md) | a System/Light/Dark button in the nav: an app-side partial and one delegated handler in `static/app.js` | — |
-| [`seed-backdated`](seed-backdated/README.md) | seeds with a history: create through the model, then `backdate::<E>(db, id, days_ago(30))` | the `resource` snippet (its test) |
-| [`public-show-by-slug`](public-show-by-slug/README.md) | `GET /read/notes/{slug}`: a public page per record by slug, a route with a path parameter end to end | the `resource` and `slug` snippets |
+| [`seed-backdated`](seed-backdated/README.md) | seeds with a history: create through the model, then `backdate::<E>(db, id, days_ago(30))` | nothing (any generated table, owner-scoped or public) |
+| [`public-show-by-slug`](public-show-by-slug/README.md) | `GET /read/notes/{slug}`: a public page per record by slug, a route with a path parameter end to end | the `resource` and `slug` snippets (not a generated owner-scoped resource: [why](public-show-by-slug/README.md)) |
 
 ## Snippet, generator, part, or by hand?
 

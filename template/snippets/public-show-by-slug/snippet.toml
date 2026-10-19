@@ -4,6 +4,7 @@ version = "0.7.3"
 summary = "GET /read/notes/{slug}: a public page per record, by slug (a path param), slugs unique and stable"
 depends_on = []
 # Notes from the resource snippet, slugs from the slug snippet (add all three with the same --as).
+# A generated owner-scoped resource doesn't qualify (its model is private): README.md says what to do.
 snippets = ["resource", "slug"]
 as = "note"
 

@@ -4,6 +4,7 @@
 > - `GET /read/notes/{slug}`: a public page for one record, found by a slug in the path (`/read/notes/hello-world`), next to the resource's own `/notes/{id}` pages.
 > - A route with a path parameter, end to end: the routes file (`/read/notes/{slug}`, `paths::note_page(slug)`), the handler (`Path(slug): Path<String>`), the query, the page, tests (found, 404, a taken slug gets `-2`, markup escaped).
 > - Builds on the `resource` snippet (notes) and the `slug` snippet; adds a nullable, unique `notes.slug` column. Add all three with the same `--as` (`--as article` → `/read/articles/{slug}`).
+> - **Not for a generated, owner-scoped resource** (`g resource posts …` in an app with accounts): `snippet add` refuses without the resource snippet, and its code calls the public notes' `note::find` and `NoteView`, which a scoped model keeps private (`find_for(db, &user, id)`). There, write it from this one as the worked example: `cargo offrails g controller blog show:/blog/{slug} --public`, a `slug` column (the `slug` snippet's `unique`), and a public query that says what is public (`published_at <= now`) marked `// unscoped:` at its call site.
 
 ## When to use it
 
