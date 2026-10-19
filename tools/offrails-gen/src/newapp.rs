@@ -656,8 +656,6 @@ mod tests {
                 .arg("-C")
                 .arg(&dir)
                 .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid"])
-                // Windows runners set core.autocrlf=true, so `git archive` would write CRLF.
-                .args(["-c", "core.autocrlf=false"])
                 .args(args)
                 .output()
                 .unwrap()
@@ -687,7 +685,10 @@ mod tests {
         let root = snap.root.clone();
         assert_ne!(root, dir);
         assert_eq!(
-            fs::read_to_string(root.join("template/app/a.txt")).unwrap(),
+            // `git archive` honours core.autocrlf, which Windows sets: CRLF there, as in a checkout.
+            fs::read_to_string(root.join("template/app/a.txt"))
+                .unwrap()
+                .replace("\r\n", "\n"),
             "next\n",
             "HEAD's files, not the working tree's"
         );
