@@ -226,7 +226,10 @@ SCENARIO
   # A sticky-footer layout, as apps often make it (<body> a flex column, <main> grows): pages that
   # replace the body block (/dev/components, /dev/layouts/*) must not scroll sideways in it at 390 px.
   perl -pi -e 's/<body hx-boost="true" class="min-h-screen /<body hx-boost="true" class="flex min-h-screen flex-col /; s/<main id="main" class="mx-auto max-w-3xl /<main id="main" class="mx-auto w-full max-w-3xl flex-1 /' templates/layouts/application.html
-  grep -q 'class="flex min-h-screen flex-col ' templates/layouts/application.html && grep -q 'w-full max-w-3xl flex-1' templates/layouts/application.html || { echo "proof_fixture: the layout edit did not apply" >&2; return 1; }
+  if ! grep -q 'class="flex min-h-screen flex-col ' templates/layouts/application.html || ! grep -q 'w-full max-w-3xl flex-1' templates/layouts/application.html; then
+    echo "proof_fixture: the layout edit did not apply" >&2
+    return 1
+  fi
   krate=$(awk -F'"' '/^name = /{ print $2; exit }' Cargo.toml)
   perl -pi -e "s/APP_CRATE/$krate/g" tests/app/proof_fixture_test.rs
   printf 'mod proof_fixture_test;\n' >> tests/app/main.rs
