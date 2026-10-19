@@ -85,7 +85,7 @@ api_tokens:
 | `GET /api/v1/tokens` | The caller's tokens, metadata only |
 | `DELETE /api/v1/tokens/current` | Log out: revoke the token making the request |
 
-A password reset or change deletes the user's tokens along with their sessions ([auth](auth.md#password-reset)); `app task tokens revoke-all <email>` does it from the terminal.
+A password reset or change deletes the user's tokens along with their sessions ([auth](auth.md#password-reset-passwordsrs-new-create-edit-update)); `app task tokens revoke-all <email>` does it from the terminal.
 | `GET /api/v1/me` | The caller |
 | `app task tokens create <email> [name] \| list <email> \| revoke <id>` | The same from the terminal, for operators and CI |
 
