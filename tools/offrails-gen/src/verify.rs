@@ -763,10 +763,10 @@ fn homebrew_llvm(app: &Path) -> Option<(String, String)> {
     if std::env::var_os("LLVM_COV").is_some() {
         return None;
     }
-    if let Some((sysroot, host)) = coverage_rustc(app) {
-        if has_llvm_tools(&sysroot, &host) {
-            return None;
-        }
+    if let Some((sysroot, host)) = coverage_rustc(app)
+        && has_llvm_tools(&sysroot, &host)
+    {
+        return None;
     }
     [
         "/opt/homebrew/opt/llvm/bin",
