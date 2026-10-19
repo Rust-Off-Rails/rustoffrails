@@ -108,7 +108,19 @@ verify() {
   unknown=$(cat target/verify/tests-*.log 2>/dev/null | grep -E '^[[:space:]]*FLAKY' | awk '{ print $NF }' | while IFS= read -r t; do
     case " $KNOWN_FLAKY " in (*" $t "*) ;; (*) echo "$t" ;; esac
   done)
-  [ -z "$unknown" ] || { echo "flaky, and not a known samples flake: $unknown" >&2; return 1; }
+  [ -z "$unknown" ] || {
+    echo "flaky, and not a known samples flake: $unknown" >&2
+    # The failed attempt's output is only in target/verify/, which CI doesn't keep: print it
+    # (nextest's "--- TRY n STDOUT/STDERR: <test>" blocks for that test).
+    for t in $unknown; do
+      echo "--- $t: the failed attempt" >&2
+      cat target/verify/tests-*.log 2>/dev/null | awk -v t="$t" '
+        /^--- (TRY [0-9]+ )?(STDOUT|STDERR):/ { show = index($0, t) > 0 }
+        /^ *(PASS|FAIL|FLAKY|TRY [0-9]+ (PASS|FAIL)|SIGSEGV|SIGABRT) / { show = 0 }
+        show' | head -200 >&2
+    done
+    return 1
+  }
 }
 
 # The boosted-navigation browser smoke (.offrails/tools/browser-smoke/smoke-boosted.mjs) against the
