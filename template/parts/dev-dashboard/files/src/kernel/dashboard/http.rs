@@ -171,6 +171,8 @@ struct CtxInner {
     statements: u32,
     sql_us: u64,
     dropped: u32,
+    /// Spans of this trace not closed yet (`trace::flush_open` records them when it ends first).
+    open: std::collections::HashSet<u64>,
 }
 
 impl RequestCtx {
@@ -220,6 +222,31 @@ impl RequestCtx {
             inner.spans.push(span);
         } else {
             inner.dropped += 1;
+        }
+    }
+
+    /// A span of this trace opened.
+    pub fn opened(&self, span: u64) {
+        lock(&self.inner).open.insert(span);
+    }
+
+    /// A span of this trace closed: false if the trace already recorded it (it ended first).
+    pub fn closed(&self, span: u64) -> bool {
+        lock(&self.inner).open.remove(&span)
+    }
+
+    /// Records the spans still open with `rec`, as the trace ends.
+    // WHY under the lock: a span closing on another thread meanwhile waits in `closed`, so it is
+    // still in the registry for `rec`, and recorded once.
+    pub fn record_open(&self, mut rec: impl FnMut(u64) -> Option<SpanRec>) {
+        let mut inner = lock(&self.inner);
+        let open: Vec<u64> = inner.open.drain().collect();
+        for span in open.into_iter().filter_map(&mut rec) {
+            if inner.spans.len() < MAX_SPANS {
+                inner.spans.push(span);
+            } else {
+                inner.dropped += 1;
+            }
         }
     }
 
@@ -669,6 +696,7 @@ pub fn finish_background(ctx: &RequestCtx) -> Arc<Trace> {
 }
 
 fn build(ctx: &RequestCtx, status: u16, bytes: Option<u64>) -> Trace {
+    trace::flush_open(ctx);
     let dur_us = ctx.started.elapsed().as_micros() as u64;
     let inner = std::mem::take(&mut *lock(&ctx.inner));
     let mut n_plus_one: Vec<(u64, u32, Arc<str>)> = inner

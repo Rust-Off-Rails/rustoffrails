@@ -312,10 +312,6 @@ impl Sequential {
     }
 }
 
-/// A gap this small between two calls means nothing ran between them (no data dependency
-/// shows). APP.
-pub const SEQUENTIAL_GAP_US: u64 = 5_000;
-
 /// The run of sequential outbound calls with the largest saving in a trace's tree.
 pub fn sequential(root: &waterfall::Node) -> Option<Sequential> {
     fn walk(n: &waterfall::Node, best: &mut Option<Sequential>) {
@@ -335,6 +331,12 @@ pub fn sequential(root: &waterfall::Node) -> Option<Sequential> {
             }
         }
         calls.sort_by_key(|c| c.1);
+        let between: Vec<u64> = n
+            .children
+            .iter()
+            .filter(|c| c.kind != "http")
+            .map(|c| c.start_us)
+            .collect();
         let mut run: Vec<(String, u64, u64)> = Vec::new();
         let flush = |run: &mut Vec<(String, u64, u64)>, best: &mut Option<Sequential>| {
             if run.len() >= 2 {
@@ -372,9 +374,15 @@ pub fn sequential(root: &waterfall::Node) -> Option<Sequential> {
                 flush(&mut run, best);
                 continue;
             }
-            let follows = run
-                .last()
-                .is_some_and(|p| c.1 >= p.1 + p.2 && c.1 - (p.1 + p.2) <= SEQUENTIAL_GAP_US);
+            // It follows the last one if it starts after it ended and nothing else of the parent's
+            // (a query, a method, a template) ran in between.
+            // WHY not a time gap: on a loaded machine the thread waits between two awaits; a 5 ms
+            // limit broke a run of four that nothing separated (test:
+            // the_checkout_fan_out_traces_four_upstreams).
+            let follows = run.last().is_some_and(|p| {
+                let end = p.1 + p.2;
+                c.1 >= end && !between.iter().any(|s| (end..c.1).contains(s))
+            });
             if !follows {
                 flush(&mut run, best);
             }

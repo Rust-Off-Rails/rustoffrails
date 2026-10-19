@@ -466,6 +466,57 @@ pub fn current_ctx() -> Option<Arc<RequestCtx>> {
     http::current().or_else(background_current)
 }
 
+/// A closed span, as its trace records it: `end` is when it closed (or when its trace ended).
+fn span_rec<'a, R: LookupSpan<'a>>(
+    span: &tracing_subscriber::registry::SpanRef<'a, R>,
+    data: &SpanData,
+    end: Instant,
+) -> SpanRec {
+    // The nearest ancestor that belongs to the same trace (and isn't its root).
+    let parent = span.scope().skip(1).find_map(|p| {
+        p.extensions()
+            .get::<SpanData>()
+            .filter(|d| d.req.id == data.req.id && !d.root)
+            .map(|_| p.id().into_u64())
+    });
+    let meta = span.metadata();
+    SpanRec {
+        id: span.id().into_u64(),
+        parent,
+        name: meta.name(),
+        target: meta.target(),
+        file: meta.file(),
+        line: meta.line(),
+        start_us: data.req.offset_us(data.start),
+        dur_us: end.saturating_duration_since(data.start).as_micros() as u64,
+        fields: data.fields.clone(),
+    }
+}
+
+/// Records the trace's spans that are still open as it ends, as if they closed now.
+///
+/// WHY: a span closes when its last clone drops, and other threads hold clones: the SQLite
+/// driver's worker thread keeps the span a query ran in until it takes its next command. When
+/// that thread runs late (a loaded machine) the last query's span, and the methods and the
+/// handler above it, close after the response, and the waterfall lost them (test:
+/// a_trace_expands_inline_with_repeats_folded). Their code is done by now: the response is.
+pub fn flush_open(ctx: &RequestCtx) {
+    let now = Instant::now();
+    tracing::dispatcher::get_default(|d| {
+        let Some(reg) = d.downcast_ref::<tracing_subscriber::Registry>() else {
+            return;
+        };
+        ctx.record_open(|id| {
+            let span = reg.span(&Id::from_u64(id))?;
+            let ext = span.extensions();
+            let data = ext.get::<SpanData>()?;
+            // A span at the top of the trace still open wraps the response body (tower-http's
+            // `request` span): it ends with the body, not with the app's code.
+            Some(span_rec(&span, data, now)).filter(|rec| rec.parent.is_some())
+        });
+    });
+}
+
 /// The layer. Cheap when the dashboard is off: one atomic load per span and event.
 pub struct DashboardLayer;
 
@@ -516,6 +567,9 @@ where
                 )
             }
         };
+        if !root {
+            req.opened(id.into_u64());
+        }
         span.extensions_mut().insert(SpanData {
             start: Instant::now(),
             req,
@@ -555,25 +609,10 @@ where
             super::http::finish_background(&data.req);
             return;
         }
-        // The nearest ancestor that belongs to the same trace (and isn't its root).
-        let parent = span.scope().skip(1).find_map(|p| {
-            p.extensions()
-                .get::<SpanData>()
-                .filter(|d| d.req.id == data.req.id && !d.root)
-                .map(|_| p.id().into_u64())
-        });
-        let meta = span.metadata();
-        data.req.push_span(SpanRec {
-            id: id.into_u64(),
-            parent,
-            name: meta.name(),
-            target: meta.target(),
-            file: meta.file(),
-            line: meta.line(),
-            start_us: data.req.offset_us(data.start),
-            dur_us: data.start.elapsed().as_micros() as u64,
-            fields: data.fields.clone(),
-        });
+        // Already in its trace if the trace ended first (`flush_open`).
+        if data.req.closed(id.into_u64()) {
+            data.req.push_span(span_rec(&span, data, Instant::now()));
+        }
     }
 
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {

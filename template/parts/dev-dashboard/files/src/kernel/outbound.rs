@@ -520,7 +520,24 @@ impl Call<'_> {
                 )
             }
         };
-        let mut res = req.send().await.map_err(failed)?;
+        // WHY a task of its own: hyper spawns the connection a request opens with the current
+        // span (`in_current_span`), and keeps it pooled. Sent from inside the call's span, that
+        // span lived as long as the connection, and the waterfall drew the call that long (over
+        // the next ones: the checkout lost its sequential calls, test:
+        // the_checkout_fan_out_traces_four_upstreams). Spawned, the connection carries no span.
+        let mut send = AbortOnDrop(tokio::spawn(req.send()));
+        let mut res = match (&mut send.0).await {
+            Ok(r) => r.map_err(failed)?,
+            Err(e) => {
+                return Err((
+                    OutboundError::Failed {
+                        service,
+                        message: e.to_string(),
+                    },
+                    Outcome::Failed,
+                ));
+            }
+        };
         if res.content_length().is_some_and(|n| n as usize > MAX_BODY) {
             return Err((OutboundError::TooLarge { service }, Outcome::TooLarge));
         }
@@ -539,6 +556,15 @@ impl Call<'_> {
             headers,
             body: Bytes::from(body),
         })
+    }
+}
+
+/// A spawned send, cancelled with the call (a timeout or a dropped request drops the call).
+struct AbortOnDrop<T>(tokio::task::JoinHandle<T>);
+
+impl<T> Drop for AbortOnDrop<T> {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }
 

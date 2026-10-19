@@ -88,11 +88,22 @@ async fn next_event(body: &mut Body, needle: &str, wait: Duration) -> String {
     }
 }
 
-/// The dashboard's layer behind development's log filter, for this test's thread.
-fn traced() -> tracing::subscriber::DefaultGuard {
-    tracing::subscriber::set_default(tracing_subscriber::registry().with(DashboardLayer).with(
-        tracing_subscriber::EnvFilter::new("info,offrails_host=debug,tower_http=debug"),
-    ))
+/// The dashboard's layer behind development's log filter, as `main` installs it: the process's
+/// global default, once (nextest runs each test in a process of its own).
+// WHY global, not `set_default` (this thread only): the SQLite driver's worker thread, and other
+// threads a request hands work to, hold clones of the request's spans and can drop the last one.
+// The registry then closes the span's parent through *that* thread's default subscriber, which a
+// thread-local one isn't: the parents (handler, the methods above the last query, an outbound
+// call) never closed, and a loaded run's trace lost them.
+fn traced() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let _ = tracing::subscriber::set_global_default(
+            tracing_subscriber::registry().with(DashboardLayer).with(
+                tracing_subscriber::EnvFilter::new("info,offrails_host=debug,tower_http=debug"),
+            ),
+        );
+    });
 }
 
 /// Takes one collector sample, as the once-a-second loop does.
@@ -621,7 +632,7 @@ async fn explain_runs_for_selects_only() {
 /// events (a job enqueued), each with start and duration.
 #[tokio::test]
 async fn the_trace_waterfall_shows_spans_sql_and_events() {
-    let _guard = traced();
+    traced();
     let app = dev_app().await;
     lab::seed(app.db(), 3).await.unwrap();
     app.get("/dev/lab/orders").await.assert_ok();
@@ -661,7 +672,7 @@ async fn the_trace_waterfall_shows_spans_sql_and_events() {
 /// The live log tail: filters by level, target and text; new lines arrive over SSE.
 #[tokio::test]
 async fn the_log_tail_streams_lines_and_filters() {
-    let _guard = traced();
+    traced();
     let app = dev_app().await;
     tracing::warn!(target: "billing", order = 42, "card declined (fixture)");
     tracing::info!(target: "billing", "invoice sent (fixture)");
@@ -691,7 +702,7 @@ async fn the_log_tail_streams_lines_and_filters() {
 /// A password or token logged as a field shows as [redacted] in the live tail.
 #[tokio::test]
 async fn secrets_logged_as_fields_never_reach_the_tail() {
-    let _guard = traced();
+    traced();
     let app = dev_app().await;
     tracing::info!(
         password = "hunter2-hunter2",
@@ -1979,7 +1990,7 @@ async fn a_model_reply_with_markup_renders_inert() {
 /// recorded requests, or Debug.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_ai_key_never_reaches_logs_traces_pages_or_recorded_requests() {
-    let _guard = traced();
+    traced();
     let (base, seen) = mock_provider("Fine.").await;
     let ai = ai_config(AiProvider::Anthropic, &base);
     assert!(!format!("{ai:?}").contains(AI_KEY));
@@ -2080,7 +2091,7 @@ fn ai_requests_are_rate_limited_and_budgeted() {
 /// secret log fields, no env values or tokens from the config.
 #[tokio::test]
 async fn ai_contexts_carry_no_rows_parameters_or_secrets() {
-    let _guard = traced();
+    traced();
     let app = TestApp::with_config(Config {
         env: AppEnv::Development,
         dashboard: DashboardConfig {
@@ -2503,7 +2514,7 @@ async fn a_slow_provider_stops_the_run_at_its_timeout() {
 /// text.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_prompt_injection_in_app_data_has_no_side_effect_and_leaks_nothing() {
-    let _guard = traced();
+    traced();
     let (base, seen) = scripted_provider(
         vec![
             a_calls("", &[("t1", "search_logs", json!({ "contains": "IGNORE" }))]),
@@ -2698,7 +2709,7 @@ fn read_source_stays_inside_the_allowlist() {
 /// small-model set.
 #[tokio::test]
 async fn every_tool_answers_within_its_cap() {
-    let _guard = traced();
+    traced();
     let app = dev_app().await;
     lab::seed(app.db(), 25).await.unwrap();
     app.db()
@@ -3556,7 +3567,7 @@ async fn the_github_page_renders_ci_and_repo_status_from_a_fixture() {
 /// header only, never onto a page, into Debug or into the log; answers are cached for 60 s.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_github_token_is_never_shown_or_logged() {
-    let _guard = traced();
+    traced();
     let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let calls = seen.clone();
     let mock = Router::new().fallback(move |req: Request<Body>| {
@@ -4830,7 +4841,7 @@ async fn a_damaged_or_incompatible_history_file_is_moved_aside() {
 /// or log events at all.
 #[tokio::test]
 async fn the_history_file_is_private_and_redacted() {
-    let _guard = traced();
+    traced();
     let app = dev_app().await;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("dashboard/history.sqlite3");
@@ -4961,7 +4972,7 @@ async fn the_trace_explorer_filters_by_route_kind_status_duration_and_text() {
 /// repeats are one row (`×20`), the framework's checks one collapsed row.
 #[tokio::test]
 async fn a_trace_expands_inline_with_repeats_folded() {
-    let _guard = traced();
+    traced();
     let app = dev_app().await;
     lab::seed(app.db(), 20).await.unwrap();
     app.get("/dev/lab/orders/n-plus-one").await.assert_ok();
@@ -5111,7 +5122,7 @@ async fn two_traces_compare() {
 /// dashboard's page finds it by job id.
 #[tokio::test]
 async fn jobs_are_traced_with_their_sql() {
-    let _guard = traced();
+    traced();
     let app = dev_app().await;
     lab::seed(app.db(), 2).await.unwrap();
     {
@@ -5129,6 +5140,11 @@ async fn jobs_are_traced_with_their_sql() {
         ))
         .await;
     }
+    // WHY a round trip first: the trace is done when the job span closes, at its last clone's
+    // drop, and on SQLite the driver's worker thread holds one (the span its query ran in) until
+    // it takes its next command. Answering this one means it let go; on a loaded machine it hadn't
+    // yet when the test looked. Postgres has no worker: the span closed with the block.
+    app.db().ping().await.unwrap();
     // WHY: by its identity (job 9's request id), not "the first job trace": the hub is the
     // process's, so any other `job` span lands there too; a failure prints every trace held.
     let traces = lock(&HUB.traces).list(false);
@@ -5315,7 +5331,7 @@ async fn the_profiler_never_runs_outside_development() {
 /// budget's order of magnitude (debug build; release numbers in the README).
 #[tokio::test]
 async fn method_spans_are_cheap() {
-    let _guard = traced();
+    traced();
     let _app = dev_app().await;
     #[tracing::instrument(level = "debug", target = "offrails_host::bench", skip_all)]
     fn step(i: u64) -> u64 {
@@ -5359,7 +5375,7 @@ async fn method_spans_are_cheap() {
 /// Span fields go through the same redaction as log fields.
 #[tokio::test]
 async fn secret_span_fields_are_redacted() {
-    let _guard = traced();
+    traced();
     let _app = dev_app().await;
     let router: Router = Router::new()
         .route(

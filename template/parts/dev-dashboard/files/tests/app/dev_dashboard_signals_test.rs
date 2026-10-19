@@ -58,10 +58,22 @@ fn basic() -> String {
     )
 }
 
-fn traced() -> tracing::subscriber::DefaultGuard {
-    tracing::subscriber::set_default(tracing_subscriber::registry().with(DashboardLayer).with(
-        tracing_subscriber::EnvFilter::new("info,offrails_host=debug,tower_http=debug"),
-    ))
+/// The dashboard's layer behind development's log filter, as `main` installs it: the process's
+/// global default, once (nextest runs each test in a process of its own).
+// WHY global, not `set_default` (this thread only): the SQLite driver's worker thread, and other
+// threads a request hands work to, hold clones of the request's spans and can drop the last one.
+// The registry then closes the span's parent through *that* thread's default subscriber, which a
+// thread-local one isn't: the parents (handler, the methods above the last query, an outbound
+// call) never closed, and a loaded run's trace lost them.
+fn traced() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let _ = tracing::subscriber::set_global_default(
+            tracing_subscriber::registry().with(DashboardLayer).with(
+                tracing_subscriber::EnvFilter::new("info,offrails_host=debug,tower_http=debug"),
+            ),
+        );
+    });
 }
 
 /// Serves `router` on a loopback port; its base URL.
@@ -85,7 +97,7 @@ async fn serve(router: Router) -> String {
 /// reported to the Upstreams view.
 #[tokio::test]
 async fn outbound_calls_are_traced_redacted_and_bounded() {
-    let _guard = traced();
+    traced();
     let _app = dev_app().await;
     let flaky = Arc::new(AtomicU32::new(0));
     let seen = Arc::new(std::sync::Mutex::new(String::new()));
@@ -213,7 +225,7 @@ async fn outbound_calls_are_traced_redacted_and_bounded() {
 /// view, its dependency map, the insights and the AI tools name the slow API.
 #[tokio::test]
 async fn the_checkout_fan_out_traces_four_upstreams() {
-    let _guard = traced();
+    traced();
     let app = dev_app().await;
     let base = serve(offrails_host::routes::router(app.state.clone()).unwrap()).await;
     let _ = HUB.serving.set(base.clone());
@@ -1206,9 +1218,7 @@ fn retry_attempts_are_not_sequential_calls() {
     );
     assert_eq!(upstreams::concurrent(&root), 1);
     // Two calls of their own, one after another: still flagged.
-    let two = request(
-        2,
-        600_000,
+    let two_calls = || {
         vec![
             span(1, None, "handler", 0, 590_000, "handler=\"lab::checkout\""),
             span(2, Some(1), "http", 1_000, 250_000, call),
@@ -1220,10 +1230,16 @@ fn retry_attempts_are_not_sequential_calls() {
                 240_000,
                 "service=\"payments\" http.method=\"POST\" http.host=api.example.com http.route=/charge",
             ),
-        ],
-    );
+        ]
+    };
+    let two = request(2, 600_000, two_calls());
     let s = upstreams::sequential(&waterfall::tree(&two, true)).unwrap();
     assert_eq!(s.calls.len(), 2);
+    // Work of the handler's between them (the second call needs it): not a run, however short.
+    let mut spans = two_calls();
+    spans.push(span(6, Some(1), "load_cart", 251_200, 300, ""));
+    let worked = request(3, 600_000, spans);
+    assert!(upstreams::sequential(&waterfall::tree(&worked, true)).is_none());
 }
 
 /// The time between a request's arrival and its first code is a `wait` row and its own share of

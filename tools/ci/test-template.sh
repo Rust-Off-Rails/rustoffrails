@@ -91,11 +91,10 @@ anchors_alone() {
   [ -z "$trailing" ] || { printf '%s\n' "$trailing"; return 1; }
 }
 
-# Parts' tests known to be flaky under a parallel run (each passes alone): they share the
-# dev dashboard's on-disk state (storage/dashboard/) across test processes. A samples bug, to be
-# fixed upstream and synced; until then one retry is allowed for these names only, and any other
-# flaky test fails the run.
-KNOWN_FLAKY="dev_dashboard_test::run_history_is_capped_redacted_and_reopened dev_dashboard_test::bench_drives_a_running_server"
+# Parts' tests known to be flaky under a parallel run, space-separated: one retry is allowed for
+# these names only, and any other flaky test fails the run. None today; a flake found here is a
+# bug, fixed where it lives (a part's in the samples repo, then synced), not listed for good.
+KNOWN_FLAKY=""
 
 # verify: `cargo offrails verify --fast` (fmt, CSS, clippy, one build, SQLite + Postgres at once),
 # failing on any flaky test not in KNOWN_FLAKY (nextest retries once: NEXTEST_RETRIES).
