@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 
-use axum::extract::Request;
+use axum::extract::{Request, State};
 use axum::http::{HeaderValue, header};
 use axum::middleware::Next;
 use axum::response::Response;
@@ -97,6 +97,17 @@ impl AssetCatalog {
     pub fn path(&self, key: &str) -> String {
         path_for(&self.digests(), key)
     }
+
+    /// Is `path` (relative to `/static`, as the nested router sees it) asked for with `?v=<its
+    /// current digest>`?
+    pub fn is_current(&self, path: &str, query: Option<&str>) -> bool {
+        let Some(v) = query.and_then(|q| q.split('&').find_map(|pair| pair.strip_prefix("v=")))
+        else {
+            return false;
+        };
+        let file = path.trim_start_matches('/');
+        self.digests().get(file).is_some_and(|hash| hash == v)
+    }
 }
 
 fn is_prefix_key(key: &str) -> bool {
@@ -145,11 +156,20 @@ fn scan_dir(root: &Path, dir: &Path, out: &mut BTreeMap<String, String>) {
 }
 
 /// `/static` is a nested router; this middleware wraps only static files.
-pub async fn cache_headers(request: Request, next: Next) -> Response {
-    let versioned = request.uri().query().is_some_and(|q| q.contains("v="));
+// WHY: a URL is immutable only when its `?v=` is the **current** digest of that file. Any
+// `v=` used to do: a stale URL (an old tab, a page served by the previous instance during a
+// rolling deploy) then pinned old content in caches for a year under the new digest's name
+// (test: only_the_current_digest_is_immutable).
+pub async fn cache_headers(
+    State(catalog): State<AssetCatalog>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let current = catalog.is_current(request.uri().path(), request.uri().query());
     let mut response = next.run(request).await;
-    // Only a file that exists, asked for by digest, is immutable; a 404 must never be cached.
-    let value = if versioned && response.status().is_success() {
+    // Only a file that exists, asked for by its current digest, is immutable; a 404 must never
+    // be cached.
+    let value = if current && response.status().is_success() {
         "public, max-age=31536000, immutable"
     } else {
         "no-cache"
@@ -221,6 +241,20 @@ mod tests {
         let mut d = BTreeMap::new();
         d.insert("kernel/admin.css.map".to_string(), "a".into());
         assert_eq!(path_for(&d, "kernel/admin.css"), "/static/kernel/admin.css");
+    }
+
+    #[test]
+    fn only_the_current_digest_is_immutable() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("app.css"), b"body{}").unwrap();
+        let catalog = AssetCatalog::load(dir.path().to_str().unwrap(), false);
+        let url = catalog.path("app.css");
+        let v = url.rsplit("?v=").next().unwrap();
+        assert!(catalog.is_current("/app.css", Some(&format!("v={v}"))));
+        assert!(catalog.is_current("app.css", Some(&format!("x=1&v={v}"))));
+        assert!(!catalog.is_current("/app.css", Some("v=stale")));
+        assert!(!catalog.is_current("/app.css", None));
+        assert!(!catalog.is_current("/missing.css", Some(&format!("v={v}"))));
     }
 
     #[test]

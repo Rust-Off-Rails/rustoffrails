@@ -122,13 +122,31 @@ pub fn validate_title(title: &str) -> Result<()> {
     if title.trim().is_empty()
         || title
             .chars()
-            .any(|c| matches!(c, '"' | '\\' | '{' | '}' | '<' | '>' | '\n' | '\r'))
+            .any(|c| matches!(c, '"' | '\\' | '{' | '}' | '<' | '>' | '&' | '\n' | '\r'))
+        || title.chars().any(char::is_control)
     {
         return Err(Fail::usage(format!(
-            "display name '{title}' must be non-empty plain text (no quotes, backslashes, braces or angle brackets)"
+            "display name '{title}' must be non-empty plain text (no quotes, backslashes, ampersands, braces or angle brackets)"
         )));
     }
     Ok(())
+}
+
+/// The pitch lands inside Rust string literals, Askama views, HTML and a `<meta>` tag, so it must
+/// be plain one-line text. Returns the trimmed pitch.
+pub const PITCH_MAX_CHARS: usize = 140;
+pub fn validate_pitch(pitch: &str) -> Result<String> {
+    let p = pitch.trim();
+    if p.is_empty()
+        || p.chars().count() > PITCH_MAX_CHARS
+        || p.chars()
+            .any(|c| c.is_control() || matches!(c, '"' | '\\' | '{' | '}' | '<' | '>' | '&'))
+    {
+        return Err(Fail::usage(format!(
+            "--pitch must be 1 to {PITCH_MAX_CHARS} characters of plain one-line text (no quotes, backslashes, ampersands, braces, angle brackets or control characters)"
+        )));
+    }
+    Ok(p.to_owned())
 }
 
 /// Replace the template tokens in one text.
@@ -362,15 +380,7 @@ pub fn vendor(fw: &Path, app: &Path, provenance: Option<&str>) -> Result<()> {
 pub fn run(fw: &Path, o: &NewOptions) -> Result<()> {
     validate_crate_name(&o.crate_name)?;
     validate_title(&o.title)?;
-    if let Some(p) = &o.pitch
-        && (p.trim().is_empty()
-            || p.chars()
-                .any(|c| matches!(c, '"' | '\\' | '{' | '}' | '<' | '>' | '\n' | '\r')))
-    {
-        return Err(Fail::usage(format!(
-            "--pitch '{p}' must be one line of plain text (no quotes, backslashes, braces or angle brackets): it goes into Rust strings and HTML"
-        )));
-    }
+    let pitch = o.pitch.as_deref().map(validate_pitch).transpose()?;
     match o.mode.as_str() {
         "htmx" | "api" | "inertia" | "spa" => {}
         m => {
@@ -433,7 +443,7 @@ pub fn run(fw: &Path, o: &NewOptions) -> Result<()> {
         util::copy_file(&src, &dest)?;
         let bytes = fs::read(&src)?;
         if let Some(text) = util::as_text(&bytes) {
-            let renamed = rename(text, &o.crate_name, &o.title, o.pitch.as_deref());
+            let renamed = rename(text, &o.crate_name, &o.title, pitch.as_deref());
             if renamed != text {
                 util::write_text(&dest, &renamed)?;
             }
@@ -767,6 +777,29 @@ mod tests {
         }
         assert!(validate_title("Book \"Shelf\"").is_err());
         assert!(validate_title("Bookshelf").is_ok());
+        assert!(validate_title("A & B").is_err());
+        assert!(validate_title("Book\tshelf").is_err());
+    }
+
+    #[test]
+    fn pitch_must_be_plain_one_line_text() {
+        assert_eq!(validate_pitch("  track books  ").unwrap(), "track books");
+        for bad in [
+            "say \"hi\"",
+            "back\\slash",
+            "two\nlines",
+            "tab\there",
+            "x\"; evil(); \"",
+            "<b>hi</b>",
+            "{{ x }}",
+            "a & b",
+            "",
+            "   ",
+        ] {
+            assert!(validate_pitch(bad).is_err(), "{bad:?}");
+        }
+        assert!(validate_pitch(&"x".repeat(140)).is_ok());
+        assert!(validate_pitch(&"x".repeat(141)).is_err());
     }
 
     #[test]

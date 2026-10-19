@@ -2,10 +2,15 @@
 # PreToolUse (Edit|Write|MultiEdit): block edits to files that must never be hand-edited.
 source "$(dirname "$0")/lib.sh"
 in_offrails_app || exit 0
+require_jq
 
-file="$(rel_path "$(json_get .tool_input.file_path)")"
+raw="$(json_get '.tool_input.file_path // .tool_input.notebook_path')"
+[ -n "$raw" ] || exit 0
+file="$(rel_path_canon "$raw")"
+# macOS volumes are usually case-insensitive: match the guarded prefixes case-insensitively.
+lower="$(printf '%s' "$file" | tr 'A-Z' 'a-z')"
 
-case "$file" in
+case "$lower" in
   .offrails/*)
     echo "Blocked: .offrails/ is the vendored framework and is read-only. To deviate, record it in docs/decisions.md and tell the human. To update it, use /offrails:upgrade." >&2
     exit 2 ;;

@@ -78,7 +78,10 @@ pub fn router(state: AppState) -> anyhow::Result<Router> {
     // Digested URLs are immutable, everything else revalidates.
     let static_files = Router::new()
         .fallback_service(ServeDir::new("static"))
-        .layer(from_fn(assets::cache_headers));
+        .layer(from_fn_with_state(
+            state.assets.clone(),
+            assets::cache_headers,
+        ));
 
     let mut csrf = CsrfLayer::new().add_trusted_origin(&config.app_url)?;
     if let Some(port) = config.dev_http_port {

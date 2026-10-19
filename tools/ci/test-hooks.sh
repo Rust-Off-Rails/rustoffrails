@@ -17,6 +17,19 @@ check 2 guard-edits.sh "$(j web/src/types/Book.ts)"              "edit to genera
 check 0 guard-edits.sh "$(j src/models/book.rs)"                 "edit to app code is allowed"
 (cd "$APP" && git init -q && echo a > migration/src/m20260101_000000_create_x.rs && git add -A && git -c user.email=t@t -c user.name=t commit -qm x)
 check 2 guard-edits.sh "$(j migration/src/m20260101_000000_create_x.rs)" "edit to a committed migration is blocked"
+ep() { printf '{"tool_input":{"file_path":"%s"}}' "$1"; }
+check 2 guard-edits.sh "$(ep "$APP/./.offrails/x")"                "dot segment before .offrails/ is blocked"
+check 2 guard-edits.sh "$(ep "$APP/src/../.offrails/x")"           ".. segment into .offrails/ is blocked"
+check 2 guard-edits.sh "$(ep "$APP/src/../migration/src/m20260101_000000_create_x.rs")" ".. path to a committed migration is blocked"
+check 0 guard-edits.sh "$(ep "$APP/src/../src/models/book.rs")"    ".. path to app code is allowed"
+printf '{"cwd":"%s","tool_input":{"file_path":"./.offrails/x"}}' "$APP" | CLAUDE_PROJECT_DIR="$APP" bash "$H/guard-edits.sh" >/dev/null 2>&1; [ $? = 2 ] && echo "ok   relative ./.offrails path is blocked" || { echo "FAIL relative ./.offrails path"; fail=1; }
+printf '{"cwd":"%s","tool_input":{"file_path":"src/models/book.rs"}}' "$APP" | CLAUDE_PROJECT_DIR="$APP" bash "$H/guard-edits.sh" >/dev/null 2>&1; [ $? = 0 ] && echo "ok   relative app path is allowed" || { echo "FAIL relative app path"; fail=1; }
+LINK="$(mktemp -d)/link"; ln -s "$APP" "$LINK"
+printf '%s' "$(ep "$LINK/.offrails/x")" | CLAUDE_PROJECT_DIR="$APP" bash "$H/guard-edits.sh" >/dev/null 2>&1; [ $? = 2 ] && echo "ok   symlinked project dir path is blocked" || { echo "FAIL symlinked project dir"; fail=1; }
+printf '%s' "$(ep "$APP/.offrails/x")" | CLAUDE_PROJECT_DIR="$LINK" bash "$H/guard-edits.sh" >/dev/null 2>&1; [ $? = 2 ] && echo "ok   symlinked CLAUDE_PROJECT_DIR is blocked" || { echo "FAIL symlinked CLAUDE_PROJECT_DIR"; fail=1; }
+rm -rf "$(dirname "$LINK")"
+check 2 guard-edits.sh "$(printf '{"tool_input":{"notebook_path":"%s"}}' "$APP/.offrails/n.ipynb")" "NotebookEdit into .offrails/ is blocked"
+check 0 guard-edits.sh "$(printf '{"tool_input":{"notebook_path":"%s"}}' "$APP/n.ipynb")" "NotebookEdit of app notebook is allowed"
 check 0 guard-edits.sh "$(j migration/src/m20260102_000000_add_y.rs)"    "edit to a new migration is allowed"
 
 printf 'db.execute_unprepared("x");\n' > "$APP/src/models/a.rs";              check 2 check-conventions.sh "$(j src/models/a.rs)" "raw SQL outside kernel is flagged"
@@ -39,8 +52,22 @@ printf '[package]\nname = "x"\n[dependencies]\naxum = "0.8"\n' > "$APP/Cargo.tom
 b() { printf '{"tool_input":{"command":"%s"}}' "$1"; }
 check 2 guard-bash.sh "$(b 'pkill -f myapp')"                      "pkill is blocked"
 check 2 guard-bash.sh "$(b 'cd x && killall myapp')"               "killall is blocked"
+check 2 guard-bash.sh "$(b '/usr/bin/pkill x')"                    "absolute-path pkill is blocked"
+check 2 guard-bash.sh "$(b "bash -c 'pkill x'")"                   "pkill inside bash -c is blocked"
+check 2 guard-bash.sh "$(b '(pkill x)')"                           "pkill in a subshell is blocked"
+check 2 guard-bash.sh "$(b 'p\\\\kill x')"                          "backslash-escaped pkill is blocked"
+check 2 guard-bash.sh "$(b 'kill -9 $(pgrep -f app)')"             "kill of \$(pgrep) is blocked"
+check 2 guard-bash.sh "$(b 'ps aux | xargs kill')"                 "ps | xargs kill is blocked"
+check 2 guard-bash.sh "$(b 'pgrep -f app | xargs kill -9')"        "pgrep | xargs kill is blocked"
+check 0 guard-bash.sh "$(b 'echo skillset; cargo run --bin killer')" "words merely containing kill are allowed"
 check 0 guard-bash.sh "$(b 'lsof -ti tcp:3000 -sTCP:LISTEN | xargs kill')" "kill by listener port is allowed"
 check 0 guard-bash.sh "$(b 'kill $(cat storage/pids/dev-3000.pid)')" "kill by PID file is allowed"
+
+# Without jq the guards fail closed (sed parsing could be fooled by , } or " in the command).
+NOJQ="$(mktemp -d)"; for t in bash cat dirname tr sed head grep git; do ln -s "$(command -v $t)" "$NOJQ/$t"; done
+printf '{"tool_input":{"command":"echo a, pkill x"}}' | PATH="$NOJQ" CLAUDE_PROJECT_DIR="$APP" "$(command -v bash)" "$H/guard-bash.sh" >/dev/null 2>&1; [ $? = 2 ] && echo "ok   guard-bash fails closed without jq" || { echo "FAIL guard-bash without jq"; fail=1; }
+printf '%s' "$(j .offrails/x)" | PATH="$NOJQ" CLAUDE_PROJECT_DIR="$APP" "$(command -v bash)" "$H/guard-edits.sh" >/dev/null 2>&1; [ $? = 2 ] && echo "ok   guard-edits fails closed without jq" || { echo "FAIL guard-edits without jq"; fail=1; }
+rm -rf "$NOJQ"
 
 check 0 stop-gate.sh '{"stop_hook_active":true}'                   "stop gate never loops"
 out=$(printf '{}' | CLAUDE_PROJECT_DIR="$APP" bash "$H/session-start.sh"); case "$out" in *"Rust off Rails app"*) echo "ok   session start orients the agent";; *) echo "FAIL session start"; fail=1;; esac

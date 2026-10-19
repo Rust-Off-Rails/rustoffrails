@@ -167,7 +167,7 @@ gates() {
   step "anchors stand alone" anchors_alone || return 1
   step "tailwind" sh -c 'bin/setup-tailwind >/dev/null' || return 1
   step "verify (fmt, css, clippy, tests on SQLite + Postgres)" verify || return 1
-  step "routes" sh -c 'cargo run -q -- routes > /dev/null' || return 1
+  step "routes" sh -c 'APP_ENV=development cargo run -q -- routes > /dev/null' || return 1
   step "clippy (no unwrap/expect)" env CARGO_TARGET_DIR="$CARGO_TARGET_DIR/clippy" cargo clippy -q --lib --bins -- -D warnings -D clippy::unwrap_used -D clippy::expect_used || return 1
   step "offrails-check" sh .offrails/tools/offrails-check || return 1
   if [ "$1" != none ]; then

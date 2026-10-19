@@ -45,11 +45,12 @@ Everything else gets 403.
 ```rust
 let csrf = CsrfLayer::new()
     .add_trusted_origin(&config.app_url)?                                   // validated: returns an error for a bad APP_URL
-    .with_insecure_bypass(|_, uri| uri.path().starts_with("/webhooks/"))   // webhooks verify the provider's signature instead
+    .with_insecure_bypass(|_, uri| uri.path().starts_with("/webhooks/"))   // webhooks verify the provider's signature instead (below)
     .with_rejection_response(|_| AppError::Forbidden.into_response());     // shaped like every other 403 (errors-and-logging.md)
 ```
 
 - Safe methods **must not change state**. This whole design depends on it.
+- **Every `/webhooks/…` route verifies the provider's signature, or it doesn't exist.** The bypass removes CSRF from that prefix, so a handler there with cookie auth or no check is an open POST. Rules: read the **raw body** before parsing; compute the HMAC the provider documents (Stripe: `t=…,v1=…` over `"{t}.{body}"`; GitHub: `X-Hub-Signature-256`) with the secret from `Config`; compare with `constant_time_eq`, never `==`; refuse a timestamp older than 5 minutes when the scheme has one; store the event id and `on_conflict_do_nothing` so a replayed delivery is a no-op; return 2xx fast and do the work in a job. Test: a valid signature is accepted, a tampered body, a wrong secret, a stale timestamp and a missing header are all 401, and the same event id twice creates one record.
 - Behind a proxy, `Host` and `Origin` must reach the app unchanged (Fly, Kamal-proxy, Render and Railway do this by default). Otherwise only `Sec-Fetch-Site` protects you.
 - Tests: a `Sec-Fetch-Site: cross-site` POST and a foreign-`Origin` POST both get 403. `TestApp::post_form` sends `Sec-Fetch-Site: same-origin`, like a browser.
 
@@ -112,9 +113,11 @@ Rails 8 `rate_limit to: 10, within: 3.minutes` equivalent:
 - `state.rate_limit.check(&key, limit, window).await -> Result<(), AppError>`. Over the limit → `AppError::TooManyRequests`. Forms a human submits (login, link request) catch it and **re-render the form with status 429** and the alert "Try again later.", so the person sees why. Other endpoints let the error map to a plain 429 (JSON on `/api`). Limited requests never reach argon2.
 - Client IP comes from the `ClientIp(Option<IpAddr>)` extractor:
   - normally the socket address. This needs `serve` to use `into_make_service_with_connect_info::<SocketAddr>()`, and it's `None` in tests;
-  - the **rightmost** `X-Forwarded-For` hop, only when `APP_TRUSTED_PROXY=true` (set behind Fly, Kamal-proxy, Render, and similar).
+  - the `X-Forwarded-For` hop `APP_TRUSTED_PROXY_HOPS` from the right (default 1, the rightmost), only when `APP_TRUSTED_PROXY=true`.
 
   `ClientIp::key(route)` builds the key.
+- **Behind any proxy, `APP_TRUSTED_PROXY=true` is required**, and `APP_TRUSTED_PROXY_HOPS` must equal the number of proxies that append to the header (one platform proxy such as Fly or Render: 1; Cloudflare → Caddy → app: 2). Without it every user shares the proxy's address as their key, so ten failed logins by anyone lock login, reset and magic links for everyone. With too many hops a client forges its address. Every deploy snippet in [deployment](deployment.md) sets it; the checklist there asks for it.
+- **Login is limited per IP and per account.** The per-IP limit alone lets a botnet guess one account's password from many addresses; the per-account throttle (`auth_throttle`, by email) alone lets anyone pause a victim. Keep both, and never count refused attempts.
 - It's in-process, so the limit is per instance. That's acceptable, and documented in decisions. If a spec needs global limits, use the escape hatch to the `cache_entries` table.
 - Applied to: login, password reset request, magic-link request (by IP **and** by email: `format!("login_links#create:{email}")`), sign-up, and any endpoint that sends email or costs money.
 - Tests run without a socket, so every request shares the `"<route>:unknown"` key. One `TestApp` can exhaust a limit in a loop (the 11th attempt → 429) without any IP spoofing. To test a **per-email limit across IPs**, build the `TestApp` with `APP_TRUSTED_PROXY=true` and send a different `X-Forwarded-For` on each request: the IP keys differ, the email key is shared, and the 11th request still gets 429.
@@ -157,7 +160,7 @@ So, in development only:
 
 1. **Bind loopback.** `serve` listens on `config.bind` (`APP_BIND`, default `127.0.0.1` in development, `0.0.0.0` in production: [config](config.md#where-serve-listens-app_bind-app_allowed_hosts-and-the-unset-app_env-warning)). A dev container sets `APP_BIND=0.0.0.0` so the published port works.
 2. **Check `Host`** (Rails' `HostAuthorization`). `kernel/hosts.rs` answers only `localhost`, `127.0.0.1`, `[::1]`, `*.localhost` (RFC 6761), `APP_URL`'s host and `APP_ALLOWED_HOSTS` entries (a leading `.` allows subdomains). Anything else gets a 403 page that says how to allow it. It runs **inside** the header-matrix middleware (the 403 carries the headers) and outside everything else, so no handler and no `/dev` page runs for a refused host ([routing](routing.md#middleware)). A request with no `Host` passes: a browser always sends one, and rebinding needs a browser. Production and test aren't checked: the platform's proxy routes by host, and an app answering any `Host` there exposes nothing that isn't public.
-3. **Say when `APP_ENV` is unset.** It still means development (so `cargo run` works), but `Config::boot_warnings` logs it at every boot, because on a server it's a missing setting that mounts `/dev`.
+3. **Refuse an unset `APP_ENV`.** `Config::from_env` reads `.env` first (bin/setup writes `APP_ENV=development` there), and if `APP_ENV` is still unset it fails with a message naming the fix. On a server an unset `APP_ENV` is a missing setting that would mount `/dev` and `/admin/jobs` without a login; a default is not a gate.
 
 To open the dev server from a phone or another machine, set both `APP_BIND=0.0.0.0` and `APP_ALLOWED_HOSTS=<the name or IP you'll type>`, and know that everyone on that network can then read your mailbox. A tunnel (`cloudflared`, `ngrok`) only needs `APP_ALLOWED_HOSTS=<tunnel host>` (or set `APP_URL` to it).
 

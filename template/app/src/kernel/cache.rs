@@ -5,8 +5,9 @@ use std::{future::Future, sync::Arc, time::Duration};
 
 use chrono::Utc;
 use sea_orm::{
-    ActiveValue::Set, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter,
-    sea_query::OnConflict,
+    ActiveValue::Set,
+    ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter,
+    sea_query::{LikeExpr, OnConflict},
 };
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -128,19 +129,13 @@ impl Cache {
     }
 
     pub async fn delete_prefix(&self, prefix: &str) -> Result<(), DbErr> {
-        // Keys are fetched and filtered in Rust so `%` and `_` in a prefix need no LIKE escaping.
-        let rows = entry::Entity::find().all(&self.db).await?;
-        let doomed: Vec<String> = rows
-            .into_iter()
-            .map(|r| r.key)
-            .filter(|k| k.starts_with(prefix))
-            .collect();
-        if !doomed.is_empty() {
-            entry::Entity::delete_many()
-                .filter(entry::Column::Key.is_in(doomed))
-                .exec(&self.db)
-                .await?;
-        }
+        // WHY: one `DELETE … WHERE key LIKE 'prefix%' ESCAPE '\\'` instead of loading every row
+        // into Rust to filter (the table can hold 10k+ entries). `%`, `_` and `\` in the prefix
+        // are escaped so they match literally on both SQLite and Postgres.
+        entry::Entity::delete_many()
+            .filter(entry::Column::Key.like(LikeExpr::new(like_prefix(prefix)).escape('\\')))
+            .exec(&self.db)
+            .await?;
         let prefix = prefix.to_owned();
         let _ = self
             .l1
@@ -155,5 +150,30 @@ impl Cache {
             .exec(db)
             .await?;
         Ok(res.rows_affected)
+    }
+}
+
+/// `prefix` as a LIKE pattern matching keys that start with it: `%`, `_` and `\` escaped with
+/// `\`, then a trailing `%`.
+fn like_prefix(prefix: &str) -> String {
+    let mut out = String::with_capacity(prefix.len() + 1);
+    for c in prefix.chars() {
+        if matches!(c, '%' | '_' | '\\') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out.push('%');
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefixes_are_escaped_for_like() {
+        assert_eq!(like_prefix("book:"), "book:%");
+        assert_eq!(like_prefix("100%_x\\"), "100\\%\\_x\\\\%");
     }
 }

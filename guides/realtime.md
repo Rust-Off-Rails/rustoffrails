@@ -1,5 +1,8 @@
 # Realtime (Action Cable / Turbo Streams → signals over SSE)
 
+> **Status: a specification, not shipped code.** Nothing in `template/app` or in the parts implements the `pubsub` module, the `/streams/{stream}` SSE route, the `?since=` cursor, the `(stream, version)` render cache or the `X-Live-Refresh` gate described below. The **`realtime` part ships [channels](channels.md)** (rooms over `offrails.v1`, presence, revocation, resume by message id) and `channels::refresh`, which tells every subscriber to re-fetch a region: that is N re-fetches per change, the thundering herd this page says is solved. Until this spec is built, treat its guarantees as design goals: if a page needs a live region many people watch, build the render-once cache first, and record in `docs/decisions.md` that you did. CHEATSHEET gotchas 7, 21 and 22 describe this spec.
+
+
 > **TL;DR**
 > - Broadcast **signals, not HTML**: `pubsub::broadcast(&txn, "book:42", "reviews-changed")` inside the transaction; clients re-fetch through normal authorized GETs (Turbo 8's refresh model).
 > - SSE at `/streams/{stream}`; every signal has an id, pages render a `?since=` cursor, and reconnects replay what was missed (or get `refresh`). Data is never empty.
@@ -10,7 +13,7 @@
 >
 > Read the rest when adding a live region or stream, or debugging stale pages.
 
-**Use the part.** The `realtime` [parts](samples.md#the-samples) are this guide built, tested on SQLite and Postgres and security-reviewed, with more on top: channels over `offrails.v1` with SSE and long-poll fallbacks, presence and `/dev/sockets`. When the product needs this, add the part rather than writing it from this guide: `cargo offrails add-part realtime` (dependencies come first; [workflow](../workflow.md#when-the-product-grows-a-need-add-the-part)). Keep its `// SECURITY:` markers and the tests its CHECKS.md cites. This guide stays the spec: hand-write from it only when no part fits, or the human declined the part.
+**Use the part for channels.** The `realtime` [part](samples.md#the-samples) is [channels](channels.md) built, tested on SQLite and Postgres and security-reviewed: channels over `offrails.v1` with SSE and long-poll fallbacks, presence and `/dev/sockets`. It does not implement the signals/streams design on this page (status note above). When the product needs this, add the part rather than writing it from this guide: `cargo offrails add-part realtime` (dependencies come first; [workflow](../workflow.md#when-the-product-grows-a-need-add-the-part)). Keep its `// SECURITY:` markers and the tests its CHECKS.md cites. This guide stays the spec: hand-write from it only when no part fits, or the human declined the part.
 
 **Broadcast signals, not HTML.** When data changes, the server announces "book 42's reviews changed" on a stream. Clients that care re-fetch through the normal, already-authorized GET routes. This is Turbo 8's "page refresh" broadcast model. Payloads stay tiny, nothing gets rendered per subscriber, authorization can't leak through a broadcast, and it works identically in all three frontend modes.
 

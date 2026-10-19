@@ -138,10 +138,10 @@ pub async fn create(State(s): State<AppState>, ctx: Ctx, RequireUser(user): Requ
    - `Content-Type` from the row;
    - `Content-Disposition: inline; filename="…"` for images, `attachment` otherwise;
    - `X-Content-Type-Options: nosniff`;
-   - `Cache-Control: private, max-age=3600`.
+   - `Cache-Control: no-store`. The header middleware sets `no-store` on every response to a request with a session, and only fills headers a handler left unset, so a handler that writes `private, max-age=3600` here would override it and keep a private file in the browser cache for an hour after logout or revocation. Public, unauthenticated media is the exception: `public, max-age=…` is fine when the route needs no login.
 
 Use **S3 presigned URLs** only when the interview or a spec calls for it (large or public media, offloading bandwidth). Then:
-- add `presigned_get(key, ttl)` to `Storage` (object_store's `Signer`, S3 only) and redirect (303) to it after the same authorization;
+- add `presigned_get(key, ttl)` to `Storage` (object_store's `Signer`, S3 only) and redirect (303) to it after the same authorization. `ttl` is **minutes, not days** (5 by default): the URL is a bearer credential for that object, and nothing revokes it before it expires. Pass `response-content-disposition` (`attachment; filename="…"` unless it's an image) and `response-content-type` from the row, so S3 doesn't serve a client-chosen type;
 - set `STORAGE_PUBLIC_HOST`, and add that host to the CSP `img-src` (and `media-src` for video) in `security.md`'s header layer;
 - log the decision in `docs/decisions.md`.
 

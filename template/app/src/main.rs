@@ -64,6 +64,10 @@ enum DbCommand {
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    // The route table is a constant: no config, no database, no APP_ENV needed.
+    if matches!(cli.command, Some(Command::Routes)) {
+        return print_routes();
+    }
     let config = Config::from_env()?;
     // WHY: a lean runtime by default (APP_WORKER_THREADS=2, APP_BLOCKING_THREADS=16) instead of
     // one worker per core and 512 blocking threads: each idle thread holds its stack and an

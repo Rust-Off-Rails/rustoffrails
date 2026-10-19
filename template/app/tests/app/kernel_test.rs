@@ -157,6 +157,28 @@ async fn x_forwarded_for_is_ignored_unless_a_proxy_is_trusted() {
     assert_eq!(client_ip(&trusted, Some("not-an-ip")).await, None);
 }
 
+/// Behind two proxies (Cloudflare → Caddy → app) the client is the second hop from the right;
+/// the rightmost is Cloudflare's address, which every user would share as a rate-limit key.
+#[tokio::test]
+async fn the_client_ip_is_the_configured_hop_from_the_right() {
+    let app = TestApp::new().await;
+    let mut config = (*app.state.config).clone();
+    config.trusted_proxy = true;
+    config.trusted_proxy_hops = 2;
+    let trusted = TestApp::with_config(config).await;
+    assert_eq!(
+        client_ip(&trusted, Some("6.6.6.6, 203.0.113.9, 198.51.100.7")).await,
+        Some("203.0.113.9".parse().unwrap())
+    );
+    // A header shorter than the hop count was not written by our proxies: not trusted.
+    assert_eq!(client_ip(&trusted, Some("203.0.113.9")).await, None);
+    // A hop that isn't a bare IP (some proxies write ip:port) is never a client-chosen value.
+    assert_eq!(
+        client_ip(&trusted, Some("6.6.6.6, 203.0.113.9:4242, 198.51.100.7")).await,
+        None
+    );
+}
+
 /// `kernel::db::begin` is `BEGIN IMMEDIATE` on SQLite. Plain deferred transactions that read then
 /// write under concurrency fail with "database is locked" (SQLITE_BUSY_SNAPSHOT), and an
 /// in-memory database (one connection) can't show it, so this uses a file.
@@ -238,4 +260,20 @@ async fn the_postgres_test_reset_empties_tables_and_refuses_a_changed_schema() {
         .unwrap();
     let refused = kernel::db::reset_test_database(db).await.unwrap_err();
     assert!(refused.to_string().contains("schema changed"), "{refused}");
+}
+
+/// An unset `APP_ENV` is an error, never a default: run the binary in a directory with no `.env`,
+/// so the fallback has nothing to load (config.rs).
+#[test]
+fn an_unset_app_env_refuses_to_boot() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_offrails_app"))
+        .args(["db", "status"])
+        .env_remove("APP_ENV")
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("APP_ENV is not set"), "{err}");
 }

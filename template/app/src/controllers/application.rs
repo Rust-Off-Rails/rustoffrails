@@ -45,9 +45,13 @@ impl FromRequestParts<AppState> for Ctx {
     }
 }
 
-/// The caller's IP: the socket address, or the **rightmost** `X-Forwarded-For` hop when
-/// `APP_TRUSTED_PROXY=true` (behind Fly, Kamal-proxy, Render and similar). `None` in tests,
-/// which run without a socket.
+/// The caller's IP: the socket address, or the `X-Forwarded-For` hop `APP_TRUSTED_PROXY_HOPS`
+/// from the right (default 1: the rightmost) when `APP_TRUSTED_PROXY=true` (behind Fly,
+/// kamal-proxy, Render and similar). `None` in tests, which run without a socket.
+// SECURITY: only the hops the operator's proxies append are trusted; anything a client put in
+// the header sits further left and is never read. A hop that isn't an IP (an `ip:port` some
+// proxies write, or a short header) falls back to the socket address, never to a client-chosen
+// value (test: the_client_ip_is_the_configured_hop_from_the_right).
 pub struct ClientIp(pub Option<IpAddr>);
 
 impl FromRequestParts<AppState> for ClientIp {
@@ -65,8 +69,7 @@ impl FromRequestParts<AppState> for ClientIp {
                     .headers
                     .get("x-forwarded-for")
                     .and_then(|v| v.to_str().ok())
-                    .and_then(|v| v.rsplit(',').next())
-                    .and_then(|hop| hop.trim().parse::<IpAddr>().ok())
+                    .and_then(|v| forwarded_hop(v, state.config.trusted_proxy_hops))
             })
             .flatten();
         let ip = forwarded.or_else(|| {
@@ -77,6 +80,15 @@ impl FromRequestParts<AppState> for ClientIp {
         });
         Ok(Self(ip))
     }
+}
+
+/// The `hops`-th address from the right of an `X-Forwarded-For` value (1 = rightmost), or
+/// `None` when the header is shorter than that or the hop isn't a bare IP.
+pub fn forwarded_hop(header: &str, hops: u8) -> Option<IpAddr> {
+    header
+        .rsplit(',')
+        .nth(usize::from(hops.max(1)) - 1)
+        .and_then(|hop| hop.trim().parse::<IpAddr>().ok())
 }
 
 impl ClientIp {
