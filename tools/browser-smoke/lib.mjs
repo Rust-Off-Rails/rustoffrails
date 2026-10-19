@@ -8,9 +8,13 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { findChrome, requireChrome } from "./cdp.mjs";
 
 export const BASE = (process.env.BASE ?? "http://localhost:3000").replace(/\/$/, "");
-export const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+// The same discovery as the CDP smokes (cdp.mjs): CHROME_PATH or CHROME, else the usual places on
+// macOS, Linux and Windows. It used to default to the macOS path, so on Linux CI every smoke run
+// through run.sh failed to launch unless CHROME was set.
+export const CHROME = findChrome();
 
 export function checker() {
   const failures = [];
@@ -25,7 +29,7 @@ export function checker() {
 export async function launch() {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "offrails-smoke-"));
   return puppeteer.launch({
-    executablePath: CHROME,
+    executablePath: requireChrome(),
     headless: true,
     userDataDir: profile,
     args: ["--no-first-run", "--no-default-browser-check"],

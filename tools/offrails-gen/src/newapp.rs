@@ -656,6 +656,8 @@ mod tests {
                 .arg("-C")
                 .arg(&dir)
                 .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid"])
+                // Windows runners set core.autocrlf=true, so `git archive` would write CRLF.
+                .args(["-c", "core.autocrlf=false"])
                 .args(args)
                 .output()
                 .unwrap()

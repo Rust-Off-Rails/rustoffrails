@@ -47,7 +47,7 @@ case "${1:-dev-tools}" in
 esac
 run="$(mktemp -d "$cache/run.XXXXXX")"
 trap 'rm -rf "$run"' EXIT INT TERM
-cp "$here/lib.mjs" "$here/$script" "$run/"
+cp "$here/lib.mjs" "$here/cdp.mjs" "$here/$script" "$run/"
 status=0
 node "$run/$script" || status=$?
 exit "$status"
