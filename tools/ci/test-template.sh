@@ -204,7 +204,12 @@ async fn the_gallery_renders_in_development() {
         ..APP_CRATE::config::Config::test()
     })
     .await;
-    app.get(&APP_CRATE::routes::paths::dev_components()).await.assert_ok();
+    app.get(&gallery_path()).await.assert_ok();
+}
+
+/// A helper whose comment cites AC-home-2: not a test, so PROOF.md must not list it.
+fn gallery_path() -> String {
+    APP_CRATE::routes::paths::dev_components()
 }
 TEST
   # The a11y smoke's scenario, so prove_app runs it the way `verify --full` does.
@@ -291,6 +296,8 @@ prove_app() {
   # shellcheck disable=SC2016 # literal backticks
   grep -q 'AC-home-1.*the_home_page_shows_the_app_name.*SQLite: passed.*`/` ok' "$proof" || { echo "AC-home-1 is not traced to its passing test and page" >&2; cat "$proof"; return 1; }
   grep -q 'screens/dev-components--mobile-dark.png' "$proof" || return 1
+  grep -q 'AC-home-2.*the_gallery_renders_in_development' "$proof" || { echo "AC-home-2 is not traced to its test" >&2; return 1; }
+  ! grep -q 'gallery_path' "$proof" || { echo "PROOF.md lists a helper that is not a test as citing an AC" >&2; grep -n gallery_path "$proof" >&2; return 1; }
   # The gallery and the layout pages were checked at 390 px (in the sticky-footer layout) and passed.
   for p in /dev/components /dev/layouts/sidebar /dev/layouts/marketing /dev/layouts/auth /dev/layouts/docs; do
     grep -q "^| \`$p\` | [^|]* | ok | " "$proof" || { echo "PROOF.md: $p is not ok" >&2; grep -F "$p" "$proof" >&2; return 1; }

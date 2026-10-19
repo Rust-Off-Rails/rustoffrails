@@ -389,8 +389,27 @@ function pathHelpers() {
   return map;
 }
 
+/** A test attribute: #[test], #[tokio::test], #[tokio::test(flavor = …)], #[sqlx::test], #[rstest]… */
+const TEST_ATTR = /^\s*#\[\s*(?:[A-Za-z_]\w*::)*(?:test|rstest|test_case)\b/;
+
+/** In Rust, the `fn` at line `j` (cited at line `i`) is a test: a test attribute among the
+ *  attributes and comments around the citation, and in src/ inside a #[cfg(test)] module. A
+ *  handler or helper whose comment mentions an AC id is not a test. */
+function isRustTest(lines, i, j, file) {
+  let k = i;
+  while (k > 0 && /^\s*(#\[|\/\/)/.test(lines[k - 1])) k -= 1;
+  // Only attributes, comments and blank lines between the citation and the fn: a comment
+  // inside a body does not cite the next test.
+  if (!lines.slice(i + 1, j).every((l) => /^\s*(#\[|\/\/|$)/.test(l))) return false;
+  const preamble = lines.slice(k, j + 1);
+  if (!preamble.some((l) => TEST_ATTR.test(l))) return false;
+  if (file.startsWith("src")) return lines.slice(0, i).some((l) => /^\s*#\[cfg\(test\)\]/.test(l));
+  return true;
+}
+
 /** Every test that cites an AC id: { id, file, line, name, paths }. The test is the first `fn`
- *  after the citation; its paths are the "/…" literals and paths::…() calls in its body. */
+ *  after the citation (in Rust, only when it is a test function: isRustTest); its paths are the
+ *  "/…" literals and paths::…() calls in its body. */
 function citations(helpers) {
   const out = [];
   const files = [...walk("tests", [".rs", ".mjs", ".ts", ".js"]), ...walk("src", [".rs"]), ...walk(path.join("web", "src"), [".ts", ".tsx", ".js", ".svelte"])];
@@ -409,6 +428,7 @@ function citations(helpers) {
           }
         }
         if (!name) continue;
+        if (file.endsWith(".rs") && !isRustTest(lines, i, start, file)) continue;
         // The body: up to the next line that starts a new top-level item.
         const body = [];
         for (let j = start; j < lines.length; j += 1) {
