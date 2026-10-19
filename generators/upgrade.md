@@ -14,7 +14,7 @@ Brings an existing app up to a newer Rust off Rails release: it re-vendors `.off
 **`$FW`** is the new framework:
 - after the one-line install: `~/.offrails/current` (run `offrails update` first to get the latest release);
 - in Claude Code: the plugin root;
-- otherwise: a checkout of the framework at a release tag (`git -C <checkout> archive v<version> | tar -x -C <tmp>`). **Never vendor a moving working tree:** unreleased commits would leak into a versioned app.
+- otherwise: a checkout of the framework at a release tag. **Never vendor a moving working tree:** `vendor` and `update-part` read a checkout's HEAD (`git archive HEAD`), not its working tree, and `vendor` records the commit as `.offrails/VERSION`'s third line, `from git v<version> (<sha>)` at the tag, or `… (unreleased: …)` when HEAD is past it (a release branch before tagging, whose `VERSION` still names the previous release). Unreleased commits in a versioned app are then visible, not silent; check out the tag for a real upgrade.
 
 Run it from the app's root (the directory with `.offrails/`).
 

@@ -21,7 +21,7 @@ The framework ships the app skeleton as real files: [`template/app/`](../templat
 
 ## 1. Generate
 
-`$FW` is the framework you're reading: the plugin root when run through `/offrails:new`, `~/.offrails/current` after the one-line install, or the path the human gave you. **Vendor a release, never a moving working tree:** if `$FW` is a git checkout, export the tag matching its `VERSION` (`git -C "$FW" archive v$(head -n1 "$FW/VERSION") | tar -x -C <tmp>`, then use `<tmp>` as `$FW`).
+`$FW` is the framework you're reading: the plugin root when run through `/offrails:new`, `~/.offrails/current` after the one-line install, or the path the human gave you. **Vendor a release, never a moving working tree.** A release install (the plugin, `~/.offrails/current`, a tag export) is copied as it is. When `$FW` is a git checkout, `new` (and `vendor`) copy **HEAD's committed files** (`git archive HEAD`, the way the release tarball is built), never the working tree, say so, and record the commit as `.offrails/VERSION`'s third line: `from git v0.7.3 (<sha>)` at the release tag, or `from git <sha> (unreleased: HEAD is not the v0.7.3 tag; VERSION names the last release)` on a branch before tagging, where `VERSION` still names the previous release (the first line, and so the `FRAMEWORK` header, say that version; the third line is the truth: say it in your final message). To vendor a release from a checkout, check out its tag first. `--worktree` copies the working tree as it is, uncommitted changes included (the framework's own CI; never for an app you hand over).
 
 ```sh
 cargo run -q --manifest-path "$FW/tools/offrails-gen/Cargo.toml" --target-dir <dir>/target/offrails-gen -- \

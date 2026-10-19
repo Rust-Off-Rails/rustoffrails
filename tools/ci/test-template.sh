@@ -67,7 +67,12 @@ mkdir -p "$work"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$work/target}"
 export CARGO_TERM_COLOR="${CARGO_TERM_COLOR:-never}"
 gen_manifest="$root/tools/offrails-gen/Cargo.toml"
-gen() { cargo run -q --manifest-path "$gen_manifest" --target-dir "$work/gen-target" -- "$@"; }
+# `new --worktree`: this checkout's working tree as it is (uncommitted changes are what CI tests),
+# not HEAD's committed files, which is what `new` vendors from a git checkout otherwise.
+gen() {
+  if [ "$1" = new ]; then set -- "$@" --worktree; fi
+  cargo run -q --manifest-path "$gen_manifest" --target-dir "$work/gen-target" -- "$@"
+}
 
 name=""
 app=""

@@ -3,6 +3,8 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::parts::{self, AddOptions};
 use crate::util::{self, Fail, Result, rel};
@@ -47,6 +49,8 @@ pub struct NewOptions {
     pub offline: bool,
     /// `--invite`: an invite-only app (`DEFAULT_SIGNUP = Signup::Invite`, `ACCOUNTS: … invite`).
     pub invite: bool,
+    /// `Snapshot::provenance`: recorded in .offrails/VERSION and the log.
+    pub provenance: Option<String>,
 }
 
 /// `new --invite`: nobody signs up; `app task auth_invite <email>` creates accounts. The auth parts
@@ -189,8 +193,139 @@ fn dir_is_empty_enough(dir: &Path) -> Result<bool> {
     Ok(true)
 }
 
-/// Copy the framework into `<app>/.offrails/` (generators/new.md step 1), then date the vendoring.
-pub fn vendor(fw: &Path, app: &Path) -> Result<()> {
+/// The framework to copy from (`new`, `vendor`). Dropping it removes its temporary export.
+pub struct Snapshot {
+    pub root: PathBuf,
+    /// Where it came from when that isn't a release install: `from git v0.7.3 (<sha>)`, `from git
+    /// <sha> (unreleased: …)` or `from the working tree of <sha>…`. `.offrails/VERSION`'s third
+    /// line and the `new` log line. None: the plugin, ~/.offrails/current, a tag export.
+    pub provenance: Option<String>,
+    tmp: Option<PathBuf>,
+}
+
+impl Drop for Snapshot {
+    fn drop(&mut self) {
+        if let Some(t) = &self.tmp {
+            let _ = fs::remove_dir_all(t);
+        }
+    }
+}
+
+/// A release install is used as it is. A git checkout (`<fw>/.git`) is never vendored as a moving
+/// working tree: HEAD's committed files are (`git archive HEAD`, as tools/release/release.sh
+/// builds the release tarball), and the commit is recorded. At the `v<VERSION>` tag that is the
+/// release; on a release branch before tagging VERSION still names the previous release, so the
+/// record says "unreleased". `worktree`: the working tree as it is, uncommitted changes included
+/// (the framework's own CI), recorded as such.
+pub fn snapshot(fw: &Path, worktree: bool) -> Result<Snapshot> {
+    let as_is = |provenance| Snapshot {
+        root: fw.to_path_buf(),
+        provenance,
+        tmp: None,
+    };
+    if !fw.join(".git").exists() || !util::have("git") {
+        return Ok(as_is(None));
+    }
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .arg("-C")
+            .arg(fw)
+            .args(args)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+    };
+    let Some(head) = git(&["rev-parse", "HEAD"]) else {
+        return Ok(as_is(None));
+    };
+    let short = head.get(..12).unwrap_or(&head).to_owned();
+    let tag = format!("v{}", util::framework_version(fw)?);
+    let dirty = git(&["status", "--porcelain"]).is_some_and(|s| !s.is_empty());
+    if worktree {
+        let p = format!(
+            "from the working tree of {short}{}",
+            if dirty {
+                ", uncommitted changes included"
+            } else {
+                ""
+            }
+        );
+        println!(
+            "  framework {} is a git checkout; --worktree: using it as it is, {p}",
+            fw.display()
+        );
+        return Ok(as_is(Some(p)));
+    }
+    let tagged = git(&[
+        "rev-parse",
+        "-q",
+        "--verify",
+        &format!("refs/tags/{tag}^{{commit}}"),
+    ])
+    .is_some_and(|c| c == head);
+    let provenance = if tagged {
+        format!("from git {tag} ({short})")
+    } else {
+        format!(
+            "from git {short} (unreleased: HEAD is not the {tag} tag; VERSION names the last release)"
+        )
+    };
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let tmp = std::env::temp_dir().join(format!(
+        "offrails-fw-{}-{nanos}-{short}",
+        std::process::id()
+    ));
+    util::ctx(fs::create_dir_all(&tmp), "creating", &tmp)?;
+    let snap = Snapshot {
+        root: tmp.clone(),
+        provenance: Some(provenance),
+        tmp: Some(tmp.clone()),
+    };
+    let mut archive = util::ctx(
+        Command::new("git")
+            .arg("-C")
+            .arg(fw)
+            .args(["archive", "--format=tar", "HEAD"])
+            .stdout(Stdio::piped())
+            .spawn(),
+        "running git archive in",
+        fw,
+    )?;
+    let tar = Command::new("tar")
+        .arg("-x")
+        .arg("-f")
+        .arg("-")
+        .arg("-C")
+        .arg(&tmp)
+        .stdin(archive.stdout.take().map_or_else(Stdio::null, Stdio::from))
+        .status();
+    let archived = archive.wait().is_ok_and(|s| s.success());
+    if !archived || !tar.is_ok_and(|s| s.success()) {
+        return Err(Fail::new(format!(
+            "`git archive HEAD | tar -x` of {} failed: export it by hand (git -C <fw> archive HEAD | tar -x -C <tmp>) and pass --framework <tmp>",
+            fw.display()
+        )));
+    }
+    println!(
+        "  framework {} is a git checkout: using HEAD's committed files (git archive HEAD), {}",
+        fw.display(),
+        snap.provenance.as_deref().unwrap_or_default()
+    );
+    if dirty {
+        println!(
+            "  note: its uncommitted changes are not used (commit them first, or pass --worktree)"
+        );
+    }
+    Ok(snap)
+}
+
+/// Copy the framework into `<app>/.offrails/` (generators/new.md step 1), then date the vendoring
+/// (and say where it came from: `snapshot`).
+pub fn vendor(fw: &Path, app: &Path, provenance: Option<&str>) -> Result<()> {
     let dest = app.join(".offrails");
     if dest.exists() {
         util::ctx(fs::remove_dir_all(&dest), "removing", &dest)?;
@@ -215,7 +350,11 @@ pub fn vendor(fw: &Path, app: &Path) -> Result<()> {
     let version = util::framework_version(fw)?;
     util::write_text(
         &dest.join("VERSION"),
-        &format!("{version}\nvendored {}\n", util::today_utc()),
+        &format!(
+            "{version}\nvendored {}\n{}",
+            util::today_utc(),
+            provenance.map(|p| format!("{p}\n")).unwrap_or_default()
+        ),
     )?;
     Ok(())
 }
@@ -305,8 +444,14 @@ pub fn run(fw: &Path, o: &NewOptions) -> Result<()> {
         "  copy {count} files from template/app (tokens {CRATE_TOKEN}, {KEBAB_TOKEN}, \"{TITLE_TOKEN}\" renamed)"
     );
 
-    vendor(fw, app)?;
-    println!("  vendor .offrails/ (Rust off Rails {version}, vendored {today})");
+    vendor(fw, app, o.provenance.as_deref())?;
+    println!(
+        "  vendor .offrails/ (Rust off Rails {version}, vendored {today}{})",
+        o.provenance
+            .as_deref()
+            .map(|p| format!(", {p}"))
+            .unwrap_or_default()
+    );
     if cfg!(target_os = "macos") {
         // Spotlight would index every build artifact: gigabytes of churn, a busy disk.
         util::write_text(&app.join("target").join(".metadata_never_index"), "")?;
@@ -368,8 +513,12 @@ pub fn run(fw: &Path, o: &NewOptions) -> Result<()> {
     util::log_decision(
         app,
         &format!(
-            "app generated from the Rust off Rails {version} template (cargo offrails new; mode=htmx, prod db={}, parts={parts_note})",
-            o.prod_db
+            "app generated from the Rust off Rails {version} template (cargo offrails new; mode=htmx, prod db={}, parts={parts_note}){}",
+            o.prod_db,
+            o.provenance
+                .as_deref()
+                .map(|p| format!("; framework vendored {p}"))
+                .unwrap_or_default()
         ),
     )?;
     if o.mode != "htmx" {
@@ -488,6 +637,92 @@ mod tests {
             ),
             "one tagline, capitalized like brand.toml's, whatever case was typed"
         );
+    }
+
+    /// A framework checkout is vendored from HEAD, never its working tree, and says which commit
+    /// and whether it is the release tag (generators/new.md step 1).
+    #[test]
+    fn a_framework_checkout_is_vendored_from_head_with_its_commit() {
+        if !util::have("git") || !util::have("tar") {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("offrails-snap-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("template/app")).unwrap();
+        fs::write(dir.join("VERSION"), "0.7.2\n").unwrap();
+        fs::write(dir.join("template/app/a.txt"), "committed\n").unwrap();
+        let git = |args: &[&str]| {
+            let ok = Command::new("git")
+                .arg("-C")
+                .arg(&dir)
+                .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid"])
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "one"]);
+        git(&["tag", "v0.7.2"]);
+        // At the tag: the release, recorded with its tag.
+        let snap = snapshot(&dir, false).unwrap();
+        assert!(
+            snap.provenance
+                .as_deref()
+                .is_some_and(|p| p.starts_with("from git v0.7.2 (")),
+            "{:?}",
+            snap.provenance
+        );
+        drop(snap);
+        // A release branch before tagging: HEAD past the tag, VERSION unchanged, a dirty tree.
+        fs::write(dir.join("template/app/a.txt"), "next\n").unwrap();
+        git(&["commit", "-qam", "two"]);
+        fs::write(dir.join("template/app/a.txt"), "uncommitted\n").unwrap();
+        let snap = snapshot(&dir, false).unwrap();
+        let root = snap.root.clone();
+        assert_ne!(root, dir);
+        assert_eq!(
+            fs::read_to_string(root.join("template/app/a.txt")).unwrap(),
+            "next\n",
+            "HEAD's files, not the working tree's"
+        );
+        assert!(
+            snap.provenance
+                .as_deref()
+                .is_some_and(|p| p.contains("unreleased") && p.contains("v0.7.2")),
+            "{:?}",
+            snap.provenance
+        );
+        let app = dir.join("app");
+        vendor(&root, &app, snap.provenance.as_deref()).unwrap();
+        let version = fs::read_to_string(app.join(".offrails/VERSION")).unwrap();
+        let lines: Vec<&str> = version.lines().collect();
+        assert_eq!(lines[0], "0.7.2", "VERSION's first line stays the version");
+        assert!(lines[1].starts_with("vendored "));
+        assert!(lines[2].starts_with("from git ") && lines[2].contains("unreleased"));
+        drop(snap);
+        assert!(!root.exists(), "the export is removed");
+        // --worktree: the working tree as it is, said so.
+        let snap = snapshot(&dir, true).unwrap();
+        assert_eq!(snap.root, dir);
+        assert!(
+            snap.provenance
+                .as_deref()
+                .is_some_and(|p| p.contains("uncommitted changes included"))
+        );
+        drop(snap);
+        // Not a checkout (a release install): as it is, nothing recorded.
+        let plain = dir.join("app/.offrails");
+        let snap = snapshot(&plain, false).unwrap();
+        assert_eq!(
+            (snap.root.as_path(), snap.provenance.as_deref()),
+            (plain.as_path(), None)
+        );
+        drop(snap);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

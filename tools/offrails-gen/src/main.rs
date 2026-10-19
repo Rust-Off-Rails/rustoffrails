@@ -35,7 +35,9 @@ use util::{Fail, Result};
 const USAGE: &str = "usage:
   offrails-gen new <dir> <crate_name> \"<Display Name>\" [--pitch \"<one line>\"] [--parts a,b|none]
                    [--invite] [--mode htmx|inertia|spa|api] [--prod-db postgres|sqlite] [--no-git] [--offline]
-                   [--framework <path>]
+                   [--framework <path>] [--worktree]
+                   a framework that is a git checkout is vendored from HEAD (git archive HEAD), its
+                   commit recorded in .offrails/VERSION; --worktree: its working tree as it is
   offrails-gen generate <kind> <name> [args…] [--dry-run] [--force] [--public] [--app <dir>]   (alias: g)
                    migration | model | resource (scaffold) | controller | page | api | job | mailer | channel | test
                    `generate --help` lists each kind, the field types and the options
@@ -45,11 +47,12 @@ const USAGE: &str = "usage:
   offrails-gen snippet add <name> [--as <model>] [--dry-run] [--force]   copy and wire it, recorded
   offrails-gen snippet remove <name> [--as <model>] [--dry-run]          take it back (unchanged files only)
   offrails-gen add <part>… [--app <dir>] [--dry-run] [--force] [--offline] [--no-fmt]   (alias: add-part)
-  offrails-gen update-part <part>… --framework <newer> [--base <fw>] [--app <dir>] [--dry-run] [--no-fmt]
+  offrails-gen update-part <part>… --framework <newer> [--base <fw>] [--app <dir>] [--dry-run] [--no-fmt] [--worktree]
                    merge a newer framework's part into the app: 3-way against the vendored .offrails/ (the
                    installed version), clean hunks applied, conflicts marked, app changes never overwritten
   offrails-gen parts [--app <dir>]   (alias: list-parts) every part, installed or not, and what it adds
-  offrails-gen vendor --framework <newer framework> [--app <dir>]   re-copy a framework into <app>/.offrails/
+  offrails-gen vendor --framework <newer framework> [--app <dir>] [--worktree]   re-copy a framework into
+                   <app>/.offrails/ (a git checkout: from HEAD, as for new)
   offrails-gen verify [--fast|--full] [--no-postgres] [--test-threads <n>] [--app <dir>]
                    the Definition of Done in parallel: --fast while iterating, --full once at the end
   offrails-gen brand [--check] [--no-images] [--init] [--app <dir>]
@@ -274,6 +277,7 @@ fn real_main() -> Result<()> {
                 "--offline",
                 "--title",
                 "--invite",
+                "--worktree",
             ])?;
             let need = || {
                 Fail::usage(format!(
@@ -290,8 +294,9 @@ fn real_main() -> Result<()> {
                 _ => return Err(need()),
             };
             let fw = util::framework_root(args.value("--framework").as_deref())?;
+            let snap = newapp::snapshot(&fw, args.flag("--worktree"))?;
             newapp::run(
-                &fw,
+                &snap.root,
                 &newapp::NewOptions {
                     dir: PathBuf::from(dir),
                     crate_name: krate,
@@ -303,6 +308,7 @@ fn real_main() -> Result<()> {
                     git: !args.flag("--no-git"),
                     offline: args.flag("--offline"),
                     invite: args.flag("--invite"),
+                    provenance: snap.provenance.clone(),
                 },
             )
         }
@@ -341,7 +347,14 @@ fn real_main() -> Result<()> {
             .map(|_| ())
         }
         "update-part" | "update-parts" => {
-            args.reject_unknown(&["--app", "--dry-run", "--no-fmt", "--framework", "--base"])?;
+            args.reject_unknown(&[
+                "--app",
+                "--dry-run",
+                "--no-fmt",
+                "--framework",
+                "--base",
+                "--worktree",
+            ])?;
             if args.positional.is_empty() {
                 return Err(Fail::usage(format!(
                     "update-part needs a part name\n\n{USAGE}"
@@ -353,7 +366,12 @@ fn real_main() -> Result<()> {
                     "update-part needs --framework <the newer framework> (the plugin root, ~/.offrails/<version>, or a checkout); the base is the app's .offrails/",
                 ));
             };
-            let new_fw = util::framework_root(Some(&newer))?;
+            // A checkout: its HEAD, as `vendor` will copy it (newapp::snapshot).
+            let snap = newapp::snapshot(
+                &util::framework_root(Some(&newer))?,
+                args.flag("--worktree"),
+            )?;
+            let new_fw = snap.root.clone();
             let base = match args.value("--base") {
                 Some(b) => util::framework_root(Some(&b))?,
                 None => util::framework_root(Some(&app.join(".offrails").to_string_lossy()))?,
@@ -380,7 +398,7 @@ fn real_main() -> Result<()> {
             parts::list(&fw, app.as_deref())
         }
         "vendor" => {
-            args.reject_unknown(&["--app", "--framework"])?;
+            args.reject_unknown(&["--app", "--framework", "--worktree"])?;
             let app = args.app()?;
             let Some(explicit) = args.value("--framework") else {
                 return Err(Fail::usage(
@@ -398,11 +416,16 @@ fn real_main() -> Result<()> {
                     "vendor copies another framework in; --framework is this app's own .offrails/",
                 ));
             }
-            newapp::vendor(&fw, &app)?;
+            let snap = newapp::snapshot(&fw, args.flag("--worktree"))?;
+            newapp::vendor(&snap.root, &app, snap.provenance.as_deref())?;
             println!(
-                "vendored Rust off Rails {} into {}",
-                util::framework_version(&fw)?,
-                app.join(".offrails").display()
+                "vendored Rust off Rails {} into {}{}",
+                util::framework_version(&snap.root)?,
+                app.join(".offrails").display(),
+                snap.provenance
+                    .as_deref()
+                    .map(|p| format!(" ({p})"))
+                    .unwrap_or_default()
             );
             Ok(())
         }
