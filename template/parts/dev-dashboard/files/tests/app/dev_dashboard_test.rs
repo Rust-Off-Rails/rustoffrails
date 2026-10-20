@@ -2704,6 +2704,17 @@ fn read_source_stays_inside_the_allowlist() {
     assert!(!ai_tools::citable_path("../.env:1"));
 }
 
+/// A result cut at the cap stays within it, the note saying so included (lines that fill the room
+/// exactly came out one character over).
+#[test]
+fn a_cut_result_stays_within_the_cap() {
+    let (out, cut) = ai_tools::cap("123456789\n".repeat(700));
+    assert!(cut);
+    let n = out.chars().count();
+    assert!(n <= ai_tools::MAX_TOOL_CHARS, "{n}");
+    assert!(out.ends_with("narrow the call]\n"));
+}
+
 /// Every tool answers (with recorded traffic) within its cap, carries no secret, and declares an
 /// object schema; the read-only view's set has no source, logs, schema or EXPLAIN; `core` is the
 /// small-model set.

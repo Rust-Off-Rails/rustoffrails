@@ -496,20 +496,27 @@ impl Output {
     }
 }
 
+/// What a cut result ends with.
+const CUT_NOTE: &str = "[… cut: the result was over MAX_TOOL_CHARS; narrow the call]\n";
+
 /// Cuts a tool result at `MAX_TOOL_CHARS`, on a line, saying so.
+// INVARIANT: the result, note included, is at most MAX_TOOL_CHARS (test:
+// every_tool_answers_within_its_cap). The room kept for the note was 60 characters and the note is
+// 61: a trace whose lines filled the rest came out one over.
 pub fn cap(text: String) -> (String, bool) {
     if text.chars().count() <= MAX_TOOL_CHARS {
         return (text, false);
     }
+    let room = MAX_TOOL_CHARS - CUT_NOTE.chars().count();
     let mut out = String::new();
     for line in text.lines() {
-        if out.chars().count() + line.chars().count() + 1 > MAX_TOOL_CHARS - 60 {
+        if out.chars().count() + line.chars().count() + 1 > room {
             break;
         }
         out.push_str(line);
         out.push('\n');
     }
-    out.push_str("[… cut: the result was over MAX_TOOL_CHARS; narrow the call]\n");
+    out.push_str(CUT_NOTE);
     (out, true)
 }
 
