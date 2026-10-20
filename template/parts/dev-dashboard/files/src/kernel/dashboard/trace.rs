@@ -8,6 +8,7 @@
 use std::collections::VecDeque;
 use std::fmt::Write as _;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
@@ -427,6 +428,10 @@ struct SpanData {
     fields: String,
     /// It opened a background trace (a job, a mail delivery): closing it finishes the trace.
     root: bool,
+    /// Its trace has its row: it closed, or the trace ended first (`flush_open`).
+    recorded: AtomicBool,
+    /// Under another span of its trace (counted in `RequestCtx::open` while open).
+    nested: bool,
 }
 
 /// Root spans (outside any request) that become a trace of their own: the jobs sample's `job`
@@ -493,27 +498,49 @@ fn span_rec<'a, R: LookupSpan<'a>>(
     }
 }
 
-/// Records the trace's spans that are still open as it ends, as if they closed now.
+/// Records the trace's spans that are still open as it ends, as if they closed now: the ones its
+/// recorded spans, statements and events name as their parent, and their ancestors.
 ///
 /// WHY: a span closes when its last clone drops, and other threads hold clones: the SQLite
 /// driver's worker thread keeps the span a query ran in until it takes its next command. When
 /// that thread runs late (a loaded machine) the last query's span, and the methods and the
 /// handler above it, close after the response, and the waterfall lost them (test:
 /// a_trace_expands_inline_with_repeats_folded). Their code is done by now: the response is.
+/// Found from what the trace holds, at its end, and only when a nested span is still open: a
+/// counter per span (test: method_spans_are_cheap).
 pub fn flush_open(ctx: &RequestCtx) {
+    if ctx.open.load(Ordering::Relaxed) == 0 {
+        return;
+    }
+    let mut todo = ctx.unrecorded_parents();
+    if todo.is_empty() {
+        return;
+    }
     let now = Instant::now();
     tracing::dispatcher::get_default(|d| {
         let Some(reg) = d.downcast_ref::<tracing_subscriber::Registry>() else {
             return;
         };
-        ctx.record_open(|id| {
-            let span = reg.span(&Id::from_u64(id))?;
+        while let Some(id) = todo.pop() {
+            let Some(span) = reg.span(&Id::from_u64(id)) else {
+                continue;
+            };
             let ext = span.extensions();
-            let data = ext.get::<SpanData>()?;
+            let Some(data) = ext.get::<SpanData>().filter(|d| d.req.id == ctx.id) else {
+                continue;
+            };
+            let rec = span_rec(&span, data, now);
             // A span at the top of the trace still open wraps the response body (tower-http's
             // `request` span): it ends with the body, not with the app's code.
-            Some(span_rec(&span, data, now)).filter(|rec| rec.parent.is_some())
-        });
+            let Some(parent) = rec.parent else {
+                continue;
+            };
+            if data.recorded.swap(true, Ordering::AcqRel) {
+                continue;
+            }
+            ctx.push_span(rec);
+            todo.push(parent);
+        }
     });
 }
 
@@ -567,14 +594,21 @@ where
                 )
             }
         };
-        if !root {
-            req.opened(id.into_u64());
+        let nested = span.parent().is_some_and(|p| {
+            p.extensions()
+                .get::<SpanData>()
+                .is_some_and(|d| d.req.id == req.id && !d.root)
+        });
+        if nested {
+            req.open.fetch_add(1, Ordering::Relaxed);
         }
         span.extensions_mut().insert(SpanData {
             start: Instant::now(),
             req,
             fields,
             root,
+            recorded: AtomicBool::new(false),
+            nested,
         });
     }
 
@@ -609,8 +643,11 @@ where
             super::http::finish_background(&data.req);
             return;
         }
+        if data.nested {
+            data.req.open.fetch_sub(1, Ordering::Relaxed);
+        }
         // Already in its trace if the trace ended first (`flush_open`).
-        if data.req.closed(id.into_u64()) {
+        if !data.recorded.swap(true, Ordering::AcqRel) {
             data.req.push_span(span_rec(&span, data, Instant::now()));
         }
     }
@@ -642,7 +679,7 @@ where
                 .filter(|s| s.extensions().get::<SpanData>().is_none_or(|d| !d.root))
                 .map(|s| s.id().into_u64());
             if req.kind != "request" && (level == "ERROR" || message.contains("exception")) {
-                req.failed.store(true, std::sync::atomic::Ordering::Relaxed);
+                req.failed.store(true, Ordering::Relaxed);
             }
             req.push_event(EventRec {
                 at_us: req.offset_us(Instant::now()),
